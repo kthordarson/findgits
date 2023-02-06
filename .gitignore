@@ -1,3 +1,6 @@
 gitrepo.db
+gitrepo.db.bak
 __pycache__/*
 .vscode/
+test*
+runtest.sh
