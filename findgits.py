@@ -43,33 +43,53 @@ class FolderScanner(Thread):
 			while not self.queue.empty():
 				item = self.queue.get()
 
+def collect_git_folders(gitfolders, session):
+	for k in gitfolders:
+#		if session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first():
+		g = session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first()
+		if g:
+			g.refresh()
+			session.add(g)
+			session.commit()
+		else:
+			session.add(k)
+			session.commit()
+			logger.debug(f'[!] newgitfolder {k} ')
+	logger.debug(f'[collect_git_folders] gitfolders={len(gitfolders)}')
+
+def collect_repo(gf, session):
+	gr = GitRepo(gf)
+	repo_q = session.query(GitRepo).filter(GitRepo.giturl == str(gr.giturl)).first()
+	if repo_q:
+		pass
+		#repo_q.refresh()
+		#session.add(repo_q)
+		#session.commit()
+	else:
+		session.add(gr)
+		session.commit()
+		logger.debug(f'[!] newgitrepo {gr} ')
+
 def main(args):
 	engine = get_engine(dbtype='sqlite')
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
-	#folder_entries = get_folder_entries(session)
 	#repo_entries = get_repo_entries(session)
 	gitfolders = [GitFolder(k) for k in get_folder_list(args.path)]
-	logger.debug(f'gitfolders={len(gitfolders)}')
+	collect_git_folders(gitfolders, session)
+	folder_entries = get_folder_entries(session)
+	logger.debug(f'[main] folder_entries={len(folder_entries)}')
+	for gf in folder_entries:
+		collect_repo(gf, session)
 	gfl = []
-	for k in gitfolders:
-		if session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first():
-			g = session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first()
-			g.refresh()
-			session.add(g)
-			session.commit()
-			logger.warning(f'[dupe] k={k} {k.git_path}')
-		else:
-			gfl.append(k)
-
-	for k in gfl:
-		logger.debug(f'gfl={len(gfl)} gitfolders={len(gitfolders)} k={k.git_path}')
-		session.add(k)
-		session.commit()
-		repo = k.get_repo()
-		session.add(repo)
-		session.commit()
+	# for k in gfl:
+	# 	logger.debug(f'gfl={len(gfl)} gitfolders={len(gitfolders)} k={k.git_path}')
+	# 	session.add(k)
+	# 	session.commit()
+	# 	repo = k.get_repo()
+	# 	session.add(repo)
+	# 	session.commit()
 
 if __name__ == '__main__':
 	myparse = argparse.ArgumentParser(description="findgits", exit_on_error=False)

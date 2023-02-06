@@ -38,7 +38,10 @@ class GitRepo(Base):
 		self.read_git_config()
 
 	def __repr__(self):
-		return f'GitRepo id={self.id}'
+		return f'GitRepo id={self.gitrepoid} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
+
+	def refresh(self):
+		logger.info(f'[refresh] {self}')
 
 	def read_git_config(self):
 		if os.path.exists(self.git_config_file):
@@ -97,6 +100,8 @@ class GitFolder(Base):
 	config_mtime = Column('config_mtime', DateTime)
 	# gitrepoid: Mapped[int] = mapped_column(ForeignKey("gitrepo.gitrepoid"))
 	#gitrepo = relationship("GitRepo", back_populates="gitfolder")
+	commitmsg_file = Column('commitmsg_file', String)
+	git_config_file = Column('git_config_file', String)
 
 	def __init__(self, gitfolder):
 		self.git_path = f'{gitfolder}'
@@ -106,12 +111,16 @@ class GitFolder(Base):
 		self.git_config_file = f'{self.git_path}/.git/config'
 		self.get_stats()
 
+	def __repr__(self):
+		return f'GitFolder id={self.folderid} {self.git_path}'
+
 	def get_repo(self):
 		return GitRepo(self)
 
 	def refresh(self):
 		self.last_scan = datetime.now()
 		self.get_stats()
+		logger.debug(f'[r] {self}')
 
 	def rescan(self):
 		self.last_scan = datetime.now()

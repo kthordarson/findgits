@@ -3,4 +3,5 @@ gitrepo.db.bak
 __pycache__/*
 .vscode/
 test*
+temp*
 runtest.sh
