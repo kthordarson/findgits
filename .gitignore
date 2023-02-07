@@ -1,5 +1,6 @@
 gitrepo.db
 gitrepo.db.bak
+gitrepo.db.bak1
 __pycache__/*
 .vscode/
 test*
