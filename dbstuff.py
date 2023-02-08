@@ -16,6 +16,9 @@ from sqlalchemy.orm import sessionmaker, relationship, Mapped, mapped_column, De
 from utils import get_directory_size, get_subdircount, get_subfilecount
 #Base = declarative_base()
 
+class MissingConfigException(Exception):
+	pass
+
 class Base(DeclarativeBase):
     pass
 
@@ -35,20 +38,24 @@ class GitRepo(Base):
 		# self.git_path = str(gitfolder.git_path)
 		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
 		self.conf = ConfigParser(strict=False)
-		self.read_git_config()
+		try:
+			self.read_git_config()
+		except MissingConfigException as e:
+			logger.error(f'[!] {e}')
+			raise e
 
 	def __repr__(self):
 		return f'GitRepo id={self.gitrepoid} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
 
 	def refresh(self):
-		logger.info(f'[refresh] {self}')
+		pass
+		#logger.info(f'[refresh] {self}')
 
 	def read_git_config(self):
-		if os.path.exists(self.git_config_file):
-			try:
-				c = self.conf.read(self.git_config_file)
-			except DuplicateSectionError as e:
-				logger.warning(f'[rgc] DuplicateSectionError {e} in {self.git_config_file}')
+		if not os.path.exists(self.git_config_file):
+			raise MissingConfigException(f'git_config_file {self.git_config_file} does not exist')
+		else:
+			c = self.conf.read(self.git_config_file)
 			st = os.stat(self.git_config_file)
 			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
 			self.config_atime = datetime.fromtimestamp(st.st_atime)
@@ -68,6 +75,8 @@ class GitRepo(Base):
 					logger.warning(f'[gconfig] {self} typeerror {e} git_config_file={self.git_config_file} ')
 				except KeyError as e:
 					logger.warning(f'[gconfig] {self} KeyError {e} git_config_file={self.git_config_file}')
+			if not self.giturl:
+				raise MissingConfigException(f'[!] {self} giturl is empty self.git_config_file={self.git_config_file}')
 
 	def get_git_remote_cmd(self):
 		os.chdir(self.git_path)
@@ -120,7 +129,7 @@ class GitFolder(Base):
 	def refresh(self):
 		self.last_scan = datetime.now()
 		self.get_stats()
-		logger.debug(f'[r] {self}')
+		# logger.debug(f'[r] {self}')
 
 	def rescan(self):
 		self.last_scan = datetime.now()

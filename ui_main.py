@@ -15,9 +15,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QHBoxLayout, QHeaderView,
-    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
-    QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QListView, QPushButton,
+    QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
 
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
@@ -31,6 +31,20 @@ class Ui_FindGitsApp(object):
         self.treeWidget.setObjectName(u"treeWidget")
         self.treeWidget.setGeometry(QRect(10, 10, 491, 391))
         self.treeWidget.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+        self.groupBox = QGroupBox(FindGitsApp)
+        self.groupBox.setObjectName(u"groupBox")
+        self.groupBox.setGeometry(QRect(520, 10, 501, 391))
+        self.formLayoutWidget = QWidget(self.groupBox)
+        self.formLayoutWidget.setObjectName(u"formLayoutWidget")
+        self.formLayoutWidget.setGeometry(QRect(19, 39, 461, 331))
+        self.formLayout = QFormLayout(self.formLayoutWidget)
+        self.formLayout.setObjectName(u"formLayout")
+        self.formLayout.setContentsMargins(0, 0, 0, 0)
+        self.listView = QListView(self.formLayoutWidget)
+        self.listView.setObjectName(u"listView")
+
+        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.listView)
+
         self.widget = QWidget(FindGitsApp)
         self.widget.setObjectName(u"widget")
         self.widget.setGeometry(QRect(10, 410, 426, 29))
@@ -72,6 +86,7 @@ class Ui_FindGitsApp(object):
         FindGitsApp.setWindowTitle(QCoreApplication.translate("FindGitsApp", u"Form", None))
         ___qtreewidgetitem = self.treeWidget.headerItem()
         ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"url", None));
+        self.groupBox.setTitle(QCoreApplication.translate("FindGitsApp", u"GroupBox", None))
         self.pushButton.setText(QCoreApplication.translate("FindGitsApp", u"populate", None))
         self.pushButton_2.setText(QCoreApplication.translate("FindGitsApp", u"populate", None))
         self.pushButton_3.setText(QCoreApplication.translate("FindGitsApp", u"populate", None))

@@ -16,6 +16,8 @@ from sqlalchemy.orm import sessionmaker
 from concurrent.futures import (ProcessPoolExecutor, as_completed)
 
 from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db, get_folder_entries, get_repo_entries
+from dbstuff import MissingConfigException
+
 from utils import get_folder_list
 
 def create_folders_task(gitpath):
@@ -47,18 +49,26 @@ def collect_git_folders(gitfolders, session):
 	for k in gitfolders:
 #		if session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first():
 		g = session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first()
-		if g:
-			g.refresh()
-			session.add(g)
-			session.commit()
-		else:
-			session.add(k)
-			session.commit()
-			logger.debug(f'[!] newgitfolder {k} ')
+		try:
+			if g:
+				g.refresh()
+				session.add(g)
+				session.commit()
+			else:
+				session.add(k)
+				session.commit()
+				# logger.debug(f'[!] New: {k} ')
+		except OperationalError as e:
+			logger.error(f'[E] {e} g={g}')
+			continue
 	logger.debug(f'[collect_git_folders] gitfolders={len(gitfolders)}')
 
 def collect_repo(gf, session):
-	gr = GitRepo(gf)
+	try:
+		gr = GitRepo(gf)
+	except MissingConfigException as e:
+		logger.error(f'[cgr] {e} gf={gf}')
+		return None
 	repo_q = session.query(GitRepo).filter(GitRepo.giturl == str(gr.giturl)).first()
 	if repo_q:
 		pass
@@ -68,7 +78,7 @@ def collect_repo(gf, session):
 	else:
 		session.add(gr)
 		session.commit()
-		logger.debug(f'[!] newgitrepo {gr} ')
+		# logger.debug(f'[!] newgitrepo {gr} ')
 
 def main(args):
 	engine = get_engine(dbtype='sqlite')

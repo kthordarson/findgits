@@ -25,8 +25,12 @@ class MainApp(QWidget, Ui_FindGitsApp):
         super(MainApp, self).__init__()
         self.setupUi(self)
         self.treeWidget.itemChanged.connect(self.handleChanged)
+        self.treeWidget.itemClicked.connect(self.tree_item_clicked)
         self.pushButton.clicked.connect(self.on_button_clicked)
         # self.getgit()
+
+    def tree_item_clicked(self, widget):
+        logger.debug(f'[h] {self} i: {widget}')
 
     def getgit(self):
         repos = session.query(GitRepo).all()
@@ -37,7 +41,8 @@ class MainApp(QWidget, Ui_FindGitsApp):
         for k in gitfolders:
             item_1 = QTreeWidgetItem(self.treeWidget)
             # item_1.setCheckState(0, QtCore.Qt.Unchecked)
-            item_1.setText(0, f"{k.giturl}")
+            item_1.setText(0, f"{k.gitrepoid}")
+            item_1.setText(1, f"{k.giturl}")
         self.retranslateUi(self)
 
     def on_button_clicked(self, widget):
