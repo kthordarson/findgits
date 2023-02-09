@@ -36,19 +36,29 @@ class MainApp(QWidget, Ui_FindGitsApp):
         repos = session.query(GitRepo).all()
         # self.populate_gitfolders(repos)
 
-    def populate_gitfolders(self, gitfolders):
+    def populate_gitrepos(self, gitrepos):
         #self.item_0 = QTreeWidgetItem(self.treeWidget)
-        for k in gitfolders:
+        for k in gitrepos:
             item_1 = QTreeWidgetItem(self.treeWidget)
             # item_1.setCheckState(0, QtCore.Qt.Unchecked)
             item_1.setText(0, f"{k.gitrepoid}")
             item_1.setText(1, f"{k.giturl}")
         self.retranslateUi(self)
 
+    def populate_gitfolders(self, gitfolders):
+        #self.item_0 = QTreeWidgetItem(self.treeWidget)
+        for k in gitfolders:
+            item_1 = QTreeWidgetItem(self.treeWidget)
+            # item_1.setCheckState(0, QtCore.Qt.Unchecked)
+            item_1.setText(0, f"{k.folderid}")
+            item_1.setText(1, f"{k.git_path}")
+        self.retranslateUi(self)
+
     def on_button_clicked(self, widget):
-        repos = session.query(GitRepo).all()
-        print(f"self.populate_gitfolders(repos) {len(repos)}")
-        self.populate_gitfolders(repos)
+        gitrepos = session.query(GitRepo).all()
+        gitfolders = session.query(GitFolder).all()
+        print(f"[on_button_clicked] repos {len(gitrepos)} folders = {len(gitfolders)}")
+        self.populate_gitfolders(gitfolders)
 
     def handleChanged(self, item, column):
         count = item.childCount()
