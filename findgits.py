@@ -2,6 +2,7 @@
 import os, sys
 import time
 import argparse
+from configparser import ConfigParser
 from pathlib import Path
 from loguru import logger
 from datetime import datetime, timedelta
@@ -101,8 +102,54 @@ def main(args):
 	# 	session.add(repo)
 	# 	session.commit()
 
+def runscan(config):
+	engine = get_engine(dbtype='sqlite')
+	Session = sessionmaker(bind=engine)
+	session = Session()
+	db_init(engine)
+	for gitsearchpath in config['searchpaths']['paths'].split(','):
+		logger.info(f'[runscan] gitsearchpath={gitsearchpath}')
+		gitfolders = [GitFolder(k) for k in get_folder_list(gitsearchpath)]
+		logger.info(f'[runscan] gitsearchpath={gitsearchpath} found {len(gitfolders)} gitfolders')
+		collect_git_folders(gitfolders, session)
+		folder_entries = get_folder_entries(session)
+		logger.debug(f'[main] folder_entries={len(folder_entries)}')
+		for gf in folder_entries:
+			collect_repo(gf, session)
+		repo_entries = get_repo_entries(session)
+		logger.debug(f'[main] folder_entries={len(folder_entries)} repo_entries={len(repo_entries)}')
+
+def listpaths(config):
+	for k in config['searchpaths']['paths'].split(','):
+		logger.info(f'[path] {k}')
+
+def read_config():
+	config = ConfigParser()
+	config.read('findgits.ini')
+	return config
+
+def add_path(path, config):
+	if path.endswith('/'):
+		path = path[:-1]
+	if path not in config['searchpaths']['paths'].split(','):
+		logger.debug(f'[add_path] path={path} to {config}')
+		config['searchpaths']['paths'] += f',{path}'
+		with open('findgits.ini', 'w') as f:
+			config.write(f)
+		listpaths(config)
+	else:
+		logger.warning(f'[add_path] path={path} already in config')
+
 if __name__ == '__main__':
+	config = read_config()
 	myparse = argparse.ArgumentParser(description="findgits", exit_on_error=False)
-	myparse.add_argument('path', nargs='?',  metavar='searchpath')
+	myparse.add_argument('--addpath', nargs='?', dest='addpath')
+	myparse.add_argument('--listpaths', action='store_true', default=False, dest='listpaths')
+	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
 	args = myparse.parse_args()
-	main(args)
+	if args.runscan:
+		runscan(config)
+	if args.listpaths:
+		listpaths(config)
+	if args.addpath:
+		add_path(args.addpath, config)

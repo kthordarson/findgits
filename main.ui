@@ -39,46 +39,64 @@
     </property>
    </column>
   </widget>
-  <widget class="QGroupBox" name="groupBox">
+  <widget class="QTableWidget" name="tableWidget">
    <property name="geometry">
     <rect>
      <x>520</x>
-     <y>10</y>
-     <width>501</width>
-     <height>391</height>
+     <y>241</y>
+     <width>491</width>
+     <height>171</height>
     </rect>
    </property>
-   <property name="title">
-    <string>repoBox</string>
-   </property>
-   <widget class="QWidget" name="formLayoutWidget">
-    <property name="geometry">
-     <rect>
-      <x>19</x>
-      <y>39</y>
-      <width>461</width>
-      <height>331</height>
-     </rect>
-    </property>
-    <layout class="QFormLayout" name="formLayout">
-     <item row="0" column="0">
-      <widget class="QListView" name="repolistView"/>
-     </item>
-    </layout>
-   </widget>
   </widget>
-  <widget class="QLabel" name="label">
+  <widget class="QWidget" name="formLayoutWidget">
    <property name="geometry">
     <rect>
-     <x>550</x>
-     <y>420</y>
-     <width>72</width>
-     <height>19</height>
+     <x>510</x>
+     <y>20</y>
+     <width>261</width>
+     <height>61</height>
     </rect>
    </property>
-   <property name="text">
-    <string>TextLabel</string>
-   </property>
+   <layout class="QFormLayout" name="formLayout">
+    <item row="0" column="0">
+     <widget class="QLabel" name="label_3">
+      <property name="text">
+       <string>repoid</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLabel" name="label_repoid">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::NoFrame</enum>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QLabel" name="label_2">
+      <property name="text">
+       <string>repourl</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QLabel" name="label_repourl">
+      <property name="frameShape">
+       <enum>QFrame::NoFrame</enum>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+     </widget>
+    </item>
+   </layout>
   </widget>
   <widget class="QWidget" name="">
    <property name="geometry">

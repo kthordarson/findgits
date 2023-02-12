@@ -26,7 +26,7 @@ class GitRepo(Base):
 	__tablename__ = 'gitrepo'
 	gitrepoid: Mapped[int] = mapped_column(primary_key=True)
 	folderid = Column('folderid', Integer)
-	# git_path = Column('git_path', String)
+	git_path = Column('git_path', String)
 	giturl = Column('giturl', String)
 	remote = Column('remote', String)
 	branch = Column('branch', String)
@@ -35,7 +35,7 @@ class GitRepo(Base):
 
 	def __init__(self,  gitfolder:GitFolder):
 		self.folderid = gitfolder.folderid
-		# self.git_path = str(gitfolder.git_path)
+		self.git_path = str(gitfolder.git_path)
 		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
 		self.conf = ConfigParser(strict=False)
 		try:

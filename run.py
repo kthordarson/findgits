@@ -15,9 +15,9 @@ from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
 from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
+    QPalette, QPixmap, QRadialGradient, QTransform, QStandardItemModel, QStandardItem)
 # from PySide6.QtWidgets import (QApplication, QSizePolicy, QWidget)
-from PySide6.QtWidgets import (QApplication, QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QApplication, QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget, QListWidgetItem, QTableWidgetItem)
 
 class MainApp(QWidget, Ui_FindGitsApp):
     def __init__(self, session):
@@ -27,10 +27,27 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.treeWidget.itemChanged.connect(self.handleChanged)
         self.treeWidget.itemClicked.connect(self.tree_item_clicked)
         self.pushButton.clicked.connect(self.on_button_clicked)
+        self.tableWidget.setColumnCount(2)
+        self.tableWidget.setHorizontalHeaderLabels(['gitrepoid', 'giturl'])
         # self.getgit()
 
     def tree_item_clicked(self, widget):
-        logger.debug(f'[h] {self} i: {widget}')
+        try:
+            repo = [k for k in self.gitrepos if k.git_path==widget.text(1)][0]
+        except IndexError as e:
+            logger.error(f'[tic] indexerror {e} widget={widget.text(0)} {widget.text(1)}')
+            return
+        repoid_item = QTableWidgetItem(f'{repo.gitrepoid}') #}\nurl: {repo.giturl}\nbranch: {repo.branch}\npath: {repo.git_path}')
+        self.label_repoid.setText(f'{repo.gitrepoid}')
+        self.label_repourl.setText(f'{repo.giturl}')
+        repourl_item = QTableWidgetItem(f'{repo.giturl}')
+        #repo_item.setText()
+        row = self.tableWidget.rowCount()
+        self.tableWidget.insertRow(row)
+        self.tableWidget.setItem(row,0,repoid_item)
+        self.tableWidget.setItem(row,1,repourl_item)
+        self.tableWidget.resizeColumnsToContents()
+        logger.debug(f'[h] {self} id: {widget.text(0)} path: {widget.text(1)} repo={repo.giturl}')
 
     def getgit(self):
         repos = session.query(GitRepo).all()
@@ -55,10 +72,10 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.retranslateUi(self)
 
     def on_button_clicked(self, widget):
-        gitrepos = session.query(GitRepo).all()
-        gitfolders = session.query(GitFolder).all()
-        print(f"[on_button_clicked] repos {len(gitrepos)} folders = {len(gitfolders)}")
-        self.populate_gitfolders(gitfolders)
+        self.gitrepos = session.query(GitRepo).all()
+        self.gitfolders = session.query(GitFolder).all()
+        print(f"[on_button_clicked] repos {len(self.gitrepos)} folders = {len(self.gitfolders)}")
+        self.populate_gitfolders(self.gitfolders)
 
     def handleChanged(self, item, column):
         count = item.childCount()

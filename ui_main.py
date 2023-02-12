@@ -16,10 +16,10 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QListView,
-    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
-    QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QFrame,
+    QHBoxLayout, QHeaderView, QLabel, QPushButton,
+    QSizePolicy, QTableWidget, QTableWidgetItem, QTreeWidget,
+    QTreeWidgetItem, QWidget)
 
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
@@ -37,23 +37,38 @@ class Ui_FindGitsApp(object):
         self.treeWidget.setGeometry(QRect(10, 10, 500, 400))
         self.treeWidget.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.treeWidget.setSortingEnabled(True)
-        self.groupBox = QGroupBox(FindGitsApp)
-        self.groupBox.setObjectName(u"groupBox")
-        self.groupBox.setGeometry(QRect(520, 10, 501, 391))
-        self.formLayoutWidget = QWidget(self.groupBox)
+        self.tableWidget = QTableWidget(FindGitsApp)
+        self.tableWidget.setObjectName(u"tableWidget")
+        self.tableWidget.setGeometry(QRect(520, 241, 491, 171))
+        self.formLayoutWidget = QWidget(FindGitsApp)
         self.formLayoutWidget.setObjectName(u"formLayoutWidget")
-        self.formLayoutWidget.setGeometry(QRect(19, 39, 461, 331))
+        self.formLayoutWidget.setGeometry(QRect(510, 20, 261, 61))
         self.formLayout = QFormLayout(self.formLayoutWidget)
         self.formLayout.setObjectName(u"formLayout")
         self.formLayout.setContentsMargins(0, 0, 0, 0)
-        self.repolistView = QListView(self.formLayoutWidget)
-        self.repolistView.setObjectName(u"repolistView")
+        self.label_3 = QLabel(self.formLayoutWidget)
+        self.label_3.setObjectName(u"label_3")
 
-        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.repolistView)
+        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.label_3)
 
-        self.label = QLabel(FindGitsApp)
-        self.label.setObjectName(u"label")
-        self.label.setGeometry(QRect(550, 420, 72, 19))
+        self.label_repoid = QLabel(self.formLayoutWidget)
+        self.label_repoid.setObjectName(u"label_repoid")
+        self.label_repoid.setEnabled(True)
+        self.label_repoid.setFrameShape(QFrame.NoFrame)
+
+        self.formLayout.setWidget(0, QFormLayout.FieldRole, self.label_repoid)
+
+        self.label_2 = QLabel(self.formLayoutWidget)
+        self.label_2.setObjectName(u"label_2")
+
+        self.formLayout.setWidget(1, QFormLayout.LabelRole, self.label_2)
+
+        self.label_repourl = QLabel(self.formLayoutWidget)
+        self.label_repourl.setObjectName(u"label_repourl")
+        self.label_repourl.setFrameShape(QFrame.NoFrame)
+
+        self.formLayout.setWidget(1, QFormLayout.FieldRole, self.label_repourl)
+
         self.widget = QWidget(FindGitsApp)
         self.widget.setObjectName(u"widget")
         self.widget.setGeometry(QRect(10, 420, 491, 29))
@@ -103,8 +118,10 @@ class Ui_FindGitsApp(object):
 #endif // QT_CONFIG(tooltip)
         ___qtreewidgetitem = self.treeWidget.headerItem()
         ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"git_path", None));
-        self.groupBox.setTitle(QCoreApplication.translate("FindGitsApp", u"repoBox", None))
-        self.label.setText(QCoreApplication.translate("FindGitsApp", u"TextLabel", None))
+        self.label_3.setText(QCoreApplication.translate("FindGitsApp", u"repoid", None))
+        self.label_repoid.setText("")
+        self.label_2.setText(QCoreApplication.translate("FindGitsApp", u"repourl", None))
+        self.label_repourl.setText("")
         self.pushButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
         self.pushButton_2.setText(QCoreApplication.translate("FindGitsApp", u"btn-one", None))
         self.pushButton_3.setText(QCoreApplication.translate("FindGitsApp", u"btn-two", None))
