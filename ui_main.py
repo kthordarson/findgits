@@ -42,7 +42,7 @@ class Ui_FindGitsApp(object):
         self.tableWidget.setGeometry(QRect(520, 241, 491, 171))
         self.formLayoutWidget = QWidget(FindGitsApp)
         self.formLayoutWidget.setObjectName(u"formLayoutWidget")
-        self.formLayoutWidget.setGeometry(QRect(510, 20, 261, 61))
+        self.formLayoutWidget.setGeometry(QRect(510, 20, 511, 61))
         self.formLayout = QFormLayout(self.formLayoutWidget)
         self.formLayout.setObjectName(u"formLayout")
         self.formLayout.setContentsMargins(0, 0, 0, 0)

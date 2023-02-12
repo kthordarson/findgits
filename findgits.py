@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+from PyQt5.QtWidgets import QApplication
+from run import MainApp
 import os, sys
 import time
 import argparse
@@ -16,10 +18,13 @@ from sqlalchemy.orm import sessionmaker
 
 from concurrent.futures import (ProcessPoolExecutor, as_completed)
 
-from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db, get_folder_entries, get_repo_entries
-from dbstuff import MissingConfigException
+from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db
+from dbstuff import  get_folder_entries, get_repo_entries, get_parent_entries
+from dbstuff import MissingConfigException, GitParentPath
 
 from utils import get_folder_list
+
+
 
 def create_folders_task(gitpath):
 	gf = GitFolder(gitpath)
@@ -102,15 +107,20 @@ def main(args):
 	# 	session.add(repo)
 	# 	session.commit()
 
-def runscan(config):
-	engine = get_engine(dbtype='sqlite')
-	Session = sessionmaker(bind=engine)
-	session = Session()
-	db_init(engine)
+def runscan(config, session):
+	gsp_entries = get_parent_entries(session)
 	for gitsearchpath in config['searchpaths']['paths'].split(','):
-		logger.info(f'[runscan] gitsearchpath={gitsearchpath}')
-		gitfolders = [GitFolder(k) for k in get_folder_list(gitsearchpath)]
-		logger.info(f'[runscan] gitsearchpath={gitsearchpath} found {len(gitfolders)} gitfolders')
+		gsp = GitParentPath(gitsearchpath)
+		folder_q = session.query(GitParentPath).filter(GitParentPath.folder == str(gsp.folder)).first()
+		if folder_q:
+			gsp = folder_q
+		else:
+			# add new parent path
+			session.add(gsp)
+			session.commit()
+		logger.info(f'[runscan] gitsearchpath={gsp}')
+		gitfolders = [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
+		logger.info(f'[runscan] gitsearchpath={gsp} found {len(gitfolders)} gitfolders')
 		collect_git_folders(gitfolders, session)
 		folder_entries = get_folder_entries(session)
 		logger.debug(f'[main] folder_entries={len(folder_entries)}')
@@ -141,15 +151,22 @@ def add_path(path, config):
 		logger.warning(f'[add_path] path={path} already in config')
 
 if __name__ == '__main__':
+	engine = get_engine(dbtype='sqlite')
+	Session = sessionmaker(bind=engine)
+	session = Session()
+	db_init(engine)
 	config = read_config()
 	myparse = argparse.ArgumentParser(description="findgits", exit_on_error=False)
 	myparse.add_argument('--addpath', nargs='?', dest='addpath')
 	myparse.add_argument('--listpaths', action='store_true', default=False, dest='listpaths')
 	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
+	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 	if args.runscan:
-		runscan(config)
+		runscan(config, session)
 	if args.listpaths:
 		listpaths(config)
 	if args.addpath:
 		add_path(args.addpath, config)
+
+

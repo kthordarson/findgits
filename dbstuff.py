@@ -24,8 +24,9 @@ class Base(DeclarativeBase):
 
 class GitRepo(Base):
 	__tablename__ = 'gitrepo'
-	gitrepoid: Mapped[int] = mapped_column(primary_key=True)
+	id: Mapped[int] = mapped_column(primary_key=True)
 	folderid = Column('folderid', Integer)
+	parentid = Column('parentid', Integer)
 	git_path = Column('git_path', String)
 	giturl = Column('giturl', String)
 	remote = Column('remote', String)
@@ -34,7 +35,8 @@ class GitRepo(Base):
 	# gitfolder = relationship("GitFolder", back_populates="gitrepo")
 
 	def __init__(self,  gitfolder:GitFolder):
-		self.folderid = gitfolder.folderid
+		self.folderid = gitfolder.id
+		self.parentid = gitfolder.parent_id
 		self.git_path = str(gitfolder.git_path)
 		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
 		self.conf = ConfigParser(strict=False)
@@ -45,7 +47,7 @@ class GitRepo(Base):
 			raise e
 
 	def __repr__(self):
-		return f'GitRepo id={self.gitrepoid} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
+		return f'GitRepo id={self.id} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
 
 	def refresh(self):
 		pass
@@ -84,10 +86,23 @@ class GitRepo(Base):
 		if status.stdout != b'':
 			statusstdout = status.stdout.decode('utf-8').split('\n')
 
+class GitParentPath(Base):
+	__tablename__ = 'gitparentpath'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	folder = Column('folder', String)
+
+	def __init__(self, folder):
+		self.folder = folder
+
+	def __repr__(self):
+		return f'GSP id={self.id} {self.folder}'
+
 class GitFolder(Base):
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
-	folderid: Mapped[int] = mapped_column(primary_key=True)
+	id: Mapped[int] = mapped_column(primary_key=True)
+	parent_id = Column('patent_id', Integer)
+	parent_path = Column('patent_path', String)
 	git_path = Column('git_path', String)
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
@@ -107,12 +122,12 @@ class GitFolder(Base):
 	gitfolder_mtime = Column('gitfolder_mtime', DateTime)
 	commit_mtime = Column('commit_mtime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
-	# gitrepoid: Mapped[int] = mapped_column(ForeignKey("gitrepo.gitrepoid"))
-	#gitrepo = relationship("GitRepo", back_populates="gitfolder")
 	commitmsg_file = Column('commitmsg_file', String)
 	git_config_file = Column('git_config_file', String)
 
-	def __init__(self, gitfolder):
+	def __init__(self, gitfolder, gsp):
+		self.parent_path = gsp.folder
+		self.parent_id = gsp.id
 		self.git_path = f'{gitfolder}'
 		self.first_scan = datetime.now()
 		self.last_scan = datetime.now()
@@ -121,7 +136,7 @@ class GitFolder(Base):
 		self.get_stats()
 
 	def __repr__(self):
-		return f'GitFolder id={self.folderid} {self.git_path}'
+		return f'GitFolder id={self.id} {self.git_path}'
 
 	def get_repo(self):
 		return GitRepo(self)
@@ -193,6 +208,9 @@ def get_folder_entries(session):
 
 def get_repo_entries(session):
 	return session.query(GitRepo).all()
+
+def get_parent_entries(session):
+	return session.query(GitParentPath).all()
 
 def remove_dupes(gitremotes, entries, engine):
 	Session = sessionmaker(bind=engine)
