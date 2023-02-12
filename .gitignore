@@ -8,3 +8,5 @@ temp*
 runtest.sh
 *.bak*
 *.ini
+*journal*
+gitrepo.db-journal
