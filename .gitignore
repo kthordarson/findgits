@@ -10,3 +10,4 @@ runtest.sh
 *.ini
 *journal*
 gitrepo.db-journal
+*.tmp
