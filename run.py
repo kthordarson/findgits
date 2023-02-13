@@ -29,7 +29,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
         #self.treeWidget = QTreeWidget(self)
         self.treeWidget.itemChanged.connect(self.handleChanged)
         self.treeWidget.itemClicked.connect(self.tree_item_clicked)
-        self.pushButton.clicked.connect(self.on_button_clicked)
+        self.folderButton.clicked.connect(self.folderButton_clicked)
         #self.tableWidget.setColumnCount(2)
         #self.tableWidget.setHorizontalHeaderLabels(['id', 'giturl'])
         self.gitrepos = session.query(GitRepo).all()
@@ -79,7 +79,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
         #self.treeWidget.header().setStretchLastSection(False)
         self.retranslateUi(self)
 
-    def on_button_clicked(self, widget):
+    def folderButton_clicked(self, widget):
         self.populate_gitfolders()
 
     def handleChanged(self, item, column):

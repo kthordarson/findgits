@@ -81,22 +81,22 @@ class Ui_FindGitsApp(object):
         self.horizontalLayout = QHBoxLayout(self.layoutWidget)
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
-        self.pushButton = QPushButton(self.layoutWidget)
-        self.pushButton.setObjectName(u"pushButton")
+        self.folderButton = QPushButton(self.layoutWidget)
+        self.folderButton.setObjectName(u"folderButton")
 
-        self.horizontalLayout.addWidget(self.pushButton)
+        self.horizontalLayout.addWidget(self.folderButton)
 
-        self.pushButton_2 = QPushButton(self.layoutWidget)
-        self.pushButton_2.setObjectName(u"pushButton_2")
-        self.pushButton_2.setEnabled(False)
+        self.runscan_button = QPushButton(self.layoutWidget)
+        self.runscan_button.setObjectName(u"runscan_button")
+        self.runscan_button.setEnabled(False)
 
-        self.horizontalLayout.addWidget(self.pushButton_2)
+        self.horizontalLayout.addWidget(self.runscan_button)
 
-        self.pushButton_3 = QPushButton(self.layoutWidget)
-        self.pushButton_3.setObjectName(u"pushButton_3")
-        self.pushButton_3.setEnabled(False)
+        self.getdupes_button = QPushButton(self.layoutWidget)
+        self.getdupes_button.setObjectName(u"getdupes_button")
+        self.getdupes_button.setEnabled(False)
 
-        self.horizontalLayout.addWidget(self.pushButton_3)
+        self.horizontalLayout.addWidget(self.getdupes_button)
 
         self.pushButton_4 = QPushButton(self.layoutWidget)
         self.pushButton_4.setObjectName(u"pushButton_4")
@@ -127,9 +127,9 @@ class Ui_FindGitsApp(object):
         ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None));
         self.foobarLabel.setText(QCoreApplication.translate("FindGitsApp", u"url", None))
         self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
-        self.pushButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
-        self.pushButton_2.setText(QCoreApplication.translate("FindGitsApp", u"btn-one", None))
-        self.pushButton_3.setText(QCoreApplication.translate("FindGitsApp", u"btn-two", None))
+        self.folderButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
+        self.runscan_button.setText(QCoreApplication.translate("FindGitsApp", u"Run scan", None))
+        self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Get dupes", None))
         self.pushButton_4.setText(QCoreApplication.translate("FindGitsApp", u"btn-three", None))
         self.pushButton_5.setText(QCoreApplication.translate("FindGitsApp", u"btn-four", None))
     # retranslateUi
