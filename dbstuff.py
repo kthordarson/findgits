@@ -22,69 +22,6 @@ class MissingConfigException(Exception):
 class Base(DeclarativeBase):
     pass
 
-class GitRepo(Base):
-	__tablename__ = 'gitrepo'
-	id: Mapped[int] = mapped_column(primary_key=True)
-	folderid = Column('folderid', Integer)
-	parentid = Column('parentid', Integer)
-	git_path = Column('git_path', String)
-	giturl = Column('giturl', String)
-	remote = Column('remote', String)
-	branch = Column('branch', String)
-	#git_paths: Mapped[List["GitFolder"]] = relationship()
-	# gitfolder = relationship("GitFolder", back_populates="gitrepo")
-
-	def __init__(self,  gitfolder:GitFolder):
-		self.folderid = gitfolder.id
-		self.parentid = gitfolder.parent_id
-		self.git_path = str(gitfolder.git_path)
-		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
-		self.conf = ConfigParser(strict=False)
-		try:
-			self.read_git_config()
-		except MissingConfigException as e:
-			logger.error(f'[!] {e}')
-			raise e
-
-	def __repr__(self):
-		return f'GitRepo id={self.id} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
-
-	def refresh(self):
-		pass
-		#logger.info(f'[refresh] {self}')
-
-	def read_git_config(self):
-		if not os.path.exists(self.git_config_file):
-			raise MissingConfigException(f'git_config_file {self.git_config_file} does not exist')
-		else:
-			c = self.conf.read(self.git_config_file)
-			st = os.stat(self.git_config_file)
-			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
-			self.config_atime = datetime.fromtimestamp(st.st_atime)
-			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
-			if self.conf.has_section('remote "origin"'):
-				try:
-					remote_section = [k for k in self.conf.sections() if 'remote' in k][0]
-				except IndexError as e:
-					logger.error(f'[err] {self} {e} git_config_file={self.git_config_file} conf={self.conf.sections()}')
-				self.remote  = remote_section.split(' ')[1].replace('"','')
-				branch_section = [k for k in self.conf.sections() if 'branch' in k][0]
-				self.branch = branch_section.split(' ')[1].replace('"','')
-				try:
-					# giturl = [k for k in conf['remote "origin"'].items()][0][1]
-					self.giturl = self.conf[remote_section]['url']
-				except TypeError as e:
-					logger.warning(f'[gconfig] {self} typeerror {e} git_config_file={self.git_config_file} ')
-				except KeyError as e:
-					logger.warning(f'[gconfig] {self} KeyError {e} git_config_file={self.git_config_file}')
-			if not self.giturl:
-				raise MissingConfigException(f'[!] {self} giturl is empty self.git_config_file={self.git_config_file}')
-
-	def get_git_remote_cmd(self):
-		os.chdir(self.git_path)
-		status = subprocess.run(['git', 'remote', '-v',], capture_output=True)
-		if status.stdout != b'':
-			statusstdout = status.stdout.decode('utf-8').split('\n')
 
 class GitParentPath(Base):
 	__tablename__ = 'gitparentpath'
@@ -164,6 +101,70 @@ class GitFolder(Base):
 			self.commit_ctime = datetime.fromtimestamp(stat.st_ctime)
 			self.commit_atime = datetime.fromtimestamp(stat.st_atime)
 			self.commit_mtime = datetime.fromtimestamp(stat.st_mtime)
+
+class GitRepo(Base):
+	__tablename__ = 'gitrepo'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	folderid = Column('folderid', Integer)
+	parentid = Column('parentid', Integer)
+	git_path = Column('git_path', String)
+	giturl = Column('giturl', String)
+	remote = Column('remote', String)
+	branch = Column('branch', String)
+	#git_paths: Mapped[List["GitFolder"]] = relationship()
+	# gitfolder = relationship("GitFolder", back_populates="gitrepo")
+
+	def __init__(self,  gitfolder:GitFolder):
+		self.folderid = gitfolder.id
+		self.parentid = gitfolder.parent_id
+		self.git_path = str(gitfolder.git_path)
+		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
+		self.conf = ConfigParser(strict=False)
+		try:
+			self.read_git_config()
+		except MissingConfigException as e:
+			logger.error(f'[!] {e}')
+			raise e
+
+	def __repr__(self):
+		return f'GitRepo id={self.id} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
+
+	def refresh(self):
+		pass
+		#logger.info(f'[refresh] {self}')
+
+	def read_git_config(self):
+		if not os.path.exists(self.git_config_file):
+			raise MissingConfigException(f'git_config_file {self.git_config_file} does not exist')
+		else:
+			c = self.conf.read(self.git_config_file)
+			st = os.stat(self.git_config_file)
+			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
+			self.config_atime = datetime.fromtimestamp(st.st_atime)
+			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
+			if self.conf.has_section('remote "origin"'):
+				try:
+					remote_section = [k for k in self.conf.sections() if 'remote' in k][0]
+				except IndexError as e:
+					logger.error(f'[err] {self} {e} git_config_file={self.git_config_file} conf={self.conf.sections()}')
+				self.remote  = remote_section.split(' ')[1].replace('"','')
+				branch_section = [k for k in self.conf.sections() if 'branch' in k][0]
+				self.branch = branch_section.split(' ')[1].replace('"','')
+				try:
+					# giturl = [k for k in conf['remote "origin"'].items()][0][1]
+					self.giturl = self.conf[remote_section]['url']
+				except TypeError as e:
+					logger.warning(f'[gconfig] {self} typeerror {e} git_config_file={self.git_config_file} ')
+				except KeyError as e:
+					logger.warning(f'[gconfig] {self} KeyError {e} git_config_file={self.git_config_file}')
+			if not self.giturl:
+				raise MissingConfigException(f'[!] {self} giturl is empty self.git_config_file={self.git_config_file}')
+
+	def get_git_remote_cmd(self):
+		os.chdir(self.git_path)
+		status = subprocess.run(['git', 'remote', '-v',], capture_output=True)
+		if status.stdout != b'':
+			statusstdout = status.stdout.decode('utf-8').split('\n')
 
 
 def db_init(engine):

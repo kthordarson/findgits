@@ -22,6 +22,12 @@
      <height>400</height>
     </rect>
    </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
    <property name="sizeAdjustPolicy">
     <enum>QAbstractScrollArea::AdjustToContents</enum>
    </property>
@@ -30,24 +36,14 @@
    </property>
    <column>
     <property name="text">
-     <string notr="true">id</string>
+     <string>id</string>
     </property>
    </column>
    <column>
     <property name="text">
-     <string>git_path</string>
+     <string>path</string>
     </property>
    </column>
-  </widget>
-  <widget class="QTableWidget" name="tableWidget">
-   <property name="geometry">
-    <rect>
-     <x>520</x>
-     <y>241</y>
-     <width>491</width>
-     <height>171</height>
-    </rect>
-   </property>
   </widget>
   <widget class="QWidget" name="formLayoutWidget">
    <property name="geometry">
@@ -55,50 +51,68 @@
      <x>510</x>
      <y>20</y>
      <width>511</width>
-     <height>61</height>
+     <height>99</height>
     </rect>
    </property>
    <layout class="QFormLayout" name="formLayout">
-    <item row="0" column="0">
-     <widget class="QLabel" name="label_3">
+    <property name="leftMargin">
+     <number>5</number>
+    </property>
+    <item row="3" column="0">
+     <widget class="QLabel" name="foobarLabel">
       <property name="text">
-       <string>repoid</string>
+       <string>url</string>
       </property>
      </widget>
     </item>
-    <item row="0" column="1">
-     <widget class="QLabel" name="label_repoid">
-      <property name="enabled">
+    <item row="3" column="1">
+     <widget class="QLineEdit" name="urlLineEdit">
+      <property name="readOnly">
        <bool>true</bool>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::NoFrame</enum>
-      </property>
-      <property name="text">
-       <string/>
       </property>
      </widget>
     </item>
     <item row="1" column="0">
-     <widget class="QLabel" name="label_2">
+     <widget class="QLabel" name="idLabel">
       <property name="text">
-       <string>repourl</string>
+       <string>id</string>
       </property>
      </widget>
     </item>
     <item row="1" column="1">
-     <widget class="QLabel" name="label_repourl">
-      <property name="frameShape">
-       <enum>QFrame::NoFrame</enum>
+     <widget class="QLineEdit" name="idLineEdit">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
       </property>
-      <property name="text">
-       <string/>
+      <property name="maximumSize">
+       <size>
+        <width>64</width>
+        <height>16777215</height>
+       </size>
+      </property>
+      <property name="baseSize">
+       <size>
+        <width>33</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="maxLength">
+       <number>4</number>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignCenter</set>
+      </property>
+      <property name="readOnly">
+       <bool>true</bool>
       </property>
      </widget>
     </item>
    </layout>
   </widget>
-  <widget class="QWidget" name="">
+  <widget class="QWidget" name="layoutWidget">
    <property name="geometry">
     <rect>
      <x>10</x>

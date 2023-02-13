@@ -114,8 +114,10 @@ def runscan(config, session):
 		folder_q = session.query(GitParentPath).filter(GitParentPath.folder == str(gsp.folder)).first()
 		if folder_q:
 			gsp = folder_q
+			logger.info(f'[runscan] gsp={gsp}')
 		else:
 			# add new parent path
+			logger.info(f'[runscan] adding new parent path {gsp}')
 			session.add(gsp)
 			session.commit()
 		logger.info(f'[runscan] gitsearchpath={gsp}')
@@ -123,22 +125,25 @@ def runscan(config, session):
 		logger.info(f'[runscan] gitsearchpath={gsp} found {len(gitfolders)} gitfolders')
 		collect_git_folders(gitfolders, session)
 		folder_entries = get_folder_entries(session)
-		logger.debug(f'[main] folder_entries={len(folder_entries)}')
+		logger.debug(f'[runscan] folder_entries={len(folder_entries)}')
 		for gf in folder_entries:
 			collect_repo(gf, session)
 		repo_entries = get_repo_entries(session)
-		logger.debug(f'[main] folder_entries={len(folder_entries)} repo_entries={len(repo_entries)}')
+		logger.debug(f'[runscan] folder_entries={len(folder_entries)} repo_entries={len(repo_entries)}')
 
-def listpaths(config):
+def listpaths(config, session):
+	gsp_entries = get_parent_entries(session)
 	for k in config['searchpaths']['paths'].split(','):
-		logger.info(f'[path] {k}')
+		logger.info(f'[confpath] {k}')
+	for gsp in gsp_entries:
+		logger.info(f'[gsp] {gsp}')
 
 def read_config():
 	config = ConfigParser()
 	config.read('findgits.ini')
 	return config
 
-def add_path(path, config):
+def add_path(path, config, session):
 	if path.endswith('/'):
 		path = path[:-1]
 	if path not in config['searchpaths']['paths'].split(','):
@@ -146,9 +151,25 @@ def add_path(path, config):
 		config['searchpaths']['paths'] += f',{path}'
 		with open('findgits.ini', 'w') as f:
 			config.write(f)
-		listpaths(config)
+		gsp = GitParentPath(path)
+		session.add(gsp)
+		session.commit()
+		listpaths(config, session)
 	else:
 		logger.warning(f'[add_path] path={path} already in config')
+
+def scanpath(scanpath, config, session):
+	gsp = session.query(GitParentPath).filter(GitParentPath.id == str(scanpath)).first()
+	logger.debug(f'[scanpath] scanpath={scanpath} path_q={gsp}')
+	gitfolders = [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
+	logger.info(f'[scanpath] gitsearchpath={gsp} found {len(gitfolders)} gitfolders')
+	collect_git_folders(gitfolders, session)
+	folder_entries = get_folder_entries(session)
+	logger.debug(f'[scanpath] folder_entries={len(folder_entries)}')
+	for gf in folder_entries:
+		collect_repo(gf, session)
+	repo_entries = get_repo_entries(session)
+	logger.debug(f'[scanpath] folder_entries={len(folder_entries)} repo_entries={len(repo_entries)}')
 
 if __name__ == '__main__':
 	engine = get_engine(dbtype='sqlite')
@@ -160,13 +181,16 @@ if __name__ == '__main__':
 	myparse.add_argument('--addpath', nargs='?', dest='addpath')
 	myparse.add_argument('--listpaths', action='store_true', default=False, dest='listpaths')
 	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
+	myparse.add_argument('--scanpath', nargs='?', help='run scan on path, specify pathid', action='store', dest='scanpath')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
+	if args.scanpath:
+		scanpath(args.scanpath, config, session)
 	if args.runscan:
 		runscan(config, session)
 	if args.listpaths:
-		listpaths(config)
+		listpaths(config, session)
 	if args.addpath:
-		add_path(args.addpath, config)
+		add_path(args.addpath, config, session)
 
 

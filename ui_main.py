@@ -16,10 +16,9 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QFrame,
-    QHBoxLayout, QHeaderView, QLabel, QPushButton,
-    QSizePolicy, QTableWidget, QTableWidgetItem, QTreeWidget,
-    QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QPushButton,
+    QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
 
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
@@ -30,75 +29,82 @@ class Ui_FindGitsApp(object):
         self.actionactionone.setObjectName(u"actionactionone")
         self.actionactionone.setCheckable(True)
         self.treeWidget = QTreeWidget(FindGitsApp)
-        __qtreewidgetitem = QTreeWidgetItem()
-        __qtreewidgetitem.setText(0, u"id");
-        self.treeWidget.setHeaderItem(__qtreewidgetitem)
         self.treeWidget.setObjectName(u"treeWidget")
         self.treeWidget.setGeometry(QRect(10, 10, 500, 400))
+        sizePolicy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.treeWidget.sizePolicy().hasHeightForWidth())
+        self.treeWidget.setSizePolicy(sizePolicy)
         self.treeWidget.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.treeWidget.setSortingEnabled(True)
-        self.tableWidget = QTableWidget(FindGitsApp)
-        self.tableWidget.setObjectName(u"tableWidget")
-        self.tableWidget.setGeometry(QRect(520, 241, 491, 171))
         self.formLayoutWidget = QWidget(FindGitsApp)
         self.formLayoutWidget.setObjectName(u"formLayoutWidget")
-        self.formLayoutWidget.setGeometry(QRect(510, 20, 511, 61))
+        self.formLayoutWidget.setGeometry(QRect(510, 20, 511, 99))
         self.formLayout = QFormLayout(self.formLayoutWidget)
         self.formLayout.setObjectName(u"formLayout")
-        self.formLayout.setContentsMargins(0, 0, 0, 0)
-        self.label_3 = QLabel(self.formLayoutWidget)
-        self.label_3.setObjectName(u"label_3")
+        self.formLayout.setContentsMargins(5, 0, 0, 0)
+        self.foobarLabel = QLabel(self.formLayoutWidget)
+        self.foobarLabel.setObjectName(u"foobarLabel")
 
-        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.label_3)
+        self.formLayout.setWidget(3, QFormLayout.LabelRole, self.foobarLabel)
 
-        self.label_repoid = QLabel(self.formLayoutWidget)
-        self.label_repoid.setObjectName(u"label_repoid")
-        self.label_repoid.setEnabled(True)
-        self.label_repoid.setFrameShape(QFrame.NoFrame)
+        self.urlLineEdit = QLineEdit(self.formLayoutWidget)
+        self.urlLineEdit.setObjectName(u"urlLineEdit")
+        self.urlLineEdit.setReadOnly(True)
 
-        self.formLayout.setWidget(0, QFormLayout.FieldRole, self.label_repoid)
+        self.formLayout.setWidget(3, QFormLayout.FieldRole, self.urlLineEdit)
 
-        self.label_2 = QLabel(self.formLayoutWidget)
-        self.label_2.setObjectName(u"label_2")
+        self.idLabel = QLabel(self.formLayoutWidget)
+        self.idLabel.setObjectName(u"idLabel")
 
-        self.formLayout.setWidget(1, QFormLayout.LabelRole, self.label_2)
+        self.formLayout.setWidget(1, QFormLayout.LabelRole, self.idLabel)
 
-        self.label_repourl = QLabel(self.formLayoutWidget)
-        self.label_repourl.setObjectName(u"label_repourl")
-        self.label_repourl.setFrameShape(QFrame.NoFrame)
+        self.idLineEdit = QLineEdit(self.formLayoutWidget)
+        self.idLineEdit.setObjectName(u"idLineEdit")
+        sizePolicy1 = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        sizePolicy1.setHorizontalStretch(0)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.idLineEdit.sizePolicy().hasHeightForWidth())
+        self.idLineEdit.setSizePolicy(sizePolicy1)
+        self.idLineEdit.setMaximumSize(QSize(64, 16777215))
+        self.idLineEdit.setBaseSize(QSize(33, 0))
+        self.idLineEdit.setMaxLength(4)
+        self.idLineEdit.setAlignment(Qt.AlignCenter)
+        self.idLineEdit.setReadOnly(True)
 
-        self.formLayout.setWidget(1, QFormLayout.FieldRole, self.label_repourl)
+        self.formLayout.setWidget(1, QFormLayout.FieldRole, self.idLineEdit)
 
-        self.widget = QWidget(FindGitsApp)
-        self.widget.setObjectName(u"widget")
-        self.widget.setGeometry(QRect(10, 420, 491, 29))
-        self.horizontalLayout = QHBoxLayout(self.widget)
+        self.layoutWidget = QWidget(FindGitsApp)
+        self.layoutWidget.setObjectName(u"layoutWidget")
+        self.layoutWidget.setGeometry(QRect(10, 420, 491, 29))
+        self.horizontalLayout = QHBoxLayout(self.layoutWidget)
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
-        self.pushButton = QPushButton(self.widget)
+        self.pushButton = QPushButton(self.layoutWidget)
         self.pushButton.setObjectName(u"pushButton")
 
         self.horizontalLayout.addWidget(self.pushButton)
 
-        self.pushButton_2 = QPushButton(self.widget)
+        self.pushButton_2 = QPushButton(self.layoutWidget)
         self.pushButton_2.setObjectName(u"pushButton_2")
         self.pushButton_2.setEnabled(False)
 
         self.horizontalLayout.addWidget(self.pushButton_2)
 
-        self.pushButton_3 = QPushButton(self.widget)
+        self.pushButton_3 = QPushButton(self.layoutWidget)
         self.pushButton_3.setObjectName(u"pushButton_3")
         self.pushButton_3.setEnabled(False)
 
         self.horizontalLayout.addWidget(self.pushButton_3)
 
-        self.pushButton_4 = QPushButton(self.widget)
+        self.pushButton_4 = QPushButton(self.layoutWidget)
         self.pushButton_4.setObjectName(u"pushButton_4")
         self.pushButton_4.setEnabled(False)
 
         self.horizontalLayout.addWidget(self.pushButton_4)
 
-        self.pushButton_5 = QPushButton(self.widget)
+        self.pushButton_5 = QPushButton(self.layoutWidget)
         self.pushButton_5.setObjectName(u"pushButton_5")
         self.pushButton_5.setEnabled(False)
 
@@ -117,11 +123,10 @@ class Ui_FindGitsApp(object):
         self.actionactionone.setToolTip(QCoreApplication.translate("FindGitsApp", u"actiononetooltip", None))
 #endif // QT_CONFIG(tooltip)
         ___qtreewidgetitem = self.treeWidget.headerItem()
-        ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"git_path", None));
-        self.label_3.setText(QCoreApplication.translate("FindGitsApp", u"repoid", None))
-        self.label_repoid.setText("")
-        self.label_2.setText(QCoreApplication.translate("FindGitsApp", u"repourl", None))
-        self.label_repourl.setText("")
+        ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"path", None));
+        ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None));
+        self.foobarLabel.setText(QCoreApplication.translate("FindGitsApp", u"url", None))
+        self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
         self.pushButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
         self.pushButton_2.setText(QCoreApplication.translate("FindGitsApp", u"btn-one", None))
         self.pushButton_3.setText(QCoreApplication.translate("FindGitsApp", u"btn-two", None))
