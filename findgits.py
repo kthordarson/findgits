@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 
 from concurrent.futures import (ProcessPoolExecutor, as_completed)
 
-from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db
+from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db, get_dupes
 from dbstuff import  get_folder_entries, get_repo_entries, get_parent_entries
 from dbstuff import MissingConfigException, GitParentPath
 
@@ -168,28 +168,6 @@ def scanpath(scanpath, config, session):
 	repo_entries = get_repo_entries(session)
 	logger.debug(f'[scanpath] folder_entries={len(folder_entries)} repo_entries={len(repo_entries)}')
 
-def get_dupes(session):
-	# return list of repos with multiple entries
-	# select giturl,count(*) as count from gitrepo group by giturl having count>1;
-	# select giturl,count(*) as count from gitrepo group by giturl having count>1 order by count;
-	sql = text('select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
-	dupes = session.execute(sql).fetchall()
-	for d in dupes:
-		dup = d._asdict()
-		repo_id = dup.get('id')
-		folder_id = dup.get('folderid')
-		giturl = dup.get('giturl')
-		sql = text(f'select id,folderid,giturl from gitrepo where giturl="{giturl}"')
-		#repo_dupes_ = session.execute(sql).fetchall()
-		repo_dupes = [r._asdict() for r in session.execute(sql).fetchall()]
-		dupepaths = [session.query(GitFolder).filter(GitFolder.id==k.get('folderid')).all() for k in repo_dupes]
-		logger.debug(f'[d] {repo_id} {folder_id} {giturl} {dup.get("count")}')
-		for dp in dupepaths:
-			logger.info(f'\t{dp[0].git_path}')
-		#[logger.debug(f'[d] {k[0].git_path}') for k in dupepaths]
-	logger.info(f'[dupes] found {len(dupes)} dupes')
-	return dupes
-	# foo = session.query(GitRepo).from_statement(text('select id,giturl,count(*) as count from gitrepo group by giturl having count>1 ')).all()
 
 if __name__ == '__main__':
 	engine = get_engine(dbtype='sqlite')

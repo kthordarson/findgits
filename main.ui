@@ -130,32 +130,32 @@
      </widget>
     </item>
     <item>
+     <widget class="QPushButton" name="getdupes_button">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="text">
+       <string>Dupes</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="searchpaths_button">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="text">
+       <string>Searchpaths</string>
+      </property>
+     </widget>
+    </item>
+    <item>
      <widget class="QPushButton" name="runscan_button">
       <property name="enabled">
        <bool>false</bool>
       </property>
       <property name="text">
        <string>Run scan</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QPushButton" name="getdupes_button">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="text">
-       <string>Get dupes</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QPushButton" name="pushButton_4">
-      <property name="enabled">
-       <bool>false</bool>
-      </property>
-      <property name="text">
-       <string>btn-three</string>
       </property>
      </widget>
     </item>
@@ -170,6 +170,19 @@
      </widget>
     </item>
    </layout>
+  </widget>
+  <widget class="QCheckBox" name="checkBox_showdupes">
+   <property name="geometry">
+    <rect>
+     <x>530</x>
+     <y>240</y>
+     <width>121</width>
+     <height>25</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Show dupes</string>
+   </property>
   </widget>
   <action name="actionactionone">
    <property name="checkable">

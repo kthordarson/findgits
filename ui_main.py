@@ -16,9 +16,10 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QPushButton,
-    QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QCheckBox, QFormLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
+    QWidget)
 
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
@@ -86,23 +87,23 @@ class Ui_FindGitsApp(object):
 
         self.horizontalLayout.addWidget(self.folderButton)
 
+        self.getdupes_button = QPushButton(self.layoutWidget)
+        self.getdupes_button.setObjectName(u"getdupes_button")
+        self.getdupes_button.setEnabled(True)
+
+        self.horizontalLayout.addWidget(self.getdupes_button)
+
+        self.searchpaths_button = QPushButton(self.layoutWidget)
+        self.searchpaths_button.setObjectName(u"searchpaths_button")
+        self.searchpaths_button.setEnabled(False)
+
+        self.horizontalLayout.addWidget(self.searchpaths_button)
+
         self.runscan_button = QPushButton(self.layoutWidget)
         self.runscan_button.setObjectName(u"runscan_button")
         self.runscan_button.setEnabled(False)
 
         self.horizontalLayout.addWidget(self.runscan_button)
-
-        self.getdupes_button = QPushButton(self.layoutWidget)
-        self.getdupes_button.setObjectName(u"getdupes_button")
-        self.getdupes_button.setEnabled(False)
-
-        self.horizontalLayout.addWidget(self.getdupes_button)
-
-        self.pushButton_4 = QPushButton(self.layoutWidget)
-        self.pushButton_4.setObjectName(u"pushButton_4")
-        self.pushButton_4.setEnabled(False)
-
-        self.horizontalLayout.addWidget(self.pushButton_4)
 
         self.pushButton_5 = QPushButton(self.layoutWidget)
         self.pushButton_5.setObjectName(u"pushButton_5")
@@ -110,6 +111,9 @@ class Ui_FindGitsApp(object):
 
         self.horizontalLayout.addWidget(self.pushButton_5)
 
+        self.checkBox_showdupes = QCheckBox(FindGitsApp)
+        self.checkBox_showdupes.setObjectName(u"checkBox_showdupes")
+        self.checkBox_showdupes.setGeometry(QRect(530, 240, 121, 25))
 
         self.retranslateUi(FindGitsApp)
 
@@ -128,9 +132,10 @@ class Ui_FindGitsApp(object):
         self.foobarLabel.setText(QCoreApplication.translate("FindGitsApp", u"url", None))
         self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
         self.folderButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
+        self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Dupes", None))
+        self.searchpaths_button.setText(QCoreApplication.translate("FindGitsApp", u"Searchpaths", None))
         self.runscan_button.setText(QCoreApplication.translate("FindGitsApp", u"Run scan", None))
-        self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Get dupes", None))
-        self.pushButton_4.setText(QCoreApplication.translate("FindGitsApp", u"btn-three", None))
         self.pushButton_5.setText(QCoreApplication.translate("FindGitsApp", u"btn-four", None))
+        self.checkBox_showdupes.setText(QCoreApplication.translate("FindGitsApp", u"Show dupes", None))
     # retranslateUi
 

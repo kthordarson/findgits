@@ -6,7 +6,7 @@ import subprocess
 from typing import List
 
 from configparser import ConfigParser, DuplicateSectionError
-from sqlalchemy import ForeignKeyConstraint, ForeignKey, create_engine, Table, MetaData, Column, Integer, String, inspect, select, BigInteger, Float, DateTime, text, BIGINT, Numeric, DATE,TIME,DATETIME
+from sqlalchemy import ForeignKeyConstraint, ForeignKey, create_engine, Table, MetaData, Column, Integer, String, inspect, select, BigInteger, Float, DateTime, text, BIGINT, Numeric, DATE,TIME,DATETIME, Boolean
 from sqlalchemy import create_engine
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError)
 from sqlalchemy.orm.exc import UnmappedInstanceError
@@ -61,6 +61,7 @@ class GitFolder(Base):
 	config_mtime = Column('config_mtime', DateTime)
 	commitmsg_file = Column('commitmsg_file', String)
 	git_config_file = Column('git_config_file', String)
+	dupe_flag = Column('dupe_flag', Boolean)
 
 	def __init__(self, gitfolder, gsp):
 		self.parent_path = gsp.folder
@@ -111,6 +112,7 @@ class GitRepo(Base):
 	giturl = Column('giturl', String)
 	remote = Column('remote', String)
 	branch = Column('branch', String)
+	dupe_flag = Column('dupe_flag', Boolean)
 	#git_paths: Mapped[List["GitFolder"]] = relationship()
 	# gitfolder = relationship("GitFolder", back_populates="gitrepo")
 
@@ -254,3 +256,45 @@ def get_engine(dbtype):
 		return create_engine('sqlite:///gitrepo.db', echo=False, connect_args={'check_same_thread': False})
 	else:
 		return None
+
+def get_dupes(session):
+	# return list of repos with multiple entries
+	sql = text('select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
+	dupes_ = [k._asdict() for k in session.execute(sql).fetchall()]
+	dupes = []
+	for d in dupes_:
+		# find all repos with this giturl
+		sql_d = text(f"""select id,folderid,giturl from gitrepo where giturl="{d.get('giturl')}" """)
+		repo_dupes = [r._asdict() for r in session.execute(sql_d).fetchall()]
+
+		# set dupe_flag on all repos with this giturl
+		for rpd in repo_dupes:
+			r = session.query(GitRepo).filter(GitRepo.id==rpd.get('id')).first()
+			r.dupe_flag = True
+			session.commit()
+
+		# find all folders with this repo
+		dupepaths = [session.query(GitFolder).filter(GitFolder.id==k.get('folderid')).first() for k in repo_dupes]
+		# logger.debug(f'[d] {d.get("giturl")} {d.get("count")}')
+		dupeitem = {
+			'gitid': d.get('id'),
+			'count': d.get('count'),
+			'giturl': d.get('giturl'),
+			'folders': [],
+		}
+		for dp in dupepaths:
+			# set dupe_flag on all folders with this repo
+			r = session.query(GitFolder).filter(GitFolder.id==dp.id).first()
+			r.dupe_flag = True
+			session.commit()
+			dpitem = {
+				'folderid': dp.id,
+				'git_path': dp.git_path,
+			}
+			dupeitem['folders'].append(dpitem)
+		# logger.info(f'[d] {dupeitem}')
+		dupes.append(dupeitem)
+		#[logger.debug(f'[d] {k[0].git_path}') for k in dupepaths]
+	logger.info(f'[dupes] found {len(dupes)} dupes')
+	return dupes
+	# foo = session.query(GitRepo).from_statement(text('select id,giturl,count(*) as count from gitrepo group by giturl having count>1 ')).all()
