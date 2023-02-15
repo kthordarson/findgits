@@ -3,12 +3,13 @@ from run import MainApp
 import os, sys
 import time
 import argparse
+import json
 from pathlib import Path
 from loguru import logger
 from datetime import datetime, timedelta
 from threading import Thread
 from queue import SimpleQueue as Queue
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, MetaData
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError)
 from sqlalchemy.orm.exc import UnmappedInstanceError
 from sqlalchemy.ext.declarative import declarative_base
@@ -92,12 +93,16 @@ def collect_repo(gf, session):
 		# logger.debug(f'[!] newgitrepo {gr} ')
 
 
-def listpaths(session):
+def listpaths(session, dump=False):
 	gsp_entries = get_parent_entries(session)
-	for gsp in gsp_entries:
-		sql = text(f"SELECT COUNT(*) as count FROM gitfolder WHERE gitfolder.parent_id = {gsp.id}")
-		res = session.execute(sql).fetchone()._asdict()
-		logger.info(f'[gsp] {gsp} folders={res.get("count")}')
+	if not dump:
+		for gsp in gsp_entries:
+			sql = text(f"SELECT COUNT(*) as count FROM gitfolder WHERE gitfolder.parent_id = {gsp.id}")
+			res = session.execute(sql).fetchone()._asdict()
+			logger.info(f'[gsp] {gsp} folders={res.get("count")}')
+	else:
+		for gsp in gsp_entries:
+			print(f'{gsp.folder}')
 
 
 def add_path(path, session):
@@ -198,6 +203,29 @@ def runscan(session):
 	repo_entries = get_repo_entries(session)
 	logger.debug(f'[runscan] collectors={len(collectors)} gfl={len(gfl)} repo_entries={len(repo_entries)}')
 
+def import_paths(pathfile, session):
+	# import paths from file
+	if not os.path.exists(pathfile):
+		logger.error(f'[importpaths] {pathfile} not found')
+		return
+	with open(pathfile, 'r') as f:
+		for line in f:
+			if os.path.exists(line):
+				add_path(line.strip(), session)
+			else:
+				logger.warning(f'[importpaths] {line} not found')
+
+def dbdump(backupfile, engine):
+	# dump db to file
+	pass
+	# logger.info(f'[dbdump] {backupfile}')
+	# meta = MetaData()
+	# meta.reflect(bind=engine)
+	# result = {}
+	# for table in meta.sorted_tables:
+	# 	result[table.name] = [dict(row) for row in engine.execute(table.select())]
+	# return json.dumps(result)
+
 if __name__ == '__main__':
 	engine = get_engine(dbtype='mysql')
 	Session = sessionmaker(bind=engine)
@@ -205,7 +233,10 @@ if __name__ == '__main__':
 	db_init(engine)
 	myparse = argparse.ArgumentParser(description="findgits", exit_on_error=False)
 	myparse.add_argument('--addpath', nargs='?', dest='addpath')
+	myparse.add_argument('--importpaths', nargs='?', dest='importpaths')
+	myparse.add_argument('--dbdump', nargs='?', dest='dbdump')
 	myparse.add_argument('--listpaths', action='store_true', default=False, dest='listpaths')
+	myparse.add_argument('--dumppaths', action='store_true', default=False, dest='dumppaths')
 	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
 	myparse.add_argument('--scanpath', nargs='?', help='run scan on path, specify pathid', action='store', dest='scanpath')
 	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
@@ -218,8 +249,12 @@ if __name__ == '__main__':
 	if args.runscan:
 		foobar = runscan(session)
 	if args.listpaths:
-		listpaths(session)
+		listpaths(session, args.dumppaths)
 	if args.addpath:
 		add_path(args.addpath, session)
-
-
+	if args.importpaths:
+		# read paths from text file and import
+		import_paths(args.importpaths, session)
+	if args.dbdump:
+		# dump database to file
+		dbdump(args.dbdump, engine)

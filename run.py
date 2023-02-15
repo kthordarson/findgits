@@ -125,7 +125,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
     #             item.child(index).setCheckState(0, Qt.Unchecked)
 
 if __name__ == '__main__':
-    engine = get_engine(dbtype='sqlite')
+    engine = get_engine(dbtype='mysql')
     Session = sessionmaker(bind=engine)
     session = Session()
     app = QApplication(sys.argv)
