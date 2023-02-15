@@ -242,7 +242,7 @@ def remove_dupes(gitremotes, entries, engine):
 def get_engine(dbtype):
 	dbuser = os.getenv('gitdbUSER')
 	dbpass = os.getenv('gitdbPASS')
-	dbhost = os.getenv('gitdbDBHOST')
+	dbhost = os.getenv('gitdbHOST')
 	dbname = os.getenv('gitdbNAME')
 	if dbtype == 'mysql':
 		dburl = (f"mysql+pymysql://{dbuser}:{dbpass}@{dbhost}/{dbname}?charset=utf8mb4")
