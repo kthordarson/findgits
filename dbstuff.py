@@ -206,8 +206,8 @@ def send_to_db(gitremotes, session):
 		logger.error(f'[db] {e} k={k}')
 		session.rollback()
 
-def get_folder_entries(session):
-	return session.query(GitFolder).all()
+def get_folder_entries(session, parentid):
+	return session.query(GitFolder).filter(GitFolder.parent_id == parentid).all()
 
 def get_repo_entries(session):
 	return session.query(GitRepo).all()

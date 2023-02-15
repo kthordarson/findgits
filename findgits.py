@@ -133,7 +133,7 @@ def scanpath(scanpath, session):
 		logger.error(f'[scanpath] dataerror {e} scanpath={scanpath} gsp={gsp}')
 		raise TypeError(f'[scanpath] {e} {type(e)} scanpath={scanpath} gsp={gsp}')
 	#collect_git_folders(gitfolders, session)
-	folder_entries = get_folder_entries(session)
+	folder_entries = get_folder_entries(session, gsp.id)
 	logger.info(f'[scanpath] scanpath={scanpath} path_q={gsp} gitsearchpath={gsp} found {len(gitfolders)} gitfolders folder_entries={len(folder_entries)}')
 	for gf in folder_entries:
 		collect_repo(gf, session)
