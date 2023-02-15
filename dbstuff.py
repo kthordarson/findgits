@@ -6,7 +6,7 @@ import subprocess
 from typing import List
 
 from configparser import ConfigParser, DuplicateSectionError
-from sqlalchemy import ForeignKeyConstraint, ForeignKey, create_engine, Table, MetaData, Column, Integer, String, inspect, select, BigInteger, Float, DateTime, text, BIGINT, Numeric, DATE,TIME,DATETIME, Boolean
+from sqlalchemy import ForeignKeyConstraint, ForeignKey, create_engine, Table, MetaData, Column, BigInteger, String, inspect, select, BigBigInteger, Float, DateTime, text, BIGINT, Numeric, DATE,TIME,DATETIME, Boolean
 from sqlalchemy import create_engine
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError)
 from sqlalchemy.orm.exc import UnmappedInstanceError
@@ -38,15 +38,15 @@ class GitFolder(Base):
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
-	parent_id = Column('parent_id', Integer)
+	parent_id = Column('parent_id', BigInteger)
 	parent_path = Column('patent_path', String(255))
 	git_path = Column('git_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 
-	folder_size = Column('folder_size', Integer)
-	file_count = Column('file_count', Integer)
-	subdir_count = Column('subdir_count', Integer)
+	folder_size = Column('folder_size', BigInteger)
+	file_count = Column('file_count', BigInteger)
+	subdir_count = Column('subdir_count', BigInteger)
 
 	gitfolder_ctime = Column('gitfolder_ctime', DateTime)
 	commit_ctime = Column('commit_ctime', DateTime)
@@ -106,8 +106,8 @@ class GitFolder(Base):
 class GitRepo(Base):
 	__tablename__ = 'gitrepo'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	folderid = Column('folderid', Integer)
-	parentid = Column('parentid', Integer)
+	folderid = Column('folderid', BigInteger)
+	parentid = Column('parentid', BigInteger)
 	git_path = Column('git_path', String(255))
 	giturl = Column('giturl', String(255))
 	remote = Column('remote', String(255))
