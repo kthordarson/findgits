@@ -24,18 +24,18 @@ from utils import get_folder_list
 
 
 
-def create_folders_task(gitpath):
-	gf = GitFolder(gitpath)
-	return gf
+# def create_folders_task(gitpath):
+# 	gf = GitFolder(gitpath)
+# 	return gf
 
-def create_remotes_task(gf):
-	gr = GitRepo(gf)
-	return gr
+# def create_remotes_task(gf):
+# 	gr = GitRepo(gf)
+# 	return gr
 
-def worker_task(gitpath):
-	gf = GitFolder(gitpath)
-	gr = GitRepo(gf)
-	return gr,gf
+# def worker_task(gitpath):
+# 	gf = GitFolder(gitpath)
+# 	gr = GitRepo(gf)
+# 	return gr,gf
 
 class FolderScanner(Thread):
 	def __init__(self):
@@ -115,9 +115,9 @@ def add_path(path, session):
 		path = path[:-1]
 	if path not in gsp_entries:
 		gsp = GitParentPath(path)
-		logger.debug(f'[add_path] path={path} gsp={gsp} to {gsp_entries}')
 		session.add(gsp)
 		session.commit()
+		logger.debug(f'[add_path] path={path} gsp={gsp} to {gsp_entries}')
 		listpaths(session)
 	else:
 		logger.warning(f'[add_path] path={path} already in config')
@@ -125,9 +125,7 @@ def add_path(path, session):
 def scanpath(scanpath, session):
 	# scan a single path, scanpath is an int corresponding to id of GitParentPath to scan
 	gsp = session.query(GitParentPath).filter(GitParentPath.id == str(scanpath)).first()
-	logger.debug(f'[scanpath] scanpath={scanpath} path_q={gsp}')
 	gitfolders = [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
-	logger.info(f'[scanpath] gitsearchpath={gsp} found {len(gitfolders)} gitfolders')
 	_ = [session.add(k) for k in gitfolders]
 	try:
 		session.commit()
@@ -136,11 +134,11 @@ def scanpath(scanpath, session):
 		raise TypeError(f'[scanpath] {e} {type(e)} scanpath={scanpath} gsp={gsp}')
 	#collect_git_folders(gitfolders, session)
 	folder_entries = get_folder_entries(session)
-	logger.debug(f'[scanpath] folder_entries={len(folder_entries)}')
+	logger.info(f'[scanpath] scanpath={scanpath} path_q={gsp} gitsearchpath={gsp} found {len(gitfolders)} gitfolders folder_entries={len(folder_entries)}')
 	for gf in folder_entries:
 		collect_repo(gf, session)
 	repo_entries = get_repo_entries(session)
-	logger.debug(f'[scanpath] folder_entries={len(folder_entries)} repo_entries={len(repo_entries)}')
+	logger.debug(f'[scanpath] repo_entries={len(repo_entries)}')
 
 class Collector(Thread):
 	def __init__(self, gsp):

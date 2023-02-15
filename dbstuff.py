@@ -266,7 +266,7 @@ def get_dupes(session):
 		# find all repos with this giturl
 		sql_d = text(f"""select id,folderid,giturl from gitrepo where giturl="{d.get('giturl')}" """)
 		repo_dupes = [r._asdict() for r in session.execute(sql_d).fetchall()]
-
+		logger.info(f'[dupe] {d.get("giturl")} dupes={len(repo_dupes)}')
 		# set dupe_flag on all repos with this giturl
 		for rpd in repo_dupes:
 			r = session.query(GitRepo).filter(GitRepo.id==rpd.get('id')).first()
@@ -294,10 +294,11 @@ def get_dupes(session):
 					'parent_id:': dp.parent_id,
 				}
 				dupeitem['folders'].append(dpitem)
-				logger.info(f'[d] {dupeitem}')
+				#logger.info(f'[d] {dupeitem}')
 				dupes.append(dupeitem)
 			else:
-				logger.warning(f'[!] d={d} dp={dp}')
+				pass
+				#logger.warning(f'[!] d={d} dp={dp}')
 
 		#[logger.debug(f'[d] {k[0].git_path}') for k in dupepaths]
 	logger.info(f'[dupes] found {len(dupes)} dupes')
