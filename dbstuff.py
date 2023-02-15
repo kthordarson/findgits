@@ -6,7 +6,7 @@ import subprocess
 from typing import List
 
 from configparser import ConfigParser, DuplicateSectionError
-from sqlalchemy import ForeignKeyConstraint, ForeignKey, create_engine, Table, MetaData, Column, BigInteger, String, inspect, select, BigBigInteger, Float, DateTime, text, BIGINT, Numeric, DATE,TIME,DATETIME, Boolean
+from sqlalchemy import ForeignKeyConstraint, ForeignKey, create_engine, Table, MetaData, Column, BigInteger, String, inspect, select,  Float, DateTime, text, BIGINT, Numeric, DATE,TIME,DATETIME, Boolean
 from sqlalchemy import create_engine
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError)
 from sqlalchemy.orm.exc import UnmappedInstanceError
