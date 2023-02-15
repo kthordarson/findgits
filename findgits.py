@@ -129,7 +129,11 @@ def scanpath(scanpath, session):
 	gitfolders = [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
 	logger.info(f'[scanpath] gitsearchpath={gsp} found {len(gitfolders)} gitfolders')
 	_ = [session.add(k) for k in gitfolders]
-	session.commit()
+	try:
+		session.commit()
+	except DataError as e:
+		logger.error(f'[scanpath] dataerror {e} gsp={gsp}')
+		raise DataError(f'[scanpath] dataerror {e} gsp={gsp}')
 	#collect_git_folders(gitfolders, session)
 	folder_entries = get_folder_entries(session)
 	logger.debug(f'[scanpath] folder_entries={len(folder_entries)}')
