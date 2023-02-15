@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-from PyQt5.QtWidgets import QApplication
 from run import MainApp
 import os, sys
 import time
