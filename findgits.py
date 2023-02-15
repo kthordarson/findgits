@@ -132,8 +132,8 @@ def scanpath(scanpath, session):
 	try:
 		session.commit()
 	except DataError as e:
-		logger.error(f'[scanpath] dataerror {e} gsp={gsp}')
-		raise DataError(f'[scanpath] dataerror {e} gsp={gsp}')
+		logger.error(f'[scanpath] dataerror {e} scanpath={scanpath}')
+		raise DataError(f'[scanpath] dataerror {e} scanpath={scanpath}')
 	#collect_git_folders(gitfolders, session)
 	folder_entries = get_folder_entries(session)
 	logger.debug(f'[scanpath] folder_entries={len(folder_entries)}')
