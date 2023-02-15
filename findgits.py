@@ -20,23 +20,8 @@ from concurrent.futures import (ProcessPoolExecutor, as_completed)
 from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db, get_dupes
 from dbstuff import  get_folder_entries, get_repo_entries, get_parent_entries
 from dbstuff import MissingConfigException, GitParentPath
-
+from dbstuff import collect_repo, add_path, scanpath, listpaths, get_folder_list
 from utils import get_folder_list
-
-
-
-# def create_folders_task(gitpath):
-# 	gf = GitFolder(gitpath)
-# 	return gf
-
-# def create_remotes_task(gf):
-# 	gr = GitRepo(gf)
-# 	return gr
-
-# def worker_task(gitpath):
-# 	gf = GitFolder(gitpath)
-# 	gr = GitRepo(gf)
-# 	return gr,gf
 
 class FolderScanner(Thread):
 	def __init__(self):
@@ -50,100 +35,6 @@ class FolderScanner(Thread):
 			while not self.queue.empty():
 				item = self.queue.get()
 
-def collect_git_folders(gitfolders, session):
-	# create GitFolder objects from gitfolders
-	for k in gitfolders:
-#		if session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first():
-		g = session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first()
-		try:
-			if g:
-				# existing gitfolder found, refresh
-				g.refresh()
-				session.add(g)
-				session.commit()
-			else:
-				# new gitfolder found, add to db
-				session.add(k)
-				session.commit()
-				# logger.debug(f'[!] New: {k} ')
-		except OperationalError as e:
-			logger.error(f'[E] {e} g={g}')
-			continue
-	logger.debug(f'[collect_git_folders] gitfolders={len(gitfolders)}')
-
-def collect_repo(gf, session):
-	try:
-		# construct repo object from gf (folder)
-		gr = GitRepo(gf)
-	except MissingConfigException as e:
-		logger.error(f'[cgr] {e} gf={gf}')
-		return None
-	repo_q = session.query(GitRepo).filter(GitRepo.giturl == str(gr.giturl)).first()
-	folder_q = session.query(GitRepo).filter(GitRepo.git_path == str(gr.git_path)).first()
-	if repo_q and folder_q:
-		# todo: check if repo exists in other folder somewhere...
-		pass
-		#repo_q.refresh()
-		#session.add(repo_q)
-		#session.commit()
-	else:
-		# new repo found, add to db
-		session.add(gr)
-		session.commit()
-		# logger.debug(f'[!] newgitrepo {gr} ')
-
-
-def listpaths(session, dump=False):
-	gsp_entries = get_parent_entries(session)
-	if not dump:
-		for gsp in gsp_entries:
-			sql = text(f"SELECT COUNT(*) as count FROM gitfolder WHERE gitfolder.parent_id = {gsp.id}")
-			res = session.execute(sql).fetchone()._asdict()
-			logger.info(f'[gsp] {gsp} folders={res.get("count")}')
-	else:
-		for gsp in gsp_entries:
-			print(f'{gsp.folder}')
-
-
-def add_path(path, session):
-	# add new path to config  db
-	if not os.path.exists(path):
-		logger.error(f'[addpath] {path} not found')
-		return
-
-	# check db entries for invalid paths and remove
-	gsp_entries = get_parent_entries(session)
-	_ = [session.delete(k) for k in gsp_entries if not os.path.exists(k.folder)]
-	session.commit()
-
-	if path.endswith('/'):
-		path = path[:-1]
-	if path not in gsp_entries:
-		gsp = GitParentPath(path)
-		session.add(gsp)
-		session.commit()
-		logger.debug(f'[add_path] path={path} gsp={gsp} to {gsp_entries}')
-		listpaths(session)
-	else:
-		logger.warning(f'[add_path] path={path} already in config')
-
-def scanpath(scanpath, session):
-	# scan a single path, scanpath is an int corresponding to id of GitParentPath to scan
-	gsp = session.query(GitParentPath).filter(GitParentPath.id == str(scanpath)).first()
-	gitfolders = [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
-	_ = [session.add(k) for k in gitfolders]
-	try:
-		session.commit()
-	except DataError as e:
-		logger.error(f'[scanpath] dataerror {e} scanpath={scanpath} gsp={gsp}')
-		raise TypeError(f'[scanpath] {e} {type(e)} scanpath={scanpath} gsp={gsp}')
-	#collect_git_folders(gitfolders, session)
-	folder_entries = get_folder_entries(session, gsp.id)
-	logger.info(f'[scanpath] scanpath={scanpath} path_q={gsp} gitsearchpath={gsp} found {len(gitfolders)} gitfolders folder_entries={len(folder_entries)}')
-	for gf in folder_entries:
-		collect_repo(gf, session)
-	repo_entries = get_repo_entries(session)
-	logger.debug(f'[scanpath] repo_entries={len(repo_entries)}')
 
 class Collector(Thread):
 	def __init__(self, gsp):

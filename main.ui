@@ -174,14 +174,14 @@
   <widget class="QCheckBox" name="checkBox_showdupes">
    <property name="geometry">
     <rect>
-     <x>530</x>
-     <y>240</y>
+     <x>510</x>
+     <y>420</y>
      <width>121</width>
      <height>25</height>
     </rect>
    </property>
    <property name="text">
-    <string>Show dupes</string>
+    <string>Filter dupes</string>
    </property>
   </widget>
   <action name="actionactionone">

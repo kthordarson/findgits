@@ -113,7 +113,7 @@ class Ui_FindGitsApp(object):
 
         self.checkBox_showdupes = QCheckBox(FindGitsApp)
         self.checkBox_showdupes.setObjectName(u"checkBox_showdupes")
-        self.checkBox_showdupes.setGeometry(QRect(530, 240, 121, 25))
+        self.checkBox_showdupes.setGeometry(QRect(510, 420, 121, 25))
 
         self.retranslateUi(FindGitsApp)
 
@@ -136,6 +136,6 @@ class Ui_FindGitsApp(object):
         self.searchpaths_button.setText(QCoreApplication.translate("FindGitsApp", u"Searchpaths", None))
         self.runscan_button.setText(QCoreApplication.translate("FindGitsApp", u"Run scan", None))
         self.pushButton_5.setText(QCoreApplication.translate("FindGitsApp", u"btn-four", None))
-        self.checkBox_showdupes.setText(QCoreApplication.translate("FindGitsApp", u"Show dupes", None))
+        self.checkBox_showdupes.setText(QCoreApplication.translate("FindGitsApp", u"Filter dupes", None))
     # retranslateUi
 

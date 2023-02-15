@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import UnmappedInstanceError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Mapped, mapped_column, DeclarativeBase
 
-from utils import get_directory_size, get_subdircount, get_subfilecount
+from utils import get_directory_size, get_subdircount, get_subfilecount, get_folder_list
 #Base = declarative_base()
 
 class MissingConfigException(Exception):
@@ -168,7 +168,6 @@ class GitRepo(Base):
 		if status.stdout != b'':
 			statusstdout = status.stdout.decode('utf-8').split('\n')
 
-
 def db_init(engine):
 	Base.metadata.create_all(bind=engine)
 
@@ -257,7 +256,53 @@ def get_engine(dbtype):
 	else:
 		return None
 
+def create_dupe_view(session):
+	drop_sql = text('DROP VIEW if exists dupeview ;')
+	session.execute(drop_sql)
+	create_sql = text('CREATE VIEW dupeview as select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
+	session.execute(create_sql)
+
 def get_dupes(session):
+	drop_sql = text('DROP VIEW if exists dupeview ;')
+	session.execute(drop_sql)
+	drop_sql = text('DROP VIEW if exists nodupes;')
+	session.execute(drop_sql)
+
+	create_sql = text('CREATE VIEW dupeview as select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
+	session.execute(create_sql)
+	sql = text('select * from dupeview;')
+	dupes = [k._asdict() for k in session.execute(sql).fetchall()]
+
+	create_sql = text('CREATE VIEW nodupes as select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count=1;')
+	session.execute(create_sql)
+	sql = text('select * from nodupes;')
+	nodupes = [k._asdict() for k in session.execute(sql).fetchall()]
+
+	for d in nodupes:
+		g = session.query(GitRepo).filter(GitRepo.id==d.get('id')).first()
+		g.dupe_flag = False
+		# set dupe_flag on all repos with this giturl
+		f = session.query(GitFolder).filter(GitFolder.id==d.get('folderid')).first()
+		f.dupe_flag = False
+		# set dupe_flag on all folders with this giturl
+		session.commit()
+
+	for d in dupes:
+		g = session.query(GitRepo).filter(GitRepo.id==d.get('id')).first()
+		g.dupe_flag = True
+		# set dupe_flag on all repos with this giturl
+		f = session.query(GitFolder).filter(GitFolder.id==d.get('folderid')).first()
+		f.dupe_flag = True
+		# set dupe_flag on all folders with this giturl
+		session.commit()
+	logger.info(f'[dupes] found {len(dupes)} dupes nodupes={len(nodupes)}')
+	drop_sql = text('DROP VIEW if exists dupeview ;')
+	session.execute(drop_sql)
+	drop_sql = text('DROP VIEW if exists nodupes;')
+	session.execute(drop_sql)
+	return dupes
+
+def get_dupesx(session):
 	# return list of repos with multiple entries
 	sql = text('select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
 	dupes_ = [k._asdict() for k in session.execute(sql).fetchall()]
@@ -304,3 +349,97 @@ def get_dupes(session):
 	logger.info(f'[dupes] found {len(dupes)} dupes')
 	return dupes
 	# foo = session.query(GitRepo).from_statement(text('select id,giturl,count(*) as count from gitrepo group by giturl having count>1 ')).all()
+def collect_git_folders(gitfolders, session):
+	# create GitFolder objects from gitfolders
+	for k in gitfolders:
+#		if session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first():
+		g = session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first()
+		try:
+			if g:
+				# existing gitfolder found, refresh
+				g.refresh()
+				session.add(g)
+				session.commit()
+			else:
+				# new gitfolder found, add to db
+				session.add(k)
+				session.commit()
+				# logger.debug(f'[!] New: {k} ')
+		except OperationalError as e:
+			logger.error(f'[E] {e} g={g}')
+			continue
+	logger.debug(f'[collect_git_folders] gitfolders={len(gitfolders)}')
+
+def collect_repo(gf, session):
+	try:
+		# construct repo object from gf (folder)
+		gr = GitRepo(gf)
+	except MissingConfigException as e:
+		logger.error(f'[cgr] {e} gf={gf}')
+		return None
+	repo_q = session.query(GitRepo).filter(GitRepo.giturl == str(gr.giturl)).first()
+	folder_q = session.query(GitRepo).filter(GitRepo.git_path == str(gr.git_path)).first()
+	if repo_q and folder_q:
+		# todo: check if repo exists in other folder somewhere...
+		pass
+		#repo_q.refresh()
+		#session.add(repo_q)
+		#session.commit()
+	else:
+		# new repo found, add to db
+		session.add(gr)
+		session.commit()
+		# logger.debug(f'[!] newgitrepo {gr} ')
+
+
+def listpaths(session, dump=False):
+	gsp_entries = get_parent_entries(session)
+	if not dump:
+		for gsp in gsp_entries:
+			sql = text(f"SELECT COUNT(*) as count FROM gitfolder WHERE gitfolder.parent_id = {gsp.id}")
+			res = session.execute(sql).fetchone()._asdict()
+			logger.info(f'[gsp] {gsp} folders={res.get("count")}')
+	else:
+		for gsp in gsp_entries:
+			print(f'{gsp.folder}')
+
+
+def add_path(path, session):
+	# add new path to config  db
+	if not os.path.exists(path):
+		logger.error(f'[addpath] {path} not found')
+		return
+
+	# check db entries for invalid paths and remove
+	gsp_entries = get_parent_entries(session)
+	_ = [session.delete(k) for k in gsp_entries if not os.path.exists(k.folder)]
+	session.commit()
+
+	if path.endswith('/'):
+		path = path[:-1]
+	if path not in gsp_entries:
+		gsp = GitParentPath(path)
+		session.add(gsp)
+		session.commit()
+		logger.debug(f'[add_path] path={path} gsp={gsp} to {gsp_entries}')
+		listpaths(session)
+	else:
+		logger.warning(f'[add_path] path={path} already in config')
+
+def scanpath(scanpath, session):
+	# scan a single path, scanpath is an int corresponding to id of GitParentPath to scan
+	gsp = session.query(GitParentPath).filter(GitParentPath.id == str(scanpath)).first()
+	gitfolders = [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
+	_ = [session.add(k) for k in gitfolders]
+	try:
+		session.commit()
+	except DataError as e:
+		logger.error(f'[scanpath] dataerror {e} scanpath={scanpath} gsp={gsp}')
+		raise TypeError(f'[scanpath] {e} {type(e)} scanpath={scanpath} gsp={gsp}')
+	#collect_git_folders(gitfolders, session)
+	folder_entries = get_folder_entries(session, gsp.id)
+	logger.info(f'[scanpath] scanpath={scanpath} path_q={gsp} gitsearchpath={gsp} found {len(gitfolders)} gitfolders folder_entries={len(folder_entries)}')
+	for gf in folder_entries:
+		collect_repo(gf, session)
+	repo_entries = get_repo_entries(session)
+	logger.debug(f'[scanpath] repo_entries={len(repo_entries)}')

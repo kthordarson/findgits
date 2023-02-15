@@ -35,11 +35,6 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.gitrepos = session.query(GitRepo).all()
         self.gitfolders = session.query(GitFolder).all()
         self.parent_folders = session.query(GitParentPath).all()
-        self.dupes = get_dupes(self.session)
-        #__qtreewidgetitem = self.treeWidget.headerItem()
-        #__qtreewidgetitem.setText(0, u"id")
-        #__qtreewidgetitem.setText(1, u"path")
-        #self.treeWidget.setHeaderItem(__qtreewidgetitem)
         logger.debug(f'[init] gr={len(self.gitrepos)} gf={len(self.gitfolders)} pf={len(self.parent_folders)}')
 
     # def checkBox_showdupes_changed(self, state):
@@ -50,9 +45,11 @@ class MainApp(QWidget, Ui_FindGitsApp):
         pass
     def checkBox_showdupes_toggle(self, *args):
         logger.debug(f'[showdupes] toggle checkState:{self.checkBox_showdupes.checkState()} isChecked:{self.checkBox_showdupes.isChecked()} args={args} {type(args)}')
+        #gitfolders_dupes = session.query(GitFolder).filter(GitFolder.dupe_flag == True).all()
         # self.retranslateUi(self)
 
     def getdupes_button_clicked(self, widget):
+
         self.checkBox_showdupes.setEnabled(False)
         self.treeWidget.clear()
         self.treeWidget.setColumnCount(3)
