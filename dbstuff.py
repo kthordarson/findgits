@@ -26,7 +26,7 @@ class Base(DeclarativeBase):
 class GitParentPath(Base):
 	__tablename__ = 'gitparentpath'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	folder = Column('folder', String)
+	folder = Column('folder', String(255))
 
 	def __init__(self, folder):
 		self.folder = folder
@@ -38,9 +38,9 @@ class GitFolder(Base):
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
-	parent_id = Column('patent_id', Integer)
-	parent_path = Column('patent_path', String)
-	git_path = Column('git_path', String)
+	parent_id = Column('parent_id', Integer)
+	parent_path = Column('patent_path', String(255))
+	git_path = Column('git_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 
@@ -59,8 +59,8 @@ class GitFolder(Base):
 	gitfolder_mtime = Column('gitfolder_mtime', DateTime)
 	commit_mtime = Column('commit_mtime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
-	commitmsg_file = Column('commitmsg_file', String)
-	git_config_file = Column('git_config_file', String)
+	commitmsg_file = Column('commitmsg_file', String(255))
+	git_config_file = Column('git_config_file', String(255))
 	dupe_flag = Column('dupe_flag', Boolean)
 
 	def __init__(self, gitfolder, gsp):
@@ -108,10 +108,10 @@ class GitRepo(Base):
 	id: Mapped[int] = mapped_column(primary_key=True)
 	folderid = Column('folderid', Integer)
 	parentid = Column('parentid', Integer)
-	git_path = Column('git_path', String)
-	giturl = Column('giturl', String)
-	remote = Column('remote', String)
-	branch = Column('branch', String)
+	git_path = Column('git_path', String(255))
+	giturl = Column('giturl', String(255))
+	remote = Column('remote', String(255))
+	branch = Column('branch', String(255))
 	dupe_flag = Column('dupe_flag', Boolean)
 	#git_paths: Mapped[List["GitFolder"]] = relationship()
 	# gitfolder = relationship("GitFolder", back_populates="gitrepo")
@@ -240,17 +240,17 @@ def remove_dupes(gitremotes, entries, engine):
 
 
 def get_engine(dbtype):
-	dbuser = None
-	dbpass = None
-	dbhost = None
-	dbname = None
+	dbuser = os.getenv('gitdbUSER')
+	dbpass = os.getenv('gitdbPASS')
+	dbhost = os.getenv('gitdbDBHOST')
+	dbname = os.getenv('gitdbNAME')
 	if dbtype == 'mysql':
 		dburl = (f"mysql+pymysql://{dbuser}:{dbpass}@{dbhost}/{dbname}?charset=utf8mb4")
 		return create_engine(dburl)
 	# return create_engine(dburl, pool_size=200, max_overflow=0)
 	if dbtype == 'postgresql':
 		# dburl = f"postgresql://postgres:foobar9999@{args.dbhost}/{args.dbname}"
-		dburl = (f"postgresql://{dbuser}:{dbpass}@{dbhost}/{dbname}")
+		dburl = (f"postgresql://{dbuser}:{dbpass}@{dbhost}/{dbname}?autocommit=True")
 		return create_engine(dburl)
 	if dbtype == 'sqlite':
 		return create_engine('sqlite:///gitrepo.db', echo=False, connect_args={'check_same_thread': False})
@@ -284,16 +284,21 @@ def get_dupes(session):
 		}
 		for dp in dupepaths:
 			# set dupe_flag on all folders with this repo
-			r = session.query(GitFolder).filter(GitFolder.id==dp.id).first()
-			r.dupe_flag = True
-			session.commit()
-			dpitem = {
-				'folderid': dp.id,
-				'git_path': dp.git_path,
-			}
-			dupeitem['folders'].append(dpitem)
-		# logger.info(f'[d] {dupeitem}')
-		dupes.append(dupeitem)
+			if dp:
+				r = session.query(GitFolder).filter(GitFolder.id==dp.id).first()
+				r.dupe_flag = True
+				session.commit()
+				dpitem = {
+					'folderid': dp.id,
+					'git_path': dp.git_path,
+					'parent_id:': dp.parent_id,
+				}
+				dupeitem['folders'].append(dpitem)
+				logger.info(f'[d] {dupeitem}')
+				dupes.append(dupeitem)
+			else:
+				logger.warning(f'[!] d={d} dp={dp}')
+
 		#[logger.debug(f'[d] {k[0].git_path}') for k in dupepaths]
 	logger.info(f'[dupes] found {len(dupes)} dupes')
 	return dupes
