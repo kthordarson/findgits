@@ -1,100 +1,84 @@
 #!/usr/bin/python3
-from run import MainApp
-import os, sys
-import time
 import argparse
 import json
-from pathlib import Path
-from loguru import logger
+import os
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from threading import Thread
+from pathlib import Path
 from queue import SimpleQueue as Queue
-from sqlalchemy import create_engine, text, MetaData
-from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError)
-from sqlalchemy.orm.exc import UnmappedInstanceError
+from threading import Thread
+
+from loguru import logger
+from sqlalchemy import MetaData, create_engine, text
+from sqlalchemy.exc import (ArgumentError, CompileError, DataError,
+                            IntegrityError, OperationalError, ProgrammingError)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from concurrent.futures import (ProcessPoolExecutor, as_completed)
-
-from dbstuff import GitRepo, GitFolder, send_to_db, get_engine, db_init, send_gitfolder_to_db, get_dupes
-from dbstuff import  get_folder_entries, get_repo_entries, get_parent_entries
-from dbstuff import MissingConfigException, GitParentPath
-from dbstuff import collect_repo, add_path, scanpath, listpaths, get_folder_list
+from dbstuff import (GitFolder, GitParentPath, GitRepo, MissingConfigException,
+                     add_path, collect_repo, db_init, dupe_view_init, get_dupes,
+                     get_engine, get_folder_entries, get_parent_entries,
+                     get_repo_entries, listpaths, scanpath)
 from utils import get_folder_list
 
-class FolderScanner(Thread):
-	def __init__(self):
-		Thread.__init__(self)
-		self.kill = False
-		self.queue = Queue()
-	def run(self):
-		while not self.kill:
-			if self.kill:
-				break
-			while not self.queue.empty():
-				item = self.queue.get()
 
-
-class Collector(Thread):
-	def __init__(self, gsp):
+class FolderCollector(Thread):
+	def __init__(self, gsp:GitParentPath):
 		Thread.__init__(self)
 		self.gsp = gsp
 		self.folders = []
-		self.gfl = []
 		self.kill = False
 
 	def __repr__(self):
-		return f'Collector({self.gsp}) folders:{len(self.folders)} gfl:{len(self.gfl)} kill:{self.kill}'
+		return f'FolderCollector({self.gsp}) f:{len(self.folders)} k:{self.kill}'
 
 	def run(self):
 		#self.folders = [) for
 		try:
-			self.gfl = [k for k in get_folder_list(self.gsp.folder)]
+			self.folders = [GitFolder(k, self.gsp) for k in get_folder_list(self.gsp.folder)]
 		except KeyboardInterrupt as e:
 			self.kill = True
 			self.join(timeout=1)
-		logger.debug(f'{self} run')
-		for g in self.gfl:
-			if self.kill:
-				break
-			self.folders.append(GitFolder(g, self.gsp))
 
-	#return [GitFolder(k, gsp) for k in get_folder_list(gsp.folder)]
+class RepoCollector(Thread):
+	def __init__(self, git_path, session:sessionmaker):
+		Thread.__init__(self)
+		self.git_path = git_path
+		self.kill = False
+		self.session = session
 
-def runscan(session):
-	# scan all paths in config/db
-	gsp_entries = get_parent_entries(session)
-	#gsp_entries = [config.get(k, 'path') for k in config.sections()]
-	collectors = []
-	gfl = []
-	for gsp in gsp_entries:
-		t = Collector(gsp)
-		collectors.append(t)
-		t.start()
-		logger.info(f'[t] {t} started')
-	logger.debug(f'[runscan] collectors={len(collectors)}')
-	for t in collectors:
+	def run(self):
 		try:
-			t.join()
-		except KeyboardInterrupt as e:
-			for t in collectors:
-				t.kill = True
-				t.join(timeout=0)
-				logger.debug(f'{t} killed')
-				_ = [collect_repo(t, session) for t in t.folders]
-			logger.warning(f'[runscan] {e} collectors={len(collectors)} gfl={len(gfl)}')
-			break
-		_ = [collect_repo(t, session) for t in t.folders]
-		#gfl.append(t.folders)
-		logger.debug(f'[runscan] {t} done gfl={len(gfl)}')
-	# gfl = [k.folders for k in collectors]
-	#for gf in gfl:
-#		collect_repo(gf, session)
-	repo_entries = get_repo_entries(session)
-	logger.debug(f'[runscan] collectors={len(collectors)} gfl={len(gfl)} repo_entries={len(repo_entries)}')
+			collect_repo(self.git_path, self.session)
+		except AttributeError as e:
+			logger.error(f'{self} {e} self.git_path {self.git_path} {type(self.git_path)}')
+			#self.join(timeout=1)
+		except Exception as e:
+			logger.error(f'{self} {e} self.git_path {self.git_path} {type(self.git_path)}')
+			#self.join(timeout=1)
+			# raise AttributeError(f'{self} {e} self.git_path {self.git_path} {type(self.git_path)}')
 
-def import_paths(pathfile, session):
+def runscan(session:sessionmaker):
+	parents = session.query(GitParentPath).all()
+	p_threads = []
+	g_threads = []
+	folderlist = []
+	for p in parents:
+		pfc = FolderCollector(p)
+		p_threads.append(pfc)
+		pfc.start()
+	for p in p_threads:
+		try:
+			p.join()
+		except Exception as e:
+			logger.error(f'[!] {e} {type(e)} in {p}')
+		rcs = [RepoCollector(k, session) for k in p.folders]
+		_ = [r.start() for r in rcs]
+		logger.debug(f'[runscan] {p} done {len(rcs)}')
+
+def import_paths(pathfile, session:sessionmaker):
 	# import paths from file
 	if not os.path.exists(pathfile):
 		logger.error(f'[importpaths] {pathfile} not found')
@@ -122,6 +106,7 @@ if __name__ == '__main__':
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
+
 	myparse = argparse.ArgumentParser(description="findgits", exit_on_error=False)
 	myparse.add_argument('--addpath', nargs='?', dest='addpath')
 	myparse.add_argument('--importpaths', nargs='?', dest='importpaths')
@@ -134,6 +119,7 @@ if __name__ == '__main__':
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 	if args.getdupes:
+		dupe_view_init(session)
 		dupe_repos = get_dupes(session)
 	if args.scanpath:
 		scanpath(args.scanpath, session)

@@ -61,7 +61,7 @@ def valid_git_folder(k):
 	return False
 
 def get_folder_list(startpath):
-	return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git')]
+	return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and os.path.exists(path+'/config')]
 	#return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and valid_git_folder(path)]
 
 def zget_folder_list(startpath):

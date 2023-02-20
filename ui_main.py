@@ -16,16 +16,15 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QCheckBox, QFormLayout,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
-    QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QCheckBox, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QPushButton,
+    QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
 
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
         if not FindGitsApp.objectName():
             FindGitsApp.setObjectName(u"FindGitsApp")
-        FindGitsApp.resize(1036, 464)
+        FindGitsApp.resize(1066, 464)
         self.actionactionone = QAction(FindGitsApp)
         self.actionactionone.setObjectName(u"actionactionone")
         self.actionactionone.setCheckable(True)
@@ -39,43 +38,6 @@ class Ui_FindGitsApp(object):
         self.treeWidget.setSizePolicy(sizePolicy)
         self.treeWidget.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.treeWidget.setSortingEnabled(True)
-        self.formLayoutWidget = QWidget(FindGitsApp)
-        self.formLayoutWidget.setObjectName(u"formLayoutWidget")
-        self.formLayoutWidget.setGeometry(QRect(510, 20, 511, 99))
-        self.formLayout = QFormLayout(self.formLayoutWidget)
-        self.formLayout.setObjectName(u"formLayout")
-        self.formLayout.setContentsMargins(5, 0, 0, 0)
-        self.foobarLabel = QLabel(self.formLayoutWidget)
-        self.foobarLabel.setObjectName(u"foobarLabel")
-
-        self.formLayout.setWidget(3, QFormLayout.LabelRole, self.foobarLabel)
-
-        self.urlLineEdit = QLineEdit(self.formLayoutWidget)
-        self.urlLineEdit.setObjectName(u"urlLineEdit")
-        self.urlLineEdit.setReadOnly(True)
-
-        self.formLayout.setWidget(3, QFormLayout.FieldRole, self.urlLineEdit)
-
-        self.idLabel = QLabel(self.formLayoutWidget)
-        self.idLabel.setObjectName(u"idLabel")
-
-        self.formLayout.setWidget(1, QFormLayout.LabelRole, self.idLabel)
-
-        self.idLineEdit = QLineEdit(self.formLayoutWidget)
-        self.idLineEdit.setObjectName(u"idLineEdit")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(self.idLineEdit.sizePolicy().hasHeightForWidth())
-        self.idLineEdit.setSizePolicy(sizePolicy1)
-        self.idLineEdit.setMaximumSize(QSize(64, 16777215))
-        self.idLineEdit.setBaseSize(QSize(33, 0))
-        self.idLineEdit.setMaxLength(4)
-        self.idLineEdit.setAlignment(Qt.AlignCenter)
-        self.idLineEdit.setReadOnly(True)
-
-        self.formLayout.setWidget(1, QFormLayout.FieldRole, self.idLineEdit)
-
         self.layoutWidget = QWidget(FindGitsApp)
         self.layoutWidget.setObjectName(u"layoutWidget")
         self.layoutWidget.setGeometry(QRect(10, 420, 491, 29))
@@ -111,9 +73,39 @@ class Ui_FindGitsApp(object):
 
         self.horizontalLayout.addWidget(self.pushButton_5)
 
-        self.checkBox_showdupes = QCheckBox(FindGitsApp)
-        self.checkBox_showdupes.setObjectName(u"checkBox_showdupes")
-        self.checkBox_showdupes.setGeometry(QRect(510, 420, 121, 25))
+        self.checkBox_filterdupes = QCheckBox(FindGitsApp)
+        self.checkBox_filterdupes.setObjectName(u"checkBox_filterdupes")
+        self.checkBox_filterdupes.setGeometry(QRect(510, 420, 121, 25))
+        self.dupetree = QTreeWidget(FindGitsApp)
+        self.dupetree.setObjectName(u"dupetree")
+        self.dupetree.setGeometry(QRect(530, 130, 461, 251))
+        self.dupetree.setAutoExpandDelay(0)
+        self.dupecountlabel = QLabel(FindGitsApp)
+        self.dupecountlabel.setObjectName(u"dupecountlabel")
+        self.dupecountlabel.setGeometry(QRect(630, 30, 121, 19))
+        self.foobarLabel = QLabel(FindGitsApp)
+        self.foobarLabel.setObjectName(u"foobarLabel")
+        self.foobarLabel.setGeometry(QRect(525, 63, 20, 19))
+        self.idLineEdit = QLineEdit(FindGitsApp)
+        self.idLineEdit.setObjectName(u"idLineEdit")
+        self.idLineEdit.setGeometry(QRect(551, 30, 64, 27))
+        sizePolicy1 = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        sizePolicy1.setHorizontalStretch(0)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.idLineEdit.sizePolicy().hasHeightForWidth())
+        self.idLineEdit.setSizePolicy(sizePolicy1)
+        self.idLineEdit.setMaximumSize(QSize(64, 16777215))
+        self.idLineEdit.setBaseSize(QSize(33, 0))
+        self.idLineEdit.setMaxLength(4)
+        self.idLineEdit.setAlignment(Qt.AlignCenter)
+        self.idLineEdit.setReadOnly(True)
+        self.idLabel = QLabel(FindGitsApp)
+        self.idLabel.setObjectName(u"idLabel")
+        self.idLabel.setGeometry(QRect(525, 30, 16, 19))
+        self.urlLineEdit = QLineEdit(FindGitsApp)
+        self.urlLineEdit.setObjectName(u"urlLineEdit")
+        self.urlLineEdit.setGeometry(QRect(551, 63, 441, 27))
+        self.urlLineEdit.setReadOnly(True)
 
         self.retranslateUi(FindGitsApp)
 
@@ -129,13 +121,16 @@ class Ui_FindGitsApp(object):
         ___qtreewidgetitem = self.treeWidget.headerItem()
         ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"path", None));
         ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None));
-        self.foobarLabel.setText(QCoreApplication.translate("FindGitsApp", u"url", None))
-        self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
         self.folderButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
         self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Dupes", None))
         self.searchpaths_button.setText(QCoreApplication.translate("FindGitsApp", u"Searchpaths", None))
         self.runscan_button.setText(QCoreApplication.translate("FindGitsApp", u"Run scan", None))
         self.pushButton_5.setText(QCoreApplication.translate("FindGitsApp", u"btn-four", None))
-        self.checkBox_showdupes.setText(QCoreApplication.translate("FindGitsApp", u"Filter dupes", None))
+        self.checkBox_filterdupes.setText(QCoreApplication.translate("FindGitsApp", u"Filter dupes", None))
+        ___qtreewidgetitem1 = self.dupetree.headerItem()
+        ___qtreewidgetitem1.setText(0, QCoreApplication.translate("FindGitsApp", u"Path", None));
+        self.dupecountlabel.setText(QCoreApplication.translate("FindGitsApp", u"Dupes:", None))
+        self.foobarLabel.setText(QCoreApplication.translate("FindGitsApp", u"url", None))
+        self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
     # retranslateUi
 
