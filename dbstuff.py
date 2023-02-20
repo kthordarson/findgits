@@ -34,6 +34,7 @@ class GitParentPath(Base):
 	__tablename__ = 'gitparentpath'
 	id: Mapped[int] = mapped_column(primary_key=True)
 	folder = Column('folder', String(255))
+	gitfolders: Mapped[List['GitFolder']] = relationship()
 
 	def __init__(self, folder):
 		self.folder = folder
@@ -45,9 +46,10 @@ class GitFolder(Base):
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
-	parent_id = Column('parent_id', BigInteger)
-	parent_path = Column('patent_path', String(255))
 	git_path = Column('git_path', String(255))
+	parent_id: Mapped[int] = mapped_column(ForeignKey('gitparentpath.id'))
+	#parent_id = Column('parent_id', BigInteger)
+	#parent_path = Column('patent_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 
@@ -81,7 +83,7 @@ class GitFolder(Base):
 		self.get_stats()
 
 	def __repr__(self):
-		return f'GitFolder id={self.id} {self.git_path}'
+		return f'GitFolder {self.git_path}'
 
 	def get_repo(self):
 		return GitRepo(self)
@@ -113,9 +115,9 @@ class GitFolder(Base):
 class GitRepo(Base):
 	__tablename__ = 'gitrepo'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	folderid = Column('folderid', BigInteger)
-	parentid = Column('parentid', BigInteger)
-	git_path = Column('git_path', String(255))
+	gitfolder_id: Mapped[int] = mapped_column(ForeignKey('gitfolder.id'))
+	parent_id: Mapped[int] = mapped_column(ForeignKey('gitparentpath.id'))
+	#parentid = Column('parentid', BigInteger)
 	giturl = Column('giturl', String(255))
 	remote = Column('remote', String(255))
 	branch = Column('branch', String(255))
@@ -125,9 +127,8 @@ class GitRepo(Base):
 	# gitfolder = relationship("GitFolder", back_populates="gitrepo")
 
 	def __init__(self,  gitfolder:GitFolder):
-		self.folderid = gitfolder.id
-		self.parentid = gitfolder.parent_id
-		self.git_path = str(gitfolder.git_path)
+		self.gitfolder_id = gitfolder.id
+		self.parent_id = gitfolder.parent_id
 		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
 		self.conf = ConfigParser(strict=False)
 		try:
@@ -137,7 +138,7 @@ class GitRepo(Base):
 			raise e
 
 	def __repr__(self):
-		return f'GitRepo id={self.id} folderid={self.folderid} {self.giturl} {self.remote} {self.branch}'
+		return f'GitRepo id={self.id} gitfolder_id={self.gitfolder_id} {self.giturl} {self.remote} {self.branch}'
 
 	def refresh(self):
 		pass
@@ -170,11 +171,6 @@ class GitRepo(Base):
 			if not self.giturl:
 				raise MissingConfigException(f'[!] {self} giturl is empty self.git_config_file={self.git_config_file}')
 
-	def get_git_remote_cmd(self):
-		os.chdir(self.git_path)
-		status = subprocess.run(['git', 'remote', '-v',], capture_output=True)
-		if status.stdout != b'':
-			statusstdout = status.stdout.decode('utf-8').split('\n')
 
 def db_init(engine):
 	Base.metadata.create_all(bind=engine)
@@ -215,10 +211,10 @@ def dupe_view_init(session):
 	drop_sql = text('DROP VIEW if exists nodupes;')
 	session.execute(drop_sql)
 
-	create_sql = text('CREATE VIEW dupeview as select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
+	create_sql = text('CREATE VIEW dupeview as select id,gitfolder_id,giturl,count(*) as count from gitrepo group by giturl having count>1;')
 	session.execute(create_sql)
 
-	create_sql = text('CREATE VIEW nodupes as select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count=1;')
+	create_sql = text('CREATE VIEW nodupes as select id,gitfolder_id,giturl,count(*) as count from gitrepo group by giturl having count=1;')
 	session.execute(create_sql)
 	logger.info(f'[dupe] dupeview and nodupes created')
 
@@ -232,7 +228,7 @@ def dupe_view_init(session):
 		g.dupe_flag = False
 		g.dupe_count = 0
 
-		f = session.query(GitFolder).filter(GitFolder.id==d.folderid).first()
+		f = session.query(GitFolder).filter(GitFolder.id==d.gitfolder_id).first()
 		f.dupe_flag = False
 		# set dupe_flag on all folders with this giturl
 	session.commit()
@@ -248,7 +244,7 @@ def dupe_view_init(session):
 		g.dupe_flag = True
 		# set dupe_flag on all repos with this giturl
 		# todo fix this
-		gf = session.query(GitFolder).filter(GitFolder.id==d.folderid).all()
+		gf = session.query(GitFolder).filter(GitFolder.id==d.gitfolder_id).all()
 
 		for f in gf:
 			f.dupe_flag = True
@@ -267,12 +263,12 @@ def get_dupes(session):
 
 def get_dupesx(session):
 	# return list of repos with multiple entries
-	sql = text('select id,folderid,giturl,count(*) as count from gitrepo group by giturl having count>1;')
+	sql = text('select id,gitfolder_id,giturl,count(*) as count from gitrepo group by giturl having count>1;')
 	dupes_ = [k._asdict() for k in session.execute(sql).fetchall()]
 	dupes = []
 	for d in dupes_:
 		# find all repos with this giturl
-		sql_d = text(f"""select id,folderid,giturl from gitrepo where giturl="{d.get('giturl')}" """)
+		sql_d = text(f"""select id,gitfolder_id,giturl from gitrepo where giturl="{d.get('giturl')}" """)
 		repo_dupes = [r._asdict() for r in session.execute(sql_d).fetchall()]
 		logger.info(f'[dupe] {d.get("giturl")} dupes={len(repo_dupes)}')
 		# set dupe_flag on all repos with this giturl
@@ -282,7 +278,7 @@ def get_dupesx(session):
 			session.commit()
 
 		# find all folders with this repo
-		dupepaths = [session.query(GitFolder).filter(GitFolder.id==k.get('folderid')).first() for k in repo_dupes]
+		dupepaths = [session.query(GitFolder).filter(GitFolder.id==k.get('gitfolder_id')).first() for k in repo_dupes]
 		# logger.debug(f'[d] {d.get("giturl")} {d.get("count")}')
 		dupeitem = {
 			'gitid': d.get('id'),
@@ -297,7 +293,7 @@ def get_dupesx(session):
 				r.dupe_flag = True
 				session.commit()
 				dpitem = {
-					'folderid': dp.id,
+					'gitfolder_id': dp.id,
 					'git_path': dp.git_path,
 					'parent_id:': dp.parent_id,
 				}
@@ -359,14 +355,16 @@ def collect_repo(gf:GitFolder, session):
 		return None
 	try:
 		repo_q = session.query(GitRepo).filter(GitRepo.giturl == str(gr.giturl)).first()
-	except Exception as e:
-		logger.error(f'[cgr] {e} {type(e)} gf={gf} gr={gr}]')
-		return None
+	except AttributeError as e:
+		# logger.error(f'[cgr] {e} {type(e)} gf={gf} gr={gr}]')
+		repo_q = None
+		# return None
 	try:
 		folder_q = session.query(GitRepo).filter(GitRepo.git_path == str(gr.git_path)).first()
-	except Exception as e:
-		logger.error(f'[cgr] {e} {type(e)} gf={gf} gr={gr}]')
-		return None
+	except AttributeError as e:
+		# logger.error(f'[cgr] {e} {type(e)} gf={gf} gr={gr}]')
+		folder_q = None
+		# return None
 	if repo_q and folder_q:
 		# todo: check if repo exists in other folder somewhere...
 		pass
@@ -389,8 +387,11 @@ def listpaths(session, dump=False):
 	if not dump:
 		for gsp in gsp_entries:
 			sql = text(f"SELECT COUNT(*) as count FROM gitfolder WHERE gitfolder.parent_id = {gsp.id}")
-			res = session.execute(sql).fetchone()._asdict()
-			logger.info(f'[gsp] {gsp} folders={res.get("count")}')
+			try:
+				res = session.execute(sql).fetchone()._asdict()
+				logger.info(f'[gsp] {gsp} folders={res.get("count")}')
+			except OperationalError as e:
+				logger.error(f'[gsp] {e} gsp={gsp}')
 	else:
 		for gsp in gsp_entries:
 			print(f'{gsp.folder}')
@@ -427,6 +428,11 @@ def scanpath(scanpath, session):
 		session.commit()
 	except DataError as e:
 		logger.error(f'[scanpath] dataerror {e} scanpath={scanpath} gsp={gsp}')
+		session.rollback()
+		raise TypeError(f'[scanpath] {e} {type(e)} scanpath={scanpath} gsp={gsp}')
+	except IntegrityError as e:
+		logger.error(f'[scanpath] IntegrityError {e} scanpath={scanpath} gsp={gsp}')
+		session.rollback()
 		raise TypeError(f'[scanpath] {e} {type(e)} scanpath={scanpath} gsp={gsp}')
 	#collect_git_folders(gitfolders, session)
 	folder_entries = get_folder_entries(session, gsp.id)

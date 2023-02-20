@@ -56,7 +56,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
             try:
                 for f in d.get('folders'):
                     item1 = QTreeWidgetItem(item0)
-                    item1.setText(0, f"{f.get('folderid')}")
+                    item1.setText(0, f"{f.get('gitfolder_id')}")
                     item1.setText(2, f"{f.get('git_path')}")
             except TypeError as e:
                 logger.error(e)
@@ -72,7 +72,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.urlLineEdit.setText(f'{repo.giturl}')
         self.dupecountlabel.setText(f'Dupes: {repo.dupe_count}')
         itemdupes = self.session.query(GitRepo).filter(GitRepo.giturl == repo.giturl).all()
-        folderdupes = [session.query(GitFolder).filter(GitFolder.id == d.folderid).first() for d in itemdupes]
+        folderdupes = [session.query(GitFolder).filter(GitFolder.id == d.gitfolder_id).first() for d in itemdupes]
         self.dupetree.clear()
         for f in folderdupes:
             item1 = QTreeWidgetItem(self.dupetree)
