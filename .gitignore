@@ -12,3 +12,4 @@ runtest.sh
 gitrepo.db-journal
 *.tmp
 *.txt
+*.db
