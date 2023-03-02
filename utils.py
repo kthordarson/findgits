@@ -60,16 +60,6 @@ def valid_git_folder(k):
 		logger.warning(f'{k} {type(k)} not valid ')
 	return False
 
-def get_folder_list(startpath):
-	t0 = datetime.now()
-	cmdstr = ['find', startpath+'/', '-type','d', '-name', '.git']
-	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
-	g_out = out.decode('utf8').split('\n')
-	if err != b'':
-		logger.warning(f'[get_folder_list] {cmdstr} {err}')
-	res = [k for k in g_out if os.path.exists(k + '/config')]
-	logger.debug(f'[get_folder_list] {datetime.now() - t0} {cmdstr} {len(g_out)} {len(out)} res = {len(res)}')
-	return res
 
 def xxget_folder_list(startpath):
 	return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and os.path.exists(path+'/config')]

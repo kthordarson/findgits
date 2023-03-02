@@ -4,7 +4,7 @@ import os, sys
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from dbstuff import GitRepo, GitFolder, GitParentPath, get_engine, get_dupes
-from utils import get_folder_list
+from dbstuff import get_folder_list
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,

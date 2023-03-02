@@ -10,8 +10,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from queue import SimpleQueue as Queue
 from threading import Thread
+from multiprocessing import cpu_count
 
 from loguru import logger
+from sqlalchemy import Engine
 from sqlalchemy import MetaData, create_engine, text
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError,
                             IntegrityError, OperationalError, ProgrammingError, InvalidRequestError)
@@ -22,7 +24,10 @@ from dbstuff import (GitFolder, GitParentPath, GitRepo, MissingConfigException,
                      add_path, collect_repo, db_init, dupe_view_init, get_dupes,
                      get_engine, get_folder_entries, get_parent_entries,
                      get_repo_entries, listpaths, scanpath, scanpath_thread, show_dbinfo)
-from utils import get_folder_list
+from dbstuff import get_folder_list, drop_database
+
+
+CPU_COUNT = cpu_count()
 
 
 class FolderCollector(Thread):
@@ -44,7 +49,7 @@ class FolderCollector(Thread):
 			self.join(timeout=1)
 
 class RepoCollector(Thread):
-	def __init__(self, git_path, engine):
+	def __init__(self, git_path, engine:Engine):
 		Thread.__init__(self)
 		self.git_path = git_path
 		self.kill = False
@@ -83,20 +88,91 @@ class RepoCollector(Thread):
 			#self.join(timeout=1)
 			# raise AttributeError(f'{self} {e} self.git_path {self.git_path} ')
 
+def repocollectionthread(git_folder:str, gsp:GitParentPath, session):
+	git_folder = GitFolder(git_folder, gsp)
+	session.add(git_folder)
+	session.commit()
+	git_repo = GitRepo(git_folder)
+	session.add(git_repo)
+	session.commit
+
 def runscan(dbmode):
+	t0 = datetime.now()
 	engine = get_engine(dbtype=dbmode)
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	gsp = session.query(GitParentPath).all()
+	gitfolders = []
+	tasks = []
+	gfl = []
+	logger.info(f'[runscan] {datetime.now()-t0} CPU_COUNT={CPU_COUNT} gsp={len(gsp)}')
+	folder_entries = []
 	tasks = []
 	results = []
-	with ProcessPoolExecutor(max_workers=4) as executor:
-		for g in gsp:
+	collector_threads = []
+	with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+		for git_parentpath in gsp:
+			logger.debug(f'[runscan] {datetime.now()-t0} scanning {git_parentpath} threads {len(tasks)} gsp={len(gsp)}')
+			tasks.append(executor.submit(get_folder_list, git_parentpath))
+		for res in as_completed(tasks):
+			r = res.result()
+			#gfl.append(r['res'])
+			for gf in r['res']:
+				git_folder = GitFolder(gf, r["gitparent"])
+				session.add(git_folder)
+				session.commit()
+				git_repo = GitRepo(git_folder)
+				session.add(git_repo)
+				session.commit
+			logger.debug(f'[runscan] {len(r["res"])} gitfolders from {r["gitparent"]} ')
+	return results
+
+def xxxrunscan(dbmode):
+	t0 = datetime.now()
+	engine = get_engine(dbtype=dbmode)
+	Session = sessionmaker(bind=engine)
+	session = Session()
+	gsp = session.query(GitParentPath).all()
+	gitfolders = []
+	tasks = []
+	gfl = []
+	logger.info(f'[runscan] {datetime.now()-t0} CPU_COUNT={CPU_COUNT} gsp={len(gsp)}')
+	folder_entries = []
+	tasks = []
+	results = []
+	with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+		for git_f in gsp:
+			tasks.append(executor.submit(get_folder_list, git_f))
+		logger.debug(f'[runscan] {datetime.now()-t0} gfl threads {len(tasks)} gsp={len(gsp)}')
+		for res in as_completed(tasks):
+			r = res.result()
+			#gfl.append(r['res'])
+			for gf in r['res']:
+				session.add(GitFolder(gf, git_f))
+			session.commit()
+			logger.debug(f'[runscan] {datetime.now()-t0} gfl {len(r["res"])}')
+
+		for git_pp in session.query(GitParentPath).all():
+			gfe = [k for k in session.query(GitFolder).filter(GitFolder.parent_id == git_pp.id).all()]
+			folder_entries.append(gfe)
+		logger.debug(f'[runscan] {datetime.now()-t0} gfe {len(folder_entries)} ')
+	threadend = datetime.now()
+
+	tasks = []
+	results = []
+
+	tasks = []
+	with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+		gfe = [k for k in session.query(GitFolder).all()]
+		for g in gfe:
 			tasks.append(executor.submit(scanpath_thread, g, dbmode))
-	for res in as_completed(tasks):
-		r = res.result()
-		results.append(r)
-		logger.debug(f'[runscan] r={r} results={len(results)}')
+		logger.debug(f'[runscan] {datetime.now()-t0} spt {len(tasks)}')
+		for res in as_completed(tasks):
+			r = res.result()
+			results.append(r)
+		logger.debug(f'[runscan] {datetime.now()-t0} results={len(results)}')
+	logger.info(f'[runscan] {datetime.now()-t0} ')
+
 	return results
 
 	# scan a single path, scanpath is an int corresponding to id of GitParentPath to scan
@@ -107,7 +183,7 @@ def runscan(dbmode):
 	# 	logger.debug(f'[runscan] starting {t}')
 	# 	t.run()
 
-def old_runscan(engine):
+def old_runscan(engine:Engine):
 	#engine = get_engine(dbtype=dbmode)
 	Session = sessionmaker(bind=engine)
 	session = Session()
@@ -164,9 +240,11 @@ if __name__ == '__main__':
 	myparse.add_argument('--dumppaths', action='store_true', default=False, dest='dumppaths')
 	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
 	myparse.add_argument('--scanpath', nargs='?', help='run scan on path, specify pathid', action='store', dest='scanpath')
+	myparse.add_argument('--scanpath_threads', nargs='?', help='run scan on path, specify pathid. threadmode.', action='store', dest='scanpath_threads')
 	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', default='sqlite', dest='dbmode')
+	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 
@@ -174,7 +252,9 @@ if __name__ == '__main__':
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
-
+	logger.info(f'[main] dbmode={args.dbmode} bind={session.bind} {session.bind.driver}')
+	if args.dropdatabase:
+		drop_database(engine)
 	if args.dbinfo:
 		# show db info
 		show_dbinfo(session)
@@ -182,12 +262,39 @@ if __name__ == '__main__':
 		dupe_view_init(session)
 		dupe_repos = get_dupes(session)
 	if args.scanpath:
-		scanpath(args.scanpath, args.dbmode)
+		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
+		# entries = get_folder_list(gsp)
+		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
+		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
+		scanpath(gsp, args.dbmode)
+		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
+		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)} after scan={len(entries_afterscan)}')
+	if args.scanpath_threads:
+		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath_threads).first()
+		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
+		logger.info(f'[scanpath_threads] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
+		gfl = get_folder_list(gsp)
+		tasks = []
+		with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+			for g_ in gfl:
+				g = gfl[g]['gfl']
+				gitfolder = GitFolder(g, gsp)
+				session.add(gitfolder)
+				session.commit()
+				tasks.append(executor.submit(scanpath_thread, gitfolder, args.dbmode))
+
+			#scanpath_thread(gitfolder, args.dbmode)
+		# gsp = session.query(GitParentPath).all()
+		#print(gfl)
+		#for gf in gfl['gf']:
+			#print(gf)
+		#scanpath_thread(GitFolder(gfl['gf'], gsp), args.dbmode)
 	if args.runscan:
-		foobar = runscan(args.dbmode)
-		logger.info(f'[*] runscan done {foobar} {type(foobar)}')
+		scan_results = runscan(args.dbmode)
+		logger.info(f'[*] runscan done {len(scan_results)} ')
 	if args.listpaths:
-		listpaths(session, args.dumppaths)
+		p = listpaths(session, args.dumppaths)
+		print(p)
 	if args.addpath:
 		new_gsp = add_path(args.addpath, session)
 		logger.debug(f'[*] new path: {new_gsp}')
