@@ -108,23 +108,32 @@ def runscan(dbmode):
 	logger.info(f'[runscan] {datetime.now()-t0} CPU_COUNT={CPU_COUNT} gsp={len(gsp)}')
 	folder_entries = []
 	tasks = []
-	results = []
 	collector_threads = []
 	with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
 		for git_parentpath in gsp:
-			logger.debug(f'[runscan] {datetime.now()-t0} scanning {git_parentpath} threads {len(tasks)} gsp={len(gsp)}')
 			tasks.append(executor.submit(get_folder_list, git_parentpath))
+		logger.debug(f'[runscan] {datetime.now()-t0} get_folder_list threads {len(tasks)} ')
 		for res in as_completed(tasks):
 			r = res.result()
 			#gfl.append(r['res'])
+			logger.info(f'[runscan] {datetime.now()-t0} {len(r["res"])} gitfolders from {r["gitparent"]} ')
+			cnt = 0
 			for gf in r['res']:
-				git_folder = GitFolder(gf, r["gitparent"])
-				session.add(git_folder)
-				session.commit()
-				git_repo = GitRepo(git_folder)
-				session.add(git_repo)
-				session.commit
-			logger.debug(f'[runscan] {len(r["res"])} gitfolders from {r["gitparent"]} ')
+				folder_check = session.query(GitFolder).filter(GitFolder.git_path == str(gf)).all()
+				if len(folder_check) == 0:
+					git_folder = GitFolder(gf, r["gitparent"])
+					session.add(git_folder)
+					session.commit()
+					git_repo = GitRepo(git_folder)
+					session.add(git_repo)
+					session.commit
+					cnt += 1
+			logger.info(f'[runscan] {datetime.now()-t0} {len(r["res"])} gitfolders from {r["gitparent"]} entries {cnt} ')
+
+	gsp = session.query(GitParentPath).all()
+	repos = session.query(GitRepo).all()
+	folders = session.query(GitFolder).all()
+	results = {'gsp':len(gsp), 'repos':len(repos), 'folders':len(folders)}
 	return results
 
 def xxxrunscan(dbmode):
@@ -291,7 +300,7 @@ if __name__ == '__main__':
 		#scanpath_thread(GitFolder(gfl['gf'], gsp), args.dbmode)
 	if args.runscan:
 		scan_results = runscan(args.dbmode)
-		logger.info(f'[*] runscan done {len(scan_results)} ')
+		logger.info(f'[*] runscan done res={scan_results} ')
 	if args.listpaths:
 		p = listpaths(session, args.dumppaths)
 		print(p)

@@ -196,10 +196,6 @@ def get_folder_entries(session:sessionmaker, parent_item:GitParentPath):
 def get_repo_entries(session:sessionmaker):
 	return session.query(GitRepo).all()
 
-def get_parent_entries(session:sessionmaker):
-	gpf = session.query(GitParentPath).all()
-	return [k  for k in gpf if os.path.exists(k.folder)]
-
 
 def get_engine(dbtype:str) -> Engine:
 	dbuser = os.getenv('gitdbUSER')
@@ -370,35 +366,38 @@ def collect_repo(gf:GitFolder, session):
 			raise Exception(errmsg)
 	return 'done'
 
+def get_parent_entries(session:sessionmaker):
+	gpf = session.query(GitParentPath).all()
+	return [k  for k in gpf if os.path.exists(k.folder)]
+
+
 
 def listpaths(session, dump=False):
 	gsp_entries = get_parent_entries(session)
 	return gsp_entries
 
 
-def add_path(path, session):
+def add_path(newpath:str, session:sessionmaker):
 	# add new path to config  db
 	# returns gsp object
-	gsp = None
-	if not os.path.exists(path):
-		logger.error(f'[addpath] {path} not found')
+	if newpath.endswith('/'):
+		newpath = newpath[:-1]
+	if not os.path.exists(newpath):
+		logger.error(f'[addpath] {newpath} not found')
 		return None
 
 	# check db entries for invalid paths and remove
-	gsp_entries = get_parent_entries(session)
-	_ = [session.delete(k) for k in gsp_entries if not os.path.exists(k.folder)]
-	session.commit()
+	# gsp_entries = get_parent_entries(session)
+	path_check = None
+	path_check = session.query(GitParentPath).filter(GitParentPath.folder == newpath).all()
 
-	if path.endswith('/'):
-		path = path[:-1]
-	if path not in gsp_entries:
-		gsp = GitParentPath(path)
+	if len(path_check) == 0:
+		gsp = GitParentPath(newpath)
 		session.add(gsp)
 		session.commit()
-		logger.debug(f'[add_path] path={path} gsp={gsp} to {gsp_entries}')
-		listpaths(session)
+		logger.debug(f'[add_path] adding {gsp} to db')
 	else:
-		logger.warning(f'[add_path] path={path} already in config')
+		logger.warning(f'[add_path] path={newpath} already in config')
 	return gsp
 
 def scanpath_thread(gf:GitFolder, argsdbmode:str):
