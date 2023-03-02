@@ -37,9 +37,13 @@ class GitParentPath(Base):
 	id: Mapped[int] = mapped_column(primary_key=True)
 	folder = Column('folder', String(255))
 	gitfolders: Mapped[List['GitFolder']] = relationship()
+	first_scan = Column('first_scan', DateTime)
+	last_scan = Column('last_scan', DateTime)
+	scan_time = Column('last_scan', BigInteger)
 
 	def __init__(self, folder):
 		self.folder = folder
+		self.first_scan = datetime.now()
 
 	def __repr__(self):
 		return f'GSP id={self.id} {self.folder}'
@@ -56,6 +60,7 @@ class GitFolder(Base):
 	#parent_path = Column('patent_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
+	scan_time = Column('last_scan', BigInteger)
 
 	folder_size = Column('folder_size', BigInteger)
 	file_count = Column('file_count', BigInteger)
@@ -132,6 +137,9 @@ class GitRepo(Base):
 	branch = Column('branch', String(255))
 	dupe_flag = Column('dupe_flag', Boolean)
 	dupe_count = Column('dupe_count', BigInteger)
+	first_scan = Column('first_scan', DateTime)
+	last_scan = Column('last_scan', DateTime)
+	scan_time = Column('last_scan', BigInteger)
 	#git_path: Mapped[List["GitFolder"]] = relationship()
 	#gitfolder = relationship("GitFolder", backref="git_path")
 
@@ -141,6 +149,7 @@ class GitRepo(Base):
 		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
 		self.git_path = gitfolder.git_path
 		self.conf = ConfigParser(strict=False)
+		self.first_scan = datetime.now()
 		try:
 			self.read_git_config()
 		except MissingConfigException as e:
@@ -186,8 +195,6 @@ class GitRepo(Base):
 def db_init(engine):
 	Base.metadata.create_all(bind=engine)
 
-
-
 def get_folder_entries(session:sessionmaker, parent_item:GitParentPath):
 	parentid = parent_item.id
 	gfe = [k for k in session.query(GitFolder).filter(GitFolder.parent_id == parentid).all()]
@@ -195,7 +202,6 @@ def get_folder_entries(session:sessionmaker, parent_item:GitParentPath):
 
 def get_repo_entries(session:sessionmaker):
 	return session.query(GitRepo).all()
-
 
 def get_engine(dbtype:str) -> Engine:
 	dbuser = os.getenv('gitdbUSER')
@@ -366,16 +372,9 @@ def collect_repo(gf:GitFolder, session):
 			raise Exception(errmsg)
 	return 'done'
 
-def get_parent_entries(session:sessionmaker):
+def get_parent_entries(session:sessionmaker) -> list:
 	gpf = session.query(GitParentPath).all()
 	return [k  for k in gpf if os.path.exists(k.folder)]
-
-
-
-def listpaths(session, dump=False):
-	gsp_entries = get_parent_entries(session)
-	return gsp_entries
-
 
 def add_path(newpath:str, session:sessionmaker):
 	# add new path to config  db
@@ -467,9 +466,9 @@ def show_dbinfo(session):
 	# sqlite3 gitrepo1.db 'select (select count(*) from gitparentpath) as gpc, (select count(*) from gitfolder) as gfc, (select count(*) from gitrepo) as grc ' -table
 	parent_folders = session.query(GitParentPath).all()
 	for gpf in parent_folders:
-		git_folders = session.query(GitFolder).filter(GitFolder.parent_id == gpf.id).all()
-		git_repos = session.query(GitRepo).filter(GitRepo.parent_id == gpf.id).all()
-		logger.info(f'[dbinfo] gpf={gpf} git_folders={len(git_folders)} git_repos={len(git_repos)}')
+		git_folders = session.query(GitFolder).filter(GitFolder.parent_id == gpf.id).count()
+		git_repos = session.query(GitRepo).filter(GitRepo.parent_id == gpf.id).count()
+		logger.info(f'[dbinfo] gpf={gpf} git_folders={git_folders} git_repos={git_repos}')
 		# git_repos = session.query(GitRepo).all()
 		# dupe_v = session.query()
 		# sql = text('select * from dupeview;')

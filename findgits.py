@@ -23,7 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from dbstuff import (GitFolder, GitParentPath, GitRepo, MissingConfigException,
                      add_path, collect_repo, db_init, dupe_view_init, get_dupes,
                      get_engine, get_folder_entries, get_parent_entries,
-                     get_repo_entries, listpaths, scanpath, scanpath_thread, show_dbinfo)
+                     get_repo_entries, scanpath, scanpath_thread, show_dbinfo)
 from dbstuff import get_folder_list, drop_database
 
 
@@ -242,21 +242,18 @@ def dbdump(backupfile, engine):
 if __name__ == '__main__':
 
 	myparse = argparse.ArgumentParser(description="findgits")
-	myparse.add_argument('--addpath', nargs='?', dest='addpath')
-	myparse.add_argument('--importpaths', nargs='?', dest='importpaths')
-	myparse.add_argument('--dbdump', nargs='?', dest='dbdump')
-	myparse.add_argument('--listpaths', action='store_true', default=False, dest='listpaths')
-	myparse.add_argument('--dumppaths', action='store_true', default=False, dest='dumppaths')
-	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
-	myparse.add_argument('--scanpath', nargs='?', help='run scan on path, specify pathid', action='store', dest='scanpath')
-	myparse.add_argument('--scanpath_threads', nargs='?', help='run scan on path, specify pathid. threadmode.', action='store', dest='scanpath_threads')
-	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
+	myparse.add_argument('--addpath', dest='addpath')
+	myparse.add_argument('--importpaths', dest='importpaths')
+	myparse.add_argument('--listpaths', action='store', default='all', help='list paths in db, specify "all" or id', dest='listpaths', metavar='krem')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
-	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', default='sqlite', dest='dbmode')
-	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase')
+	myparse.add_argument('--runscan', action='store_true', default=False, dest='runscan')
+	myparse.add_argument('--scanpath', help='run scan on path, specify pathid', action='store', dest='scanpath')
+	myparse.add_argument('--scanpath_threads', help='run scan on path, specify pathid. threadmode.', action='store', dest='scanpath_threads')
+	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
+	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', required=True, action='store', metavar='dbmode')
+	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
-
 	engine = get_engine(dbtype=args.dbmode)
 	Session = sessionmaker(bind=engine)
 	session = Session()
@@ -301,9 +298,17 @@ if __name__ == '__main__':
 	if args.runscan:
 		scan_results = runscan(args.dbmode)
 		logger.info(f'[*] runscan done res={scan_results} ')
+
 	if args.listpaths:
-		p = listpaths(session, args.dumppaths)
-		print(p)
+		if args.listpaths == 'all':
+			git_parent_entries = get_parent_entries(session)
+		else:
+			git_parent_entries = session.query(GitParentPath).filter(GitParentPath.id == str(args.listpaths)).all()
+		for gpe in git_parent_entries:
+			fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
+			rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
+			print(f'[*] {gpe.id} {gpe.folder} {fc} {rc}')
+
 	if args.addpath:
 		new_gsp = add_path(args.addpath, session)
 		logger.debug(f'[*] new path: {new_gsp}')
@@ -311,6 +316,3 @@ if __name__ == '__main__':
 	if args.importpaths:
 		# read paths from text file and import
 		import_paths(args.importpaths, session)
-	if args.dbdump:
-		# dump database to file
-		dbdump(args.dbdump, engine)
