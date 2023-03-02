@@ -127,9 +127,10 @@ def runscan(dbmode):
 			ups = 0
 			for gf in git_folders:
 				folder_check = session.query(GitFolder).filter(GitFolder.git_path == str(gf)).all()
-				_t0_ = datetime.now()
+
 				if len(folder_check) == 0:
 					# add new entries
+					_t0_ = datetime.now()
 					git_folder = GitFolder(gf, gitparent)
 					git_folder.scan_time = (datetime.now() - _t0_).total_seconds()
 					session.add(git_folder)
@@ -146,14 +147,14 @@ def runscan(dbmode):
 					for updatefolder_ in folder_check:
 						gf_update = session.query(GitFolder).filter(GitFolder.git_path == str(updatefolder_.git_path)).first()
 						gf_update.last_scan = datetime.now()
-						gf_update.scan_time = (datetime.now() - _t0_).total_seconds()
+						#scan_time = (datetime.now() - _t0_).total_seconds()
 						session.add(gf_update)
 						session.commit()
-						_t0_ = datetime.now()
+						# _t0_ = datetime.now()
 						gr_update = session.query(GitRepo).filter(GitRepo.git_path == str(updatefolder_.git_path)).all()
 						for gru in gr_update:
 							gru.last_scan = datetime.now()
-							gru.scan_time = (datetime.now() - _t0_).total_seconds()
+							#gru.scan_time = (datetime.now() - _t0_).total_seconds()
 							session.add(gru)
 							session.commit()
 							ups += 1
