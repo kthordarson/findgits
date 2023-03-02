@@ -101,34 +101,64 @@ def runscan(dbmode):
 	engine = get_engine(dbtype=dbmode)
 	Session = sessionmaker(bind=engine)
 	session = Session()
+	tasks = []
 	gsp = session.query(GitParentPath).all()
-	gitfolders = []
-	tasks = []
-	gfl = []
 	logger.info(f'[runscan] {datetime.now()-t0} CPU_COUNT={CPU_COUNT} gsp={len(gsp)}')
-	folder_entries = []
-	tasks = []
-	collector_threads = []
 	with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+		# start thread for each gitparentpath
 		for git_parentpath in gsp:
 			tasks.append(executor.submit(get_folder_list, git_parentpath))
-		logger.debug(f'[runscan] {datetime.now()-t0} get_folder_list threads {len(tasks)} ')
+			git_parentpath.last_scan = datetime.now()
+			logger.debug(f'[runscan] {datetime.now()-t0} {git_parentpath} {git_parentpath.first_scan} {git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
 		for res in as_completed(tasks):
 			r = res.result()
+			gitparent_ = r["gitparent"]
+			gitparent = session.query(GitParentPath).filter(GitParentPath.folder == gitparent_.folder).first()
+			session.add(gitparent)
+			session.commit()
+			git_folders = r["res"]
+			scan_time = r["scan_time"]
+			gitparent.scan_time = scan_time
+			#session.add(gitparent)
+			session.commit()
 			#gfl.append(r['res'])
-			logger.info(f'[runscan] {datetime.now()-t0} {len(r["res"])} gitfolders from {r["gitparent"]} ')
+			logger.info(f'[runscan] {datetime.now()-t0} {len(git_folders)} gitfolders from {gitparent} scan_time={scan_time} {gitparent.scan_time} ' )
 			cnt = 0
-			for gf in r['res']:
+			ups = 0
+			for gf in git_folders:
 				folder_check = session.query(GitFolder).filter(GitFolder.git_path == str(gf)).all()
+				_t0_ = datetime.now()
 				if len(folder_check) == 0:
-					git_folder = GitFolder(gf, r["gitparent"])
+					# add new entries
+					git_folder = GitFolder(gf, gitparent)
+					git_folder.scan_time = (datetime.now() - _t0_).total_seconds()
 					session.add(git_folder)
 					session.commit()
+					_t0_ = datetime.now()
 					git_repo = GitRepo(git_folder)
+					git_repo.scan_time = (datetime.now() - _t0_).total_seconds()
 					session.add(git_repo)
 					session.commit
 					cnt += 1
-			logger.info(f'[runscan] {datetime.now()-t0} {len(r["res"])} gitfolders from {r["gitparent"]} entries {cnt} ')
+				else:
+					# update stats for existing entries
+					#logger.debug(f'[runscan] gitparent={r["gitparent"]} r={len(r["res"])} fc={len(folder_check)} gc0={folder_check[0]}')
+					for updatefolder_ in folder_check:
+						gf_update = session.query(GitFolder).filter(GitFolder.git_path == str(updatefolder_.git_path)).first()
+						gf_update.last_scan = datetime.now()
+						gf_update.scan_time = (datetime.now() - _t0_).total_seconds()
+						session.add(gf_update)
+						session.commit()
+						_t0_ = datetime.now()
+						gr_update = session.query(GitRepo).filter(GitRepo.git_path == str(updatefolder_.git_path)).all()
+						for gru in gr_update:
+							gru.last_scan = datetime.now()
+							gru.scan_time = (datetime.now() - _t0_).total_seconds()
+							session.add(gru)
+							session.commit()
+							ups += 1
+						#logger.debug(f'[runscan] gitparent={gitparent} fc={len(folder_check)} gc0={folder_check[0]} updatefolder_={updatefolder_} gf_update={gf_update} gr_update={gr_update}')
+			logger.debug(f'[runscan] {datetime.now()-t0} {len(r["res"])} gitfolders from {r["gitparent"]} entries {cnt}/{ups} ')
 
 	gsp = session.query(GitParentPath).all()
 	repos = session.query(GitRepo).all()

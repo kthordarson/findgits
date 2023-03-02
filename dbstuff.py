@@ -39,11 +39,13 @@ class GitParentPath(Base):
 	gitfolders: Mapped[List['GitFolder']] = relationship()
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
-	scan_time = Column('last_scan', BigInteger)
+	scan_time = Column('scan_time', Float)
 
 	def __init__(self, folder):
 		self.folder = folder
 		self.first_scan = datetime.now()
+		self.last_scan = datetime.now()
+		self.scan_time = 0.0
 
 	def __repr__(self):
 		return f'GSP id={self.id} {self.folder}'
@@ -60,7 +62,7 @@ class GitFolder(Base):
 	#parent_path = Column('patent_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
-	scan_time = Column('last_scan', BigInteger)
+	scan_time = Column('scan_time', Float)
 
 	folder_size = Column('folder_size', BigInteger)
 	file_count = Column('file_count', BigInteger)
@@ -90,6 +92,7 @@ class GitFolder(Base):
 		self.commitmsg_file = f'{self.git_path}/.git/COMMIT_EDITMSG'
 		self.git_config_file = f'{self.git_path}/.git/config'
 		self.get_stats()
+		self.scan_time = 0.0
 
 	def __repr__(self):
 		return f'GitFolder {self.git_path} size={self.folder_size} fc={self.file_count} sc={self.subdir_count}'
@@ -139,7 +142,7 @@ class GitRepo(Base):
 	dupe_count = Column('dupe_count', BigInteger)
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
-	scan_time = Column('last_scan', BigInteger)
+	scan_time = Column('scan_time', Float)
 	#git_path: Mapped[List["GitFolder"]] = relationship()
 	#gitfolder = relationship("GitFolder", backref="git_path")
 
@@ -150,6 +153,8 @@ class GitRepo(Base):
 		self.git_path = gitfolder.git_path
 		self.conf = ConfigParser(strict=False)
 		self.first_scan = datetime.now()
+		self.last_scan = datetime.now()
+		self.scan_time = 0.0
 		try:
 			self.read_git_config()
 		except MissingConfigException as e:
@@ -515,8 +520,9 @@ def get_folder_list(gitparent:GitParentPath):
 	if err != b'':
 		logger.warning(f'[get_folder_list] {cmdstr} {err}')
 	res = [Path(k).parent for k in g_out if os.path.exists(k + '/config')]
+	scan_time = (datetime.now() - t0).total_seconds()
 	# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
-	return {'gitparent':gitparent, 'res':res}
+	return {'gitparent':gitparent, 'res':res, 'scan_time':scan_time}
 
 def drop_database(engine:Engine):
 	logger.warning(f'[drop] all engine={engine}')
