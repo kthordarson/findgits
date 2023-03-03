@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import List
 
 from loguru import logger
+import sqlalchemy as sa
 from sqlalchemy import Engine
 from sqlalchemy import (BIGINT, DATE, DATETIME, TIME, Integer, BigInteger, Boolean,
                         Column, DateTime, Float, ForeignKey,
@@ -17,7 +18,9 @@ from sqlalchemy import (BIGINT, DATE, DATETIME, TIME, Integer, BigInteger, Boole
                         create_engine, inspect, select, text)
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError,
                             IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
-#from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext import compiler
+from sqlalchemy.schema import DDLElement
+from sqlalchemy.sql import table
 from sqlalchemy.orm import (DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker)
 from sqlalchemy.orm.exc import UnmappedInstanceError
 
@@ -185,15 +188,26 @@ class GitRepo(Base):
 					# giturl = [k for k in conf['remote "origin"'].items()][0][1]
 					self.giturl = self.conf[remote_section]['url']
 				except TypeError as e:
-					logger.warning(f'[gconfig] {self} typeerror {e} git_config_file={self.git_config_file} ')
+					logger.warning(f'[!] {self} typeerror {e} git_config_file={self.git_config_file} ')
 				except KeyError as e:
-					logger.warning(f'[gconfig] {self} KeyError {e} git_config_file={self.git_config_file}')
+					logger.warning(f'[!] {self} KeyError {e} git_config_file={self.git_config_file}')
 			if not self.giturl:
 				pass
 				#raise MissingConfigException(f'[!] {self} giturl is empty self.git_config_file={self.git_config_file}')
 
+class DupeView(Base):
+	__tablename__ = 'dupeview'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	gitfolder_id = Column('gitfolder_id', Integer)
+	giturl = Column('giturl', String(255))
+	count = Column('count', Integer)
 
 def db_init(engine):
+	Base.metadata.create_all(bind=engine)
+
+def drop_database(engine:Engine):
+	logger.warning(f'[drop] all engine={engine}')
+	Base.metadata.drop_all(bind=engine)
 	Base.metadata.create_all(bind=engine)
 
 def get_folder_entries(session:sessionmaker, parent_item:GitParentPath):
@@ -224,6 +238,9 @@ def get_engine(dbtype:str) -> Engine:
 		return None
 
 def dupe_view_init(session):
+	pass
+
+def dupe_view_init_x(session):
 	drop_sql = text('DROP VIEW if exists dupeview ;')
 	session.execute(drop_sql)
 	drop_sql = text('DROP VIEW if exists nodupes;')
@@ -271,10 +288,10 @@ def dupe_view_init(session):
 
 def get_dupes(session):
 	sql = text('select * from dupeview;')
-	dupes = [k._asdict() for k in session.execute(sql).fetchall()]
+	dupes = session.execute(sql).all()
 
 	sql = text('select * from nodupes;')
-	nodupes = [k._asdict() for k in session.execute(sql).fetchall()]
+	nodupes = session.execute(sql).all()
 
 	logger.info(f'[dupes] found {len(dupes)} dupes nodupes={len(nodupes)}')
 	return dupes
@@ -523,10 +540,6 @@ def get_folder_list(gitparent:GitParentPath):
 	# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
 	return {'gitparent':gitparent, 'res':res, 'scan_time':scan_time}
 
-def drop_database(engine:Engine):
-	logger.warning(f'[drop] all engine={engine}')
-	Base.metadata.drop_all(bind=engine)
-	Base.metadata.create_all(bind=engine)
 
 def get_git_log(gitrepo:GitRepo):
 	# git -P log    --format="%aI %H %T %P %ae subject=%s"

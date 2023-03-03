@@ -48,21 +48,21 @@ def runscan(dbmode):
 			r = res.result()
 			gitparent_ = r["gitparent"]
 			gitparent = session.query(GitParentPath).filter(GitParentPath.folder == gitparent_.folder).first()
-			session.add(gitparent)
-			session.commit()
+			gitparent.last_scan = datetime.now()
 			git_folders = r["res"]
 			scan_time = r["scan_time"]
 			gitparent.scan_time = scan_time
 			#session.add(gitparent)
+			session.add(gitparent)
 			session.commit()
 			#gfl.append(r['res'])
 			logger.info(f'[runscan] {datetime.now()-t0} {len(git_folders)} gitfolders from {gitparent} scan_time={scan_time} {gitparent.scan_time} ' )
 			cnt = 0
 			ups = 0
 			for gf in git_folders:
-				folder_check = session.query(GitFolder).filter(GitFolder.git_path == str(gf)).all()
-
-				if len(folder_check) == 0:
+				folder_check = None
+				folder_check = session.query(GitFolder).filter(GitFolder.git_path == str(gf)).first()
+				if not folder_check:
 					# add new entries
 					_t0_ = datetime.now()
 					git_folder = GitFolder(gf, gitparent)
@@ -78,21 +78,19 @@ def runscan(dbmode):
 				else:
 					# update stats for existing entries
 					#logger.debug(f'[runscan] gitparent={r["gitparent"]} r={len(r["res"])} fc={len(folder_check)} gc0={folder_check[0]}')
-					for updatefolder_ in folder_check:
-						gf_update = session.query(GitFolder).filter(GitFolder.git_path == str(updatefolder_.git_path)).first()
-						gf_update.last_scan = datetime.now()
-						#scan_time = (datetime.now() - _t0_).total_seconds()
-						session.add(gf_update)
-						session.commit()
-						# _t0_ = datetime.now()
-						gr_update = session.query(GitRepo).filter(GitRepo.git_path == str(updatefolder_.git_path)).all()
-						for gru in gr_update:
-							gru.last_scan = datetime.now()
-							#gru.scan_time = (datetime.now() - _t0_).total_seconds()
-							session.add(gru)
-							session.commit()
-							ups += 1
-						#logger.debug(f'[runscan] gitparent={gitparent} fc={len(folder_check)} gc0={folder_check[0]} updatefolder_={updatefolder_} gf_update={gf_update} gr_update={gr_update}')
+					# for updatefolder_ in folder_check:
+					# gf_update = session.query(GitFolder).filter(GitFolder.git_path == str(updatefolder_.git_path)).first()
+					folder_check.last_scan = datetime.now()
+					#scan_time = (datetime.now() - _t0_).total_seconds()
+					# _t0_ = datetime.now()
+					gr_update = session.query(GitRepo).filter(GitRepo.git_path == str(folder_check.git_path)).first()
+					gr_update.last_scan = datetime.now()
+					#gru.scan_time = (datetime.now() - _t0_).total_seconds()
+					session.add(folder_check)
+					session.add(gr_update)
+					session.commit()
+					ups += 1
+					#logger.debug(f'[runscan] gitparent={gitparent} fc={len(folder_check)} gc0={folder_check[0]} updatefolder_={updatefolder_} gf_update={gf_update} gr_update={gr_update}')
 			logger.debug(f'[runscan] {datetime.now()-t0} {len(r["res"])} gitfolders from {r["gitparent"]} entries {cnt}/{ups} ')
 
 	gsp = session.query(GitParentPath).all()
@@ -138,12 +136,11 @@ if __name__ == '__main__':
 	logger.info(f'[main] dbmode={args.dbmode} bind={session.bind} {session.bind.driver}')
 	if args.dropdatabase:
 		drop_database(engine)
-	if args.dbinfo:
-		# show db info
-		show_dbinfo(session)
 	if args.getdupes:
-		dupe_view_init(session)
-		dupe_repos = get_dupes(session)
+		sql = text('select * from newdupeview order by count desc limit 10;')
+		dupes = session.execute(sql).all()
+		for d in dupes:
+			print(d)
 	if args.scanpath:
 		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
 		# entries = get_folder_list(gsp)
@@ -151,6 +148,7 @@ if __name__ == '__main__':
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
 		scanpath(gsp, args.dbmode)
 		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
+		dupe_view_init(session)
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)} after scan={len(entries_afterscan)}')
 	if args.scanpath_threads:
 		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath_threads).first()
@@ -174,17 +172,21 @@ if __name__ == '__main__':
 		#scanpath_thread(GitFolder(gfl['gf'], gsp), args.dbmode)
 	if args.runscan:
 		scan_results = runscan(args.dbmode)
+		dupe_view_init(session)
 		logger.info(f'[*] runscan done res={scan_results} ')
 
-	if args.listpaths:
-		if args.listpaths == 'all':
-			git_parent_entries = get_parent_entries(session)
-		else:
-			git_parent_entries = session.query(GitParentPath).filter(GitParentPath.id == str(args.listpaths)).all()
-		for gpe in git_parent_entries:
-			fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
-			rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-			print(f'[*] {gpe.id} {gpe.folder} {fc} {rc}')
+	if args.dbinfo:
+		# show db info
+		show_dbinfo(session)
+		if args.listpaths:
+			if args.listpaths == 'all':
+				git_parent_entries = get_parent_entries(session)
+			else:
+				git_parent_entries = session.query(GitParentPath).filter(GitParentPath.id == str(args.listpaths)).all()
+			for gpe in git_parent_entries:
+				fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
+				rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
+				print(f'[*] {gpe.id} {gpe.folder} {fc} {rc}')
 
 	if args.addpath:
 		new_gsp = add_path(args.addpath, session)
