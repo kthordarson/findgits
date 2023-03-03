@@ -527,3 +527,27 @@ def drop_database(engine:Engine):
 	logger.warning(f'[drop] all engine={engine}')
 	Base.metadata.drop_all(bind=engine)
 	Base.metadata.create_all(bind=engine)
+
+def get_git_log(gitrepo:GitRepo):
+	# git -P log    --format="%aI %H %T %P %ae subject=%s"
+	os.chdir(gitrepo.folder)
+	cmdstr = ['git', '-P', 'log','--format="%aI %H %T %P %ae subject=%s"']
+	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+	log_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+	return log_out
+
+def get_git_show(gitrepo:GitRepo):
+	# git -P log    --format="%aI %H %T %P %ae subject=%s"
+	os.chdir(gitrepo.folder)
+	cmdstr = ['git',  'show','--raw', '--format="%aI %H %T %P %ae subject=%s"']
+	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+	show_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+	return show_out
+
+def get_git_status(gitrepo:GitRepo):
+	# git -P log    --format="%aI %H %T %P %ae subject=%s"
+	os.chdir(gitrepo.folder)
+	cmdstr = ['git', 'status','-s']
+	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+	status_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+	return status_out
