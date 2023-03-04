@@ -316,13 +316,9 @@ def dupe_view_init(session: sessionmaker) -> None:
 
 
 def get_dupes(session: sessionmaker) -> list:
-	sql = text('select * from dupeview;')
+	sql = text('select id, giturl, count(*) as count from gitrepo group by giturl having count(*)>1;')
+	#sql = text('select * from dupeview;')
 	dupes = session.execute(sql).all()
-
-	sql = text('select * from nodupes;')
-	nodupes = session.execute(sql).all()
-
-	logger.info(f'[dupes] found {len(dupes)} dupes nodupes={len(nodupes)}')
 	return dupes
 
 

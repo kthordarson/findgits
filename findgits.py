@@ -14,7 +14,7 @@ from dbstuff import drop_database, dupe_view_init,get_engine, db_init
 from dbstuff import MissingGitFolderException, MissingConfigException
 from git_tasks import run_scanpath_threads, run_full_scan
 from git_tasks import (add_path, get_parent_entries, scanpath)
-
+from utils import format_bytes
 CPU_COUNT = cpu_count()
 
 
@@ -51,6 +51,8 @@ if __name__ == '__main__':
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
+	logger.debug(f'[main] args={args}')
+	logger.info(f'[main] args={args}')
 	if args.dropdatabase:
 		drop_database(engine)
 	if args.getdupes:
@@ -80,7 +82,7 @@ if __name__ == '__main__':
 		# entries = get_folder_list(gsp)
 		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
-		scanpath(gsp, args.dbmode)
+		scanpath(gsp, session)
 		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)} after scan={len(entries_afterscan)}')
 	if args.scanpath_threads:
@@ -102,7 +104,7 @@ if __name__ == '__main__':
 				f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
 				f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
 				rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-				print(f'[*] id={gpe.id} path={gpe.folder}\n\tfolders={fc}\n\trepos={rc}\n\tsize={f_size}\n\tscantime={f_scantime}')
+				print(f'[*] id={gpe.id} path={gpe.folder}\n\tfolders={fc}\n\trepos={rc}\n\tsize={format_bytes(f_size)}\n\tscantime={f_scantime}')
 
 	if args.addpath:
 		try:
@@ -110,11 +112,6 @@ if __name__ == '__main__':
 		except MissingGitFolderException as e:
 			logger.error(e)
 		# logger.debug(f'[*] new path: {new_gsp}')
-		entries = session.query(GitFolder).filter(GitFolder.parent_id == new_gsp.id).count()
-		logger.info(f'[addpath] scanning newgsp {new_gsp.folder} id={new_gsp.id} existing_entries={entries}')
-		scanpath(new_gsp, args.dbmode)
-		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == new_gsp.id).count()
-		logger.info(f'[addpath] scanning {new_gsp.folder} id={new_gsp.id} existing_entries={entries} after scan={entries_afterscan}')
 	# scanpath(new_gsp.id, session)
 	if args.importpaths:
 		# read paths from text file and import

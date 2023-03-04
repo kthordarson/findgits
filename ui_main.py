@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
-## Form generated from reading UI file 'main.ui'
+## Form generated from reading UI file 'mainuxyEpR.ui'
 ##
 ## Created by: Qt User Interface Compiler version 6.4.2
 ##
@@ -20,8 +20,6 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QCheckBox, QHB
     QHeaderView, QLabel, QLineEdit, QPushButton,
     QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
 
-
-# noinspection PyAttributeOutsideInit
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
         if not FindGitsApp.objectName():
@@ -80,17 +78,17 @@ class Ui_FindGitsApp(object):
         self.checkBox_filterdupes.setGeometry(QRect(510, 420, 121, 25))
         self.dupetree = QTreeWidget(FindGitsApp)
         self.dupetree.setObjectName(u"dupetree")
-        self.dupetree.setGeometry(QRect(530, 130, 461, 251))
+        self.dupetree.setGeometry(QRect(520, 80, 461, 251))
         self.dupetree.setAutoExpandDelay(0)
         self.dupecountlabel = QLabel(FindGitsApp)
         self.dupecountlabel.setObjectName(u"dupecountlabel")
-        self.dupecountlabel.setGeometry(QRect(630, 30, 121, 19))
+        self.dupecountlabel.setGeometry(QRect(630, 10, 121, 19))
         self.foobarLabel = QLabel(FindGitsApp)
         self.foobarLabel.setObjectName(u"foobarLabel")
-        self.foobarLabel.setGeometry(QRect(525, 63, 20, 19))
+        self.foobarLabel.setGeometry(QRect(525, 43, 20, 19))
         self.idLineEdit = QLineEdit(FindGitsApp)
         self.idLineEdit.setObjectName(u"idLineEdit")
-        self.idLineEdit.setGeometry(QRect(551, 30, 64, 27))
+        self.idLineEdit.setGeometry(QRect(551, 10, 64, 27))
         sizePolicy1 = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         sizePolicy1.setHorizontalStretch(0)
         sizePolicy1.setVerticalStretch(0)
@@ -103,11 +101,20 @@ class Ui_FindGitsApp(object):
         self.idLineEdit.setReadOnly(True)
         self.idLabel = QLabel(FindGitsApp)
         self.idLabel.setObjectName(u"idLabel")
-        self.idLabel.setGeometry(QRect(525, 30, 16, 19))
+        self.idLabel.setGeometry(QRect(525, 10, 16, 19))
         self.urlLineEdit = QLineEdit(FindGitsApp)
         self.urlLineEdit.setObjectName(u"urlLineEdit")
-        self.urlLineEdit.setGeometry(QRect(551, 63, 441, 27))
+        self.urlLineEdit.setGeometry(QRect(551, 43, 431, 27))
         self.urlLineEdit.setReadOnly(True)
+        self.gitshow_button = QPushButton(FindGitsApp)
+        self.gitshow_button.setObjectName(u"gitshow_button")
+        self.gitshow_button.setGeometry(QRect(520, 340, 94, 27))
+        self.gitstatus_button = QPushButton(FindGitsApp)
+        self.gitstatus_button.setObjectName(u"gitstatus_button")
+        self.gitstatus_button.setGeometry(QRect(620, 340, 94, 27))
+        self.gitlog_button = QPushButton(FindGitsApp)
+        self.gitlog_button.setObjectName(u"gitlog_button")
+        self.gitlog_button.setGeometry(QRect(720, 340, 94, 27))
 
         self.retranslateUi(FindGitsApp)
 
@@ -121,8 +128,8 @@ class Ui_FindGitsApp(object):
         self.actionactionone.setToolTip(QCoreApplication.translate("FindGitsApp", u"actiononetooltip", None))
 #endif // QT_CONFIG(tooltip)
         ___qtreewidgetitem = self.treeWidget.headerItem()
-        ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"path", None))
-        ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None))
+        ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"path", None));
+        ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None));
         self.folderButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
         self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Dupes", None))
         self.searchpaths_button.setText(QCoreApplication.translate("FindGitsApp", u"Searchpaths", None))
@@ -134,5 +141,8 @@ class Ui_FindGitsApp(object):
         self.dupecountlabel.setText(QCoreApplication.translate("FindGitsApp", u"Dupes:", None))
         self.foobarLabel.setText(QCoreApplication.translate("FindGitsApp", u"url", None))
         self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
+        self.gitshow_button.setText(QCoreApplication.translate("FindGitsApp", u"Git show", None))
+        self.gitstatus_button.setText(QCoreApplication.translate("FindGitsApp", u"Git status", None))
+        self.gitlog_button.setText(QCoreApplication.translate("FindGitsApp", u"Git log", None))
     # retranslateUi
 

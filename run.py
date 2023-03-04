@@ -4,7 +4,6 @@ import os, sys
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from dbstuff import GitRepo, GitFolder, GitParentPath, get_engine, get_dupes
-from dbstuff import get_folder_list
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
@@ -27,12 +26,21 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.getdupes_button.clicked.connect(self.getdupes_button_clicked)
         self.checkBox_filterdupes.toggled.connect(self.checkBox_filterdupes_toggle)
         self.searchpaths_button.clicked.connect(self.searchpaths_button_clicked)
-        self.gitrepos = session.query(GitRepo).all()
-        self.gitfolders = session.query(GitFolder).all()
-        self.parent_folders = session.query(GitParentPath).all()
-        self.dupes = get_dupes(self.session)
+        self.gitshow_button.clicked.connect(self.gitshow_button_clicked)
+        self.gitlog_button.clicked.connect(self.gitlog_button_clicked)
+        self.gitstatus_button.clicked.connect(self.gitstatus_button_clicked)
+
+
         self.dupefilter = False
-        logger.debug(f'[init] gr={len(self.gitrepos)} gf={len(self.gitfolders)} pf={len(self.parent_folders)}')
+
+    def gitshow_button_clicked(self, widget):
+        pass
+
+    def gitlog_button_clicked(self, widget):
+        pass
+
+    def gitstatus_button_clicked(self, widget):
+        pass
 
     def searchpaths_button_clicked(self, widget):
         pass
@@ -48,23 +56,24 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.treeWidget.headerItem().setText(0, "id")
         self.treeWidget.headerItem().setText(1, "count")
         self.treeWidget.headerItem().setText(2, "giturl")
-        for d in self.dupes:
+        dupes = get_dupes(self.session)
+        for d in dupes:
             item0 = QTreeWidgetItem(self.treeWidget)
-            item0.setText(0, f"{d.get('id')}")
-            item0.setText(1, f"{d.get('count')}")
-            item0.setText(2, f"{d.get('giturl')}")
-            try:
-                for f in d.get('folders'):
-                    item1 = QTreeWidgetItem(item0)
-                    item1.setText(0, f"{f.get('gitfolder_id')}")
-                    item1.setText(2, f"{f.get('git_path')}")
-            except TypeError as e:
-                logger.error(e)
+            item0.setText(0, f"{d.id}")
+            item0.setText(1, f"{d.count}")
+            item0.setText(2, f"{d.giturl}")
+            # try:
+            #     for f in d.get('folders'):
+            #         item1 = QTreeWidgetItem(item0)
+            #         item1.setText(0, f"{f.get('gitfolder_id')}")
+            #         item1.setText(2, f"{f.get('git_path')}")
+            # except TypeError as e:
+            #     logger.error(e)
         #self.retranslateUi(self)
 
     def tree_item_clicked(self, widget):
         try:
-            repo = [k for k in self.gitrepos if k.git_path==widget.text(1)][0]
+            repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
         except IndexError as e:
             logger.error(f'[tic] indexerror {e} widget={widget.text(0)} {widget.text(1)}')
             return
@@ -80,7 +89,8 @@ class MainApp(QWidget, Ui_FindGitsApp):
 
     def populate_gitrepos(self):
         self.treeWidget.clear()
-        for k in self.gitrepos:
+        gitrepos = session.query(GitRepo).all()
+        for k in gitrepos:
             item_1 = QTreeWidgetItem(self.treeWidget)
             item_1.setText(0, f"{k.id}")
             item_1.setText(1, f"{k.giturl}")

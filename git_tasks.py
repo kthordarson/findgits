@@ -223,41 +223,25 @@ def add_path(newpath: str, session: sessionmaker) -> GitParentPath:
 	# check db entries for invalid paths and remove
 	# gsp_entries = get_parent_entries(session)
 	path_check = None
-	path_check = session.query(GitParentPath).filter(GitParentPath.folder == newpath).all()
-	if len(path_check) == 0:
+	path_check = session.query(GitParentPath).filter(GitParentPath.folder == newpath).first()
+	if not path_check:
 		gsp = GitParentPath(newpath)
 		session.add(gsp)
 		session.commit()
-		logger.debug(f'[add_path] adding {gsp} to db')
+
+		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).count()
+		logger.info(f'[addpath] scanning newgsp {gsp.folder} id={gsp.id} existing_entries={entries}')
+		scanpath(gsp, session)
+		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).count()
+		logger.info(f'[addpath] scanning {gsp.folder} id={gsp.id} existing_entries={entries} after scan={entries_afterscan}')
+		return gsp
 	else:
-		logger.warning(f'[add_path] path={newpath} already in config')
-	return gsp
+		logger.warning(f'[add_path] path={newpath} {path_check} already in config')
+		return path_check
 
 
-def scanpath_thread(gf: GitFolder, argsdbmode: str) -> None:
-	engine = get_engine(dbtype=argsdbmode)
-	Session = sessionmaker(bind=engine)
-	session = Session()
-	try:
-		cr = collect_repo(gf, session)
-	except TypeError as e:
-		logger.error(f'[!] TypeError {e} gf={gf}')
-		return None
-	except AttributeError as e:
-		logger.error(f'[!] AttributeError {e} gf={gf}')
-		return None
-	except IntegrityError as e:
-		logger.error(f'[!] IntegrityError {e} {type(e)} gf={gf}')
-	except InvalidRequestError as e:
-		errmsg = f'[!] InvalidRequestError {e} {type(e)} gf={gf}'
-		logger.error(errmsg)
-		raise InvalidRequestError(errmsg)
 
-
-def scanpath(gsp: GitParentPath, argsdbmode: str) -> None:
-	engine = get_engine(dbtype=argsdbmode)
-	Session = sessionmaker(bind=engine)
-	session = Session()
+def scanpath(gsp: GitParentPath, session:sessionmaker) -> None:
 	# scan a single path, scanpath is an int corresponding to id of GitParentPath to scan
 	gitfolders = []
 	gfl = get_folder_list(gsp)
@@ -291,46 +275,6 @@ def show_dbinfo(session: sessionmaker) -> None:
 		if git_repos > 0:
 			print(f'[dbinfo] gpf={gpf} git_folders={git_folders} git_repos={git_repos} scantime={gpf.scan_time} {gpf.scan_time / git_folders} {gpf.scan_time / git_repos}')
 
-
-# git_repos = session.query(GitRepo).all()
-# dupe_v = session.query()
-# sql = text('select * from dupeview;')
-# dupes = [k._asdict() for k in session.execute(sql).fetchall()]
-
-# sql = text('select * from nodupes;')
-# nodupes = [k._asdict() for k in session.execute(sql).fetchall()]
-
-# sql = text('select * from gitrepo where dupe_flag = 1;')
-# dupetest = [k._asdict() for k in session.execute(sql).fetchall()]
-
-# sql = text('select * from gitrepo where dupe_flag is NULL;')
-# nodupetest = [k._asdict() for k in session.execute(sql).fetchall()]
-
-# logger.info(f'[dbinfo] parent_folders={len(parent_folders)} git_folders={len(git_folders)} git_repos={len(git_repos)} dupes={len(dupes)} / {len(dupetest)} nodupes={len(nodupes)} / NULL {len(nodupetest)}')
-
-# noinspection PyProtectedMember
-def xshow_dbinfo(session: sessionmaker) -> None:
-	# mysql 'select (select count(*) from gitfolder) as fc, (select count(*) from gitrepo) as rc, (select count(*) from gitparentpath) as fpc, (select count(*) from dupeview) as dc';
-	# sqlite3 gitrepo1.db 'select (select count(*) from gitparentpath) as gpc, (select count(*) from gitfolder) as gfc, (select count(*) from gitrepo) as grc ' -table
-	parent_folders = session.query(GitParentPath).all()
-	git_folders = session.query(GitFolder).all()
-	git_repos = session.query(GitRepo).all()
-	dupe_v = session.query()
-	sql = text('select * from dupeview;')
-	dupes = [k._asdict() for k in session.execute(sql).fetchall()]
-
-	sql = text('select * from nodupes;')
-	nodupes = [k._asdict() for k in session.execute(sql).fetchall()]
-
-	sql = text('select * from gitrepo where dupe_flag = 1;')
-	dupetest = [k._asdict() for k in session.execute(sql).fetchall()]
-
-	sql = text('select * from gitrepo where dupe_flag is NULL;')
-	nodupetest = [k._asdict() for k in session.execute(sql).fetchall()]
-
-	logger.info(f'[dbinfo] parent_folders={len(parent_folders)} git_folders={len(git_folders)} git_repos={len(git_repos)} dupes={len(dupes)} / {len(dupetest)} nodupes={len(nodupes)} / NULL {len(nodupetest)}')
-
-
 def get_folder_list(gitparent: GitParentPath) -> dict:
 	startpath = gitparent.folder
 	t0 = datetime.now()
@@ -353,7 +297,6 @@ def get_git_log(gitrepo: GitRepo) -> list:
 	log_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
 	return log_out
 
-
 def get_git_show(gitrepo: GitRepo) -> list:
 	# git -P log    --format="%aI %H %T %P %ae subject=%s"
 	os.chdir(gitrepo.folder)
@@ -361,7 +304,6 @@ def get_git_show(gitrepo: GitRepo) -> list:
 	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 	show_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
 	return show_out
-
 
 def get_git_status(gitrepo: GitRepo) -> list:
 	# git -P log    --format="%aI %H %T %P %ae subject=%s"
