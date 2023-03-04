@@ -8,6 +8,7 @@ from threading import Thread
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import drop_database, dupe_view_init,get_engine, db_init
 from dbstuff import MissingGitFolderException, MissingConfigException
@@ -55,13 +56,25 @@ if __name__ == '__main__':
 	if args.getdupes:
 		#dupe_view_init(session)
 		#sql = text('select * from dupeview order by count desc limit 10;')
-		sql = text('select id,gitfolder_id,giturl,git_path, count(*) as count from gitrepo group by giturl having count>1;')
-		dupes = session.execute(sql).all()
-		for d in dupes:
-			repdupe = session.query(GitRepo).filter(GitRepo.giturl == d.giturl).all()
-			print(f'[d] gitrepo {d.giturl} has {len(repdupe)} dupes found in:')
-			for r in repdupe:
-				print(f'\t{r.git_path} ')
+		# psql:
+		# select * from gitrepo ou where (select count(*) from gitrepo inr where inr.giturl = ou.giturl)>1;
+		# select giturl, count(*) from gitrepo group by giturl having count(*)>3;
+		# sql = text('select id,gitfolder_id,giturl,git_path, count(*) as count from gitrepo group by giturl having count>1;')
+		sql = text('select giturl, count(*) from gitrepo group by giturl having count(*)>1;')
+		dupes = None
+		dupe_counter = 0
+		try:
+			dupes = session.execute(sql).all()
+		except ProgrammingError as e:
+			logger.error(f'[getdupes] {e}')
+		if dupes:
+			for d in dupes:
+				repdupe = session.query(GitRepo).filter(GitRepo.giturl == d.giturl).all()
+				dupe_counter += len(repdupe)
+				print(f'[d] gitrepo {d.giturl} has {len(repdupe)} dupes found in:')
+				for r in repdupe:
+					print(f'\t{r.git_path} ')
+		print(f'[getdupes] {dupe_counter} dupes found')
 	if args.scanpath:
 		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
 		# entries = get_folder_list(gsp)
