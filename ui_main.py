@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QCheckBox, QHB
     QHeaderView, QLabel, QLineEdit, QPushButton,
     QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
 
+
+# noinspection PyAttributeOutsideInit
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
         if not FindGitsApp.objectName():
@@ -119,8 +121,8 @@ class Ui_FindGitsApp(object):
         self.actionactionone.setToolTip(QCoreApplication.translate("FindGitsApp", u"actiononetooltip", None))
 #endif // QT_CONFIG(tooltip)
         ___qtreewidgetitem = self.treeWidget.headerItem()
-        ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"path", None));
-        ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None));
+        ___qtreewidgetitem.setText(1, QCoreApplication.translate("FindGitsApp", u"path", None))
+        ___qtreewidgetitem.setText(0, QCoreApplication.translate("FindGitsApp", u"id", None))
         self.folderButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
         self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Dupes", None))
         self.searchpaths_button.setText(QCoreApplication.translate("FindGitsApp", u"Searchpaths", None))

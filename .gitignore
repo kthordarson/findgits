@@ -13,3 +13,4 @@ gitrepo.db-journal
 *.tmp
 *.txt
 *.db
+.idea/**
