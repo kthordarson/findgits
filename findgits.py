@@ -2,7 +2,7 @@
 import argparse
 import os
 from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor, as_completed)
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from multiprocessing import cpu_count
 from threading import Thread
 from loguru import logger
@@ -13,7 +13,8 @@ from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import drop_database, dupe_view_init,get_engine, db_init
 from dbstuff import MissingGitFolderException, MissingConfigException
 from git_tasks import run_scanpath_threads, run_full_scan
-from git_tasks import (add_path, get_parent_entries, scanpath)
+from git_tasks import (add_path, scanpath)
+from git_tasks import (get_git_log, get_git_show, get_git_status)
 from utils import format_bytes
 CPU_COUNT = cpu_count()
 
@@ -31,6 +32,16 @@ def dbdump(backupfile, engine):
 	# todo finish
 	# dump db to file
 	pass
+
+def get_dupes(session:sessionmaker):
+	sql = text('select giturl, count(*) as count from gitrepo group by giturl having count(*)>1;')
+	dupes = None
+	dupe_counter = 0
+	try:
+		dupes = session.execute(sql).all()
+	except ProgrammingError as e:
+		logger.error(f'[getdupes] {e}')
+	return dupes
 
 
 if __name__ == '__main__':
@@ -51,8 +62,6 @@ if __name__ == '__main__':
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
-	logger.debug(f'[main] args={args}')
-	logger.info(f'[main] args={args}')
 	if args.dropdatabase:
 		drop_database(engine)
 	if args.getdupes:
@@ -62,24 +71,27 @@ if __name__ == '__main__':
 		# select * from gitrepo ou where (select count(*) from gitrepo inr where inr.giturl = ou.giturl)>1;
 		# select giturl, count(*) from gitrepo group by giturl having count(*)>3;
 		# sql = text('select id,gitfolder_id,giturl,git_path, count(*) as count from gitrepo group by giturl having count>1;')
-		sql = text('select giturl, count(*) from gitrepo group by giturl having count(*)>1;')
-		dupes = None
+		dupes = get_dupes(session)
 		dupe_counter = 0
-		try:
-			dupes = session.execute(sql).all()
-		except ProgrammingError as e:
-			logger.error(f'[getdupes] {e}')
-		if dupes:
-			for d in dupes:
-				repdupe = session.query(GitRepo).filter(GitRepo.giturl == d.giturl).all()
-				dupe_counter += len(repdupe)
-				print(f'[d] gitrepo {d.giturl} has {len(repdupe)} dupes found in:')
-				for r in repdupe:
-					print(f'\t{r.git_path} ')
+		for d in dupes:
+			repdupe = session.query(GitRepo).filter(GitRepo.giturl == d.giturl).all()
+			dupe_counter += len(repdupe)
+			print(f'[d] gitrepo url:{d.giturl} has {len(repdupe)} dupes found in:')
+			for r in repdupe:
+				grepo = session.query(GitRepo).filter(GitRepo.git_path == r.git_path).first()
+				g_show = get_git_show(grepo)
+				if g_show:
+					try:
+						# timediff=datetime.now(timezone.utc)-datetime.fromisoformat(str(g_show["last_commit"]))
+						lastcommitdate = g_show["last_commit"]
+						timediff = grepo.config_ctime - lastcommitdate
+						timediff2 = datetime.now() - lastcommitdate
+					except TypeError as e:
+						logger.error(f'[!] {e} ')
+					print(f'\tid:{grepo.id} path={r.git_path} age {timediff.days} days td2={timediff2.days}')
 		print(f'[getdupes] {dupe_counter} dupes found')
 	if args.scanpath:
 		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
-		# entries = get_folder_list(gsp)
 		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
 		scanpath(gsp, session)
@@ -93,18 +105,18 @@ if __name__ == '__main__':
 
 	if args.dbinfo:
 		# show db info
-		# show_dbinfo(session)
-		if args.listpaths:
-			if args.listpaths == 'all':
-				git_parent_entries = get_parent_entries(session)
-			else:
-				git_parent_entries = session.query(GitParentPath).filter(GitParentPath.id == str(args.listpaths)).all()
-			for gpe in git_parent_entries:
-				fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
-				f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-				f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-				rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-				print(f'[*] id={gpe.id} path={gpe.folder}\n\tfolders={fc}\n\trepos={rc}\n\tsize={format_bytes(f_size)}\n\tscantime={f_scantime}')
+		git_parent_entries = session.query(GitParentPath).all() #filter(GitParentPath.id == str(args.listpaths)).all()
+		total_size = 0
+		total_time = 0
+		for gpe in git_parent_entries:
+			fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
+			f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
+			total_size += f_size
+			f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
+			total_time += f_scantime
+			rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
+			print(f'[*] id={gpe.id} path={gpe.folder}\n\tfolders={fc}\n\trepos={rc}\n\tsize={format_bytes(f_size)}\n\tscantime={f_scantime}')
+		print(f'[*] total_size={format_bytes(total_size)} total_time={total_time}')
 
 	if args.addpath:
 		try:

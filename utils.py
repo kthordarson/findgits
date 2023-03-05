@@ -5,7 +5,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import glob
 from subprocess import Popen, PIPE
-from datetime import datetime
 from sqlalchemy import Engine
 from threading import Thread
 from multiprocessing import cpu_count

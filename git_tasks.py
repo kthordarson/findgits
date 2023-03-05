@@ -53,7 +53,7 @@ def run_full_scan(dbmode: str):
 		for git_parentpath in gsp:
 			tasks.append(executor.submit(get_folder_list, git_parentpath))
 			git_parentpath.last_scan = datetime.now()
-			logger.debug(f'[runscan] {datetime.now() - t0} {git_parentpath} {git_parentpath.first_scan} {git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
+			logger.debug(f'[runscan] {datetime.now() - t0} {git_parentpath} firstscan:{git_parentpath.first_scan} lastscan:{git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
 		for res in as_completed(tasks):
 			r = res.result()
 			gitparent_ = r["gitparent"]
@@ -66,7 +66,7 @@ def run_full_scan(dbmode: str):
 			session.add(gitparent)
 			session.commit()
 			# gfl.append(r['res'])
-			logger.info(f'[runscan] {datetime.now() - t0} {len(git_folders)} gitfolders from {gitparent} scan_time={scan_time} {gitparent.scan_time} ')
+			logger.info(f'[runscan] {datetime.now() - t0} {len(git_folders)} gitfolders from {gitparent} scan_time={scan_time} gpscantime={gitparent.scan_time} ')
 			cnt = 0
 			ups = 0
 			for gf in git_folders:
@@ -110,30 +110,6 @@ def run_full_scan(dbmode: str):
 	results = {'gsp': len(gsp), 'repos': len(repos), 'folders': len(folders)}
 	return results
 
-
-def collect_git_folders(gitfolders: list, session: sessionmaker) -> None:
-	# create GitFolder objects from gitfolders
-	for k in gitfolders:
-		g = session.query(GitFolder).filter(GitFolder.git_path == str(k.git_path)).first()
-		try:
-			if g:
-				# existing gitfolder found, refresh
-				g.refresh()
-				session.add(g)
-				session.commit()
-			else:
-				# new gitfolder found, add to db
-				session.add(k)
-				session.commit()
-		# logger.debug(f'[!] New: {k} ')
-		except OperationalError as e:
-			logger.error(f'[E] {e} g={g}')
-			continue
-		finally:
-			session.close()
-	logger.debug(f'[collect_git_folders] gitfolders={len(gitfolders)}')
-
-
 def collect_git_folder(gitfolder, session) -> None:
 	# create GitFolder objects from gitfolders
 	g = session.query(GitFolder).filter(GitFolder.git_path == str(gitfolder.git_path)).first()
@@ -153,63 +129,6 @@ def collect_git_folder(gitfolder, session) -> None:
 	finally:
 		session.close()
 
-
-def collect_repo(gf: GitFolder, session: sessionmaker) -> str:
-	try:
-		# construct repo object from gf (folder)
-		gr = GitRepo(gf)
-	except MissingConfigException as e:
-		# logger.error(f'[cgr] {e} gf={gf}')
-		return f'[cgr] MissingConfigException {e} gf={gf}'
-	except TypeError as e:
-		errmsg = f'[cgr] TypeError {e} gf={gf}'
-		logger.error(errmsg)
-		raise TypeError(errmsg)
-
-	repo_q = session.query(GitRepo).filter(GitRepo.giturl == str(gr.giturl)).first()
-	folder_q = session.query(GitRepo).filter(GitRepo.git_path == str(gr.git_path)).first()
-	if repo_q and folder_q:
-		# todo: check if repo exists in other folder somewhere...
-		pass
-	# repo_q.refresh()
-	# session.add(repo_q)
-	# session.commit()
-	else:
-		# new repo found, add to db
-		try:
-			session.add(gr)
-		except IntegrityError as e:
-			errmsg = f'[cgr] {e} {type(e)} gf={gf} gr={gr}]'
-			logger.error(errmsg)
-			return errmsg
-		except IllegalStateChangeError as e:
-			errmsg = f'[cgr] {e} {type(e)} gf={gf} gr={gr}]'
-			logger.error(errmsg)
-			return errmsg
-		# logger.debug(f'[!] newgitrepo {gr} ')
-		try:
-			session.commit()
-		except IntegrityError as e:
-			errmsg = f'[cgr] {e} {type(e)} gf={gf} gr={gr}]'
-			logger.error(errmsg)
-			return errmsg
-		except IllegalStateChangeError as e:
-			errmsg = f'[cgr] {e} {type(e)} gf={gf} gr={gr}]'
-			logger.error(errmsg)
-			return errmsg
-		except Exception as e:
-			errmsg = f'[cgr] {e} {type(e)} gf={gf} gr={gr}]'
-			logger.error(errmsg)
-			# session.rollback()
-			raise Exception(errmsg)
-	return 'done'
-
-
-def get_parent_entries(session: sessionmaker) -> list:
-	gpf = session.query(GitParentPath).all()
-	return [k for k in gpf if os.path.exists(k.folder)]
-
-
 def add_path(newpath: str, session: sessionmaker) -> GitParentPath:
 	# add new path to config  db
 	# returns gsp object
@@ -221,7 +140,6 @@ def add_path(newpath: str, session: sessionmaker) -> GitParentPath:
 		raise MissingGitFolderException(errmsg)
 
 	# check db entries for invalid paths and remove
-	# gsp_entries = get_parent_entries(session)
 	path_check = None
 	path_check = session.query(GitParentPath).filter(GitParentPath.folder == newpath).first()
 	if not path_check:
@@ -299,11 +217,37 @@ def get_git_log(gitrepo: GitRepo) -> list:
 
 def get_git_show(gitrepo: GitRepo) -> list:
 	# git -P log    --format="%aI %H %T %P %ae subject=%s"
-	os.chdir(gitrepo.folder)
-	cmdstr = ['git', 'show', '--raw', '--format="%aI %H %T %P %ae subject=%s"']
-	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
-	show_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
-	return show_out
+	if os.path.exists(gitrepo.git_path):
+		try:
+			os.chdir(gitrepo.git_path)
+		except FileNotFoundError as e:
+			logger.error(f'{e} {type(e)} gitrepo={gitrepo}')
+			return None
+		#cmdstr = ['git', 'show', '--raw', '--format="%aI %H %T %P %ae subject=%s"']
+		cmdstr = ['git', 'show', '--raw', '-s', '--format="date:%at%nsubject:%s%ncommitemail:%ce"']
+
+		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+		if err != b'':
+			logger.warning(f'[get_git_show] {cmdstr} {err} {os.path.curdir}')
+			return None
+		show_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+		dsplit = show_out[0].split(':')[1]
+		last_commit = datetime.fromtimestamp(int(dsplit))
+		try:
+			result = {
+				# 'last_commit':datetime.fromisoformat(show_out[0].split('date:')[1]),
+				'last_commit':last_commit,
+				'subject': show_out[1].split('subject:')[1],
+				'commitemail': show_out[2].split('commitemail:')[1]
+				}
+
+		except (IndexError, ValueError, AttributeError) as e:
+			logger.error(f'{e} {type(e)} sout={show_out} out={out} err={err}')
+			return None
+		return result
+	else:
+		logger.warning(f'[get_git_show] gitrepo={gitrepo} does not exist')
+		return None
 
 def get_git_status(gitrepo: GitRepo) -> list:
 	# git -P log    --format="%aI %H %T %P %ae subject=%s"
