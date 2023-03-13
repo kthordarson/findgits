@@ -139,11 +139,6 @@ class GitRepo(Base):
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
 
-	commitmsg_file = Column('commitmsg_file', String(255))
-	commitmsg_mtime = Column('commitmsg_mtime', DateTime)
-	commitmsg_ctime = Column('commitmsg_ctime', DateTime)
-	commitmsg_atime = Column('commitmsg_atime', DateTime)
-
 	# git_path: Mapped[List["GitFolder"]] = relationship()
 	# gitfolder = relationship("GitFolder", backref="git_path")
 
@@ -151,7 +146,6 @@ class GitRepo(Base):
 		self.gitfolder_id = gitfolder.id
 		self.parent_id = gitfolder.parent_id
 		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
-		self.commitmsg_file = f'{self.git_path}/.git/COMMIT_EDITMSG'
 		self.git_path = gitfolder.git_path
 		self.first_scan = datetime.now()
 		self.last_scan = datetime.now()
@@ -177,12 +171,6 @@ class GitRepo(Base):
 			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
 			self.config_atime = datetime.fromtimestamp(st.st_atime)
 			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
-
-		if os.path.exists(self.commitmsg_file):
-			st = os.stat(self.commitmsg_file)
-			self.commitmsg_ctime = datetime.fromtimestamp(st.st_ctime)
-			self.commitmsg_atime = datetime.fromtimestamp(st.st_atime)
-			self.commitmsg_mtime = datetime.fromtimestamp(st.st_mtime)
 
 	def read_git_config(self):
 		if not os.path.exists(self.git_config_file):

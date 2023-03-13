@@ -65,12 +65,6 @@ if __name__ == '__main__':
 	if args.dropdatabase:
 		drop_database(engine)
 	if args.getdupes:
-		#dupe_view_init(session)
-		#sql = text('select * from dupeview order by count desc limit 10;')
-		# psql:
-		# select * from gitrepo ou where (select count(*) from gitrepo inr where inr.giturl = ou.giturl)>1;
-		# select giturl, count(*) from gitrepo group by giturl having count(*)>3;
-		# sql = text('select id,gitfolder_id,giturl,git_path, count(*) as count from gitrepo group by giturl having count>1;')
 		dupes = get_dupes(session)
 		dupe_counter = 0
 		for d in dupes:
