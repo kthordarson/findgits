@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
-from dbstuff import drop_database, dupe_view_init,get_engine, db_init
+from dbstuff import drop_database, dupe_view_init,get_engine, db_init, get_dupes
 from dbstuff import MissingGitFolderException, MissingConfigException
 from git_tasks import run_scanpath_threads, run_full_scan
 from git_tasks import (add_path, scanpath)
@@ -33,7 +33,7 @@ def dbdump(backupfile, engine):
 	# dump db to file
 	pass
 
-def get_dupes(session:sessionmaker):
+def get_cxdupes(session:sessionmaker):
 	sql = text('select giturl, count(*) as count from gitrepo group by giturl having count(*)>1;')
 	dupes = None
 	dupe_counter = 0
@@ -86,17 +86,16 @@ if __name__ == '__main__':
 		print(f'[getdupes] {dupe_counter} dupes found')
 	if args.scanpath:
 		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
-		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
+		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).count()
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
 		scanpath(gsp, session)
-		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).all()
+		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).count()
 		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)} after scan={len(entries_afterscan)}')
 	if args.scanpath_threads:
 		run_scanpath_threads(args.scanpath_threads, session)
 	if args.fullscan:
 		scan_results = run_full_scan(args.dbmode)
 		logger.info(f'[*] runscan done res={scan_results} ')
-
 	if args.dbinfo:
 		# show db info
 		git_parent_entries = session.query(GitParentPath).all() #filter(GitParentPath.id == str(args.listpaths)).all()
@@ -111,13 +110,13 @@ if __name__ == '__main__':
 			rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
 			print(f'[*] id={gpe.id} path={gpe.folder}\n\tfolders={fc}\n\trepos={rc}\n\tsize={format_bytes(f_size)}\n\tscantime={f_scantime}')
 		print(f'[*] total_size={format_bytes(total_size)} total_time={total_time}')
-
 	if args.addpath:
 		try:
 			new_gsp = add_path(args.addpath, session)
 		except MissingGitFolderException as e:
 			logger.error(e)
-		# logger.debug(f'[*] new path: {new_gsp}')
+		gspcount = session.query(GitParentPath).count()
+		logger.debug(f'[*] new gsp: {new_gsp} gspcount:{gspcount}')
 	# scanpath(new_gsp.id, session)
 	if args.importpaths:
 		# read paths from text file and import

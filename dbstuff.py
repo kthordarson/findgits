@@ -34,15 +34,30 @@ class GitParentPath(Base):
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_time = Column('scan_time', Float)
+	folder_count = Column(Integer)
 
 	def __init__(self, folder):
 		self.folder = folder
 		self.first_scan = datetime.now()
-		self.last_scan = datetime.now()
+		self.last_scan = self.first_scan
 		self.scan_time = 0.0
+		self.gfl = []
+		self.folder_count = 0
 
 	def __repr__(self):
-		return f'GSP id={self.id} {self.folder}'
+		return f'<GSP id={self.id} {self.folder} st:{self.scan_time}>'
+
+	def get_git_folders(self) -> dict:
+		t0 = datetime.now()
+		cmdstr = ['find', self.folder + '/', '-type', 'd', '-name', '.git']
+		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+		g_out = out.decode('utf8').split('\n')
+		res = [Path(k).parent for k in g_out if os.path.exists(k + '/config')]
+		self.scan_time = (datetime.now() - t0).total_seconds()
+		# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
+		self.gfl = res
+		return {'gitparent': self.id, 'res': res, 'scan_time': self.scan_time}
+
 
 
 class GitFolder(Base):
@@ -54,9 +69,8 @@ class GitFolder(Base):
 	# gitparent = relationship("GitParentPath", backref="git_path")
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
-	scan_time = Column('scan_time', Float)
 	scan_count = Column('scan_count', Integer)
-
+	scan_time = Column('scan_time', Float)
 	folder_size = Column('folder_size', BigInteger)
 	file_count = Column('file_count', BigInteger)
 	subdir_count = Column('subdir_count', BigInteger)
@@ -65,44 +79,27 @@ class GitFolder(Base):
 	gitfolder_atime = Column('gitfolder_atime', DateTime)
 	gitfolder_mtime = Column('gitfolder_mtime', DateTime)
 	dupe_flag = Column('dupe_flag', Boolean)
+	valid = Column(Boolean, default=True)
 
 	def __init__(self, gitfolder: str, gsp: GitParentPath):
 		self.parent_path = str(gsp.folder)
 		self.parent_id = gsp.id
 		self.git_path = str(gitfolder)
 		self.first_scan = datetime.now()
-		self.last_scan = datetime.now()
-		self.get_stats()
+		self.last_scan = self.first_scan
 		self.scan_time = 0.0
 		self.scan_count = 0
+		self.get_stats()
 		self.dupe_flag = False
 
 	def __repr__(self):
-		return f'GitFolder {self.git_path} size={self.folder_size} fc={self.file_count} sc={self.subdir_count}'
-
-	def refresh(self):
-		self.scan_count += 1
-		self.last_scan = datetime.now()
-		self.get_stats()
-		return f'[refresh] {self}'
-
-	# logger.debug(f'[r] {self}')
-
-	def rescan(self):
-		# self.last_scan = datetime.now()
-		try:
-			self.get_stats()
-		except FileNotFoundError as e:
-			errmsg = f'{self} {e}'
-			logger.warning(errmsg)
-			return errmsg
-
-	# raise FileNotFoundError(errmsg)
-
-	# return GitRepo(self)
+		return f'<GitFolder {self.git_path} size={self.folder_size} fc={self.file_count} sc={self.subdir_count} t:{self.scan_time}>'
 
 	def get_stats(self):
+		t0 = datetime.now()
 		if os.path.exists(self.git_path):
+			self.scan_count += 1
+			self.last_scan = datetime.now()
 			stat = os.stat(self.git_path)
 			self.gitfolder_ctime = datetime.fromtimestamp(stat.st_ctime)
 			self.gitfolder_atime = datetime.fromtimestamp(stat.st_atime)
@@ -111,7 +108,9 @@ class GitFolder(Base):
 			self.folder_size = get_directory_size(self.git_path)
 			self.file_count = get_subfilecount(self.git_path)
 			self.subdir_count = get_subdircount(self.git_path)
+			self.scan_time = (datetime.now() - t0).total_seconds()
 		else:
+			self.valid = False
 			raise FileNotFoundError(f'{self} does not exist')
 
 
@@ -131,13 +130,13 @@ class GitRepo(Base):
 	dupe_count = Column('dupe_count', BigInteger)
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
-	scan_time = Column('scan_time', Float)
 	scan_count = Column('scan_count', Integer)
 
 	git_config_file = Column('git_config_file', String(255))
 	config_ctime = Column('config_ctime', DateTime)
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
+	valid = Column(Boolean, default=True)
 
 	# git_path: Mapped[List["GitFolder"]] = relationship()
 	# gitfolder = relationship("GitFolder", backref="git_path")
@@ -149,34 +148,24 @@ class GitRepo(Base):
 		self.git_path = gitfolder.git_path
 		self.first_scan = datetime.now()
 		self.last_scan = datetime.now()
-		self.scan_time = 0.0
 		self.scan_count = 0
 		self.dupe_flag = False
 		self.get_stats()
-		self.read_git_config()
 
 	def __repr__(self):
-		return f'GitRepo id={self.id} gitfolder_id={self.gitfolder_id} url: {self.giturl} remote: {self.remote} branch: {self.branch}'
-
-	def refresh(self):
-		self.get_stats()
-		self.read_git_config()
-		self.scan_count += 1
-
-	# logger.info(f'[refresh] {self}')
+		return f'<GitRepo id={self.id} {self.giturl} fid={self.gitfolder_id} r:{self.remote}/{self.branch}>'
 
 	def get_stats(self):
-		if os.path.exists(self.git_config_file):
+		if not os.path.exists(self.git_config_file):
+			self.valid = False
+			return
+		else:
+			#c = self.
+			self.scan_count += 1
 			st = os.stat(self.git_config_file)
 			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
 			self.config_atime = datetime.fromtimestamp(st.st_atime)
 			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
-
-	def read_git_config(self):
-		if not os.path.exists(self.git_config_file):
-			return
-		else:
-			#c = self.
 			conf = ConfigParser(strict=False)
 			c = conf.read(self.git_config_file)
 			remote_section = None
@@ -185,6 +174,7 @@ class GitRepo(Base):
 					remote_section = [k for k in conf.sections() if 'remote' in k][0]
 				except IndexError as e:
 					logger.error(f'[err] {self} {e} git_config_file={self.git_config_file} conf={conf.sections()}')
+					self.valid = False
 				if remote_section:
 					self.remote = remote_section.split(' ')[1].replace('"', '')
 					branch_section = [k for k in conf.sections() if 'branch' in k][0]
@@ -194,8 +184,10 @@ class GitRepo(Base):
 						self.giturl = conf[remote_section]['url']
 					except TypeError as e:
 						logger.warning(f'[!] {self} typeerror {e} git_config_file={self.git_config_file} ')
+						self.valid = False
 					except KeyError as e:
 						logger.warning(f'[!] {self} KeyError {e} git_config_file={self.git_config_file}')
+						self.valid = False
 
 
 class DupeViewX(Base):
@@ -216,22 +208,12 @@ def drop_database(engine: Engine) -> None:
 	Base.metadata.create_all(bind=engine)
 
 
-def get_folder_entries(session: sessionmaker, parent_item: GitParentPath) -> dict:
-	parentid = parent_item.id
-	gfe = [k for k in session.query(GitFolder).filter(GitFolder.parent_id == parentid).all()]
-	return {'parentid': parent_item, 'gfe': gfe}
-
-
-def get_repo_entries(session: sessionmaker) -> list:
-	return session.query(GitRepo).all()
-
-
 def get_engine(dbtype: str) -> Engine:
 	if dbtype == 'mysql':
 		dbuser = os.getenv('gitdbUSER')
 		dbpass = os.getenv('gitdbPASS')
 		dbhost = os.getenv('gitdbHOST')
-		dbname = os.getenv('gitdbNAME')
+		dbname = 'gitdbdev'#os.getenv('gitdbNAME')
 		if not dbuser or not dbpass or not dbhost or not dbname:
 			raise AttributeError(f'[db] missing db env variables')
 		dburl = f"mysql+pymysql://{dbuser}:{dbpass}@{dbhost}/{dbname}?charset=utf8mb4"
