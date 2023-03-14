@@ -101,6 +101,8 @@ if __name__ == '__main__':
 		git_parent_entries = session.query(GitParentPath).all() #filter(GitParentPath.id == str(args.listpaths)).all()
 		total_size = 0
 		total_time = 0
+		#print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
+		print(f"{'id' : <3}{'folder' : <31}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <10}")
 		for gpe in git_parent_entries:
 			fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
 			f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
@@ -108,8 +110,9 @@ if __name__ == '__main__':
 			f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
 			total_time += f_scantime
 			rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-			print(f'[*] id={gpe.id} path={gpe.folder}\n\tfolders={fc}\n\trepos={rc}\n\tsize={format_bytes(f_size)}\n\tscantime={f_scantime}')
-		print(f'[*] total_size={format_bytes(total_size)} total_time={total_time}')
+			scant = str(timedelta(seconds=f_scantime))
+			print(f'{gpe.id:<3}{gpe.folder:<31}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{scant:<10}')
+		print(f'[*] total_size={format_bytes(total_size)} total_time={timedelta(seconds=total_time)}')
 	if args.addpath:
 		try:
 			new_gsp = add_path(args.addpath, session)
