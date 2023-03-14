@@ -55,8 +55,10 @@ def run_full_scan(dbmode: str):
 			tasks.append(executor.submit(git_parentpath.get_git_folders,))
 			#tasks.append(executor.submit(get_folder_list, git_parentpath))
 			git_parentpath.last_scan = datetime.now()
-			logger.debug(f'[runscan] {datetime.now() - t0} {git_parentpath} firstscan:{git_parentpath.first_scan} lastscan:{git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
+			tx0 = (datetime.now() - t0).total_seconds()
+			logger.debug(f'[runscan] {tx0} {git_parentpath} firstscan:{git_parentpath.first_scan} lastscan:{git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
 		for res in as_completed(tasks):
+			tx1 = datetime.now()
 			r = res.result()
 			git_folders = r["res"]
 			gitparent = session.query(GitParentPath).filter(GitParentPath.id == r["gitparent"]).first()
@@ -65,7 +67,9 @@ def run_full_scan(dbmode: str):
 			gitparent.scan_time = r["scan_time"]
 			gitparent.folder_count = len(git_folders)
 			session.commit()
-			logger.info(f'[runscan] {datetime.now() - t0} {len(git_folders)} gitfolders from {gitparent} gpscantime={gitparent.scan_time} gitparent.folder_count:{gitparent.folder_count}')
+			tx0 = (datetime.now() - t0).total_seconds()
+			tx1_0 = (datetime.now() - tx1).total_seconds()
+			#logger.info(f'[runscan] t0:{tx0} t1:{tx1_0} {len(git_folders)} gitfolders from {gitparent} gpscantime={gitparent.scan_time} gitparent.folder_count:{gitparent.folder_count}')
 			cnt = 0
 			ups = 0
 			for gf in git_folders:
@@ -85,10 +89,6 @@ def run_full_scan(dbmode: str):
 					session.commit
 					cnt += 1
 				else:
-					# update stats for existing entries
-					# logger.debug(f'[runscan] gitparent={r["gitparent"]} r={len(r["res"])} fc={len(folder_check)} gc0={folder_check[0]}')
-					# for updatefolder_ in folder_check:
-					# gf_update = session.query(GitFolder).filter(GitFolder.git_path == str(updatefolder_.git_path)).first()
 					folder_check.last_scan = datetime.now()
 					# scan_time = (datetime.now() - _t0_).total_seconds()
 					# _t0_ = datetime.now()
@@ -101,7 +101,9 @@ def run_full_scan(dbmode: str):
 						ups += 1
 					session.commit()
 			# logger.debug(f'[runscan] gitparent={gitparent} fc={len(folder_check)} gc0={folder_check[0]} updatefolder_={updatefolder_} gf_update={gf_update} gr_update={gr_update}')
-			logger.debug(f'[runscan] {datetime.now() - t0} {len(r["res"])} gitfolders from {r["gitparent"]} entries {cnt}/{ups} ')
+			tx0 = (datetime.now() - t0).total_seconds()
+			tx0_1 = (datetime.now() - tx1).total_seconds()
+			logger.info(f'[runscan] tx0:{tx0} tx0_1:{tx0_1} reslen:{len(r["res"])} gitfolders from {gitparent} cnt:{cnt} ups:{ups} ')
 
 	gsp = session.query(GitParentPath).count()
 	repos = session.query(GitRepo).count()
