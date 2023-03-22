@@ -54,6 +54,8 @@ class GitParentPath(Base):
 		self.folder_size = 0
 		self.file_count = 0
 		self.repo_count = 0
+		self.git_folder_list = []
+		self.base_folders = []
 
 	def __repr__(self):
 		return f'<GPP id={self.id} {self.folder}>'
@@ -101,7 +103,7 @@ class GitFolder(Base):
 	is_parent = Column(Boolean, default=False)
 
 	def __init__(self, gitfolder: str, gpp: GitParentPath):
-		self.parent_path = str(gpp.folder)
+		self.parent_path = gpp.folder
 		self.parent_id = gpp.id
 		self.git_path = str(gitfolder)
 		self.first_scan = datetime.now()
@@ -113,11 +115,15 @@ class GitFolder(Base):
 		self.is_parent = False
 
 	def __repr__(self):
-		return f'<GitFolder {self.git_path} size={self.folder_size} fc={self.file_count} sc={self.subdir_count} t:{self.scan_time}>'
+		return f'<GitFolder {self.id} {self.git_path} >'
 
 	def get_stats(self):
 		""" Get stats for this gitfolder"""
 		t0 = datetime.now()
+		sub_git_folder = [k for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+		if len(sub_git_folder) > 1:
+			self.is_parent = True
+			logger.info(f'{self.git_path} is a parent folder with {len(sub_git_folder)} subfolders]')
 		if os.path.exists(self.git_path): # redundant check, but just in case?
 			self.scan_count += 1
 			self.last_scan = datetime.now()
@@ -132,7 +138,7 @@ class GitFolder(Base):
 			self.scan_time = (datetime.now() - t0).total_seconds()
 		else:
 			self.valid = False
-			raise FileNotFoundError(f'{self} does not exist')
+			raise MissingGitFolderException(f'{self} does not exist')
 
 
 # todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
@@ -167,7 +173,7 @@ class GitRepo(Base):
 	def __init__(self, gitfolder: GitFolder):
 		self.gitfolder_id = gitfolder.id
 		self.parent_id = gitfolder.parent_id
-		self.git_config_file = str(gitfolder.git_path) + '/.git/config'
+		self.git_config_file = gitfolder.git_path + '/config'
 		self.git_path = gitfolder.git_path
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
@@ -182,7 +188,7 @@ class GitRepo(Base):
 		""" Collect stats and read config for this git repo """
 		if not os.path.exists(self.git_config_file): # redundant check, but just in case?
 			self.valid = False
-			return
+			raise MissingGitFolderException(f'{self} git config not found')
 		else:
 			#c = self.
 			self.scan_count += 1

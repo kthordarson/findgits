@@ -14,8 +14,8 @@ from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityErr
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import drop_database, get_engine, db_init, get_dupes, db_dupe_info, get_db_info,gitfolder_to_gitparent
 from dbstuff import MissingGitFolderException, MissingConfigException
-from git_tasks import run_full_scan
-from git_tasks import (add_path, scanpath)
+from git_tasks import run_full_scan, scan_parent_subfolders
+from git_tasks import (add_parent_path, scanpath)
 from git_tasks import (get_git_log, get_git_show, get_git_status)
 from utils import format_bytes
 CPU_COUNT = cpu_count()
@@ -48,55 +48,32 @@ def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
 	scantime_start = datetime.now()
 	scanpath(gpp, session)
 	scantime_end = (datetime.now() - scantime_start).total_seconds()
-	gpp.scan_time = scantime_end
-	gpp.last_scan = datetime.now()
-	session.commit()
-	logger.debug(f'[msp] {gpp} scan_time:{gpp.scan_time}')
+	#gpp.scan_time = scantime_end
+	#gpp.last_scan = datetime.now()
+	#session.commit()
+	logger.debug(f'[msp] scan_time:{scantime_end}')
 
-def dbcheck(session) -> str:
+def dbcheck(session) -> int:
 	"""
 	run db checks:
-		* check if any subfolders of each gitparentpath contain more than one gitfolder, if so, turn into gitparentpath
 		* todo check for missing folders
 		* todo check for missing repos
 	"""
 	gpp = session.query(GitParentPath).all()
 	ggp_count = len(gpp)
-	gflist_to_convert = []
-	for gp in gpp:
-		sub_count = 0
-		logger.info(f'[chk] scanning {gp} for subgitfolders')
-		try:
-			subfolders = session.query(GitFolder).filter(GitFolder.parent_id == gp.id).all()
-		except OperationalError as e:
-			logger.error(f'[chk] {e} gp: {gp}')
-			continue
-		for sf in subfolders:
-			sub_gits = [k for k in glob.glob(sf.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
-			# check if the folder contains more than one git repo
-			if len(sub_gits) > 1:
-				sub_count += len(sub_gits)
-				sf.is_parent = True
-				# set is_parent on that gitfolder
-				session.commit()
-		gppcnt = session.query(GitParentPath).count()
-		subfcnt = session.query(GitFolder).filter(GitFolder.is_parent == True).count()
-		logger.debug(f'[chk] gppcntt:{gppcnt}  subfcnt:{subfcnt}')
-	else:
-		logger.info(f'[cgk] no folders to convbert to gitparentpath')
-	return len(gflist_to_convert)
+	return ggp_count
 
 if __name__ == '__main__':
 	myparse = argparse.ArgumentParser(description="findgits")
-	myparse.add_argument('--addpath', dest='addpath')
+	myparse.add_argument('--addpath', dest='addpath', help='add new parent path to db and run scan on it')
 	myparse.add_argument('--importpaths', dest='importpaths')
 	myparse.add_argument('--listpaths', action='store_true', help='list gitparentpaths in db', dest='listpaths')
-	myparse.add_argument('--fullscan', action='store_true', default=False, dest='fullscan')
-	myparse.add_argument('--scanpath', help='Scan single GitParent, specified by ID. Use listpaths to get IDs', action='store', dest='scanpath')
+	myparse.add_argument('--fullscan', action='store_true', default=False, dest='fullscan',help='run full scan on all parent paths in db')
+	myparse.add_argument('--scanpath', help='Scan single GitParent, specified by ID. Use --listpaths to get IDs', action='store', dest='scanpath')
 	myparse.add_argument('--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
 	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', required=True, action='store', metavar='dbmode')
-	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database')
+	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
 	myparse.add_argument('--dbcheck', help='run checks', action='store_true', default=False, dest='dbcheck')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
@@ -114,9 +91,12 @@ if __name__ == '__main__':
 		gpp = session.query(GitParentPath).all()
 		for gp in gpp:
 			print(f'[listpaths] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')
-	if args.getdupes and (args.dbmode == 'mysql' or args.dbmode == 'sqlite'):
-		# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
-		dupes = get_dupes(session)
+	if args.getdupes:
+		if args.dbmode == 'postgresql':
+			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
+		else:
+			dupes = get_dupes(session)
+			# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
 	if args.scanpath:
 		gpp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
 		if gpp:
@@ -127,19 +107,31 @@ if __name__ == '__main__':
 		else:
 			logger.warning(f'Path with id {args.scanpath} not found')
 	if args.fullscan:
+		t0 = datetime.now()
 		scan_results = run_full_scan(args.dbmode)
-		logger.info(f'[*] runscan done res={scan_results} ')
-	if args.dbinfo and args.dbmode == 'postgresql':
-		logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
-	if args.dbinfo and (args.dbmode == 'mysql' or args.dbmode == 'sqlite'):
-		db_dupe_info(session)
-		get_db_info(session)
+		t1 = (datetime.now() - t0).total_seconds()
+		logger.info(f'[*] fullscan done res={scan_results} t:{t1}')
+	if args.dbinfo:
+		if args.dbmode == 'postgresql':
+			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
+		else:
+			db_dupe_info(session)
+			get_db_info(session)
 	if args.addpath:
-		try:
-			new_gpp = add_path(args.addpath, session)
-		except (MissingGitFolderException, OperationalError) as e:
-			logger.error(e)
+		t0 = datetime.now()
+		new_gpp = add_parent_path(args.addpath, session)
 		if new_gpp:
-			main_scanpath(new_gpp, session)
-			gppcount = session.query(GitParentPath).count()
-			logger.debug(f'[*] gppcount:{gppcount}')
+			session.add(new_gpp)
+			session.commit()
+			parent_subfolders = scan_parent_subfolders(new_gpp)
+			if len(parent_subfolders) > 0:
+				logger.debug(f'[addpath] {new_gpp} parent_subfolders:{len(parent_subfolders)}')
+				for new_subgpp in parent_subfolders:
+					session.add(new_subgpp)
+					session.commit()
+					logger.info(f'[*] {new_subgpp} from {new_gpp}')
+					scanpath(new_subgpp, session)
+			scanpath(new_gpp, session)
+		gppcount = session.query(GitParentPath).count()
+		t1 = (datetime.now() - t0).total_seconds()
+		logger.debug(f'[*] gppcount:{gppcount} t:{t1}')
