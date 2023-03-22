@@ -55,13 +55,13 @@ class MainApp(QWidget, Ui_FindGitsApp):
         self.treeWidget.setColumnCount(3)
         self.treeWidget.headerItem().setText(0, "id")
         self.treeWidget.headerItem().setText(1, "count")
-        self.treeWidget.headerItem().setText(2, "giturl")
+        self.treeWidget.headerItem().setText(2, "git_url")
         dupes = get_dupes(self.session)
         for d in dupes:
             item0 = QTreeWidgetItem(self.treeWidget)
             item0.setText(0, f"{d.id}")
             item0.setText(1, f"{d.count}")
-            item0.setText(2, f"{d.giturl}")
+            item0.setText(2, f"{d.git_url}")
             # try:
             #     for f in d.get('folders'):
             #         item1 = QTreeWidgetItem(item0)
@@ -78,9 +78,9 @@ class MainApp(QWidget, Ui_FindGitsApp):
             logger.error(f'[tic] indexerror {e} widget={widget.text(0)} {widget.text(1)}')
             return
         self.idLineEdit.setText(f'{repo.id}')
-        self.urlLineEdit.setText(f'{repo.giturl}')
+        self.urlLineEdit.setText(f'{repo.git_url}')
         self.dupecountlabel.setText(f'Dupes: {repo.dupe_count}')
-        itemdupes = self.session.query(GitRepo).filter(GitRepo.giturl == repo.giturl).all()
+        itemdupes = self.session.query(GitRepo).filter(GitRepo.git_url == repo.git_url).all()
         folderdupes = [session.query(GitFolder).filter(GitFolder.id == d.gitfolder_id).first() for d in itemdupes]
         self.dupetree.clear()
         for f in folderdupes:
@@ -93,7 +93,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
         for k in gitrepos:
             item_1 = QTreeWidgetItem(self.treeWidget)
             item_1.setText(0, f"{k.id}")
-            item_1.setText(1, f"{k.giturl}")
+            item_1.setText(1, f"{k.git_url}")
         self.retranslateUi(self)
 
     def folderButton_clicked(self, widget):
