@@ -67,22 +67,26 @@ def dbcheck(session) -> str:
 	for gp in gpp:
 		sub_count = 0
 		logger.info(f'[chk] scanning {gp} for subgitfolders')
-		subfolders = session.query(GitFolder).filter(GitFolder.parent_id == gp.id).all()
+		try:
+			subfolders = session.query(GitFolder).filter(GitFolder.parent_id == gp.id).all()
+		except OperationalError as e:
+			logger.error(f'[chk] {e} gp: {gp}')
+			continue
 		for sf in subfolders:
-			sub_gits = glob.glob(str(Path(sf.git_path))+'/**/.git',recursive=True, include_hidden=True)
+			sub_gits = [k for k in glob.glob(str(Path(sf.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
 			if len(sub_gits) > 1:
-				logger.warning(f'[chk] {sf.git_path} contains {len(sub_gits)} subgitfolders')
-				gflist_to_convert.append(sf)
 				sub_count += len(sub_gits)
-	if len(gflist_to_convert) > 0:
-		logger.debug(f'[chk] {len(gflist_to_convert)} gitfolders to convert to gitparentpaths')
-		for g in gflist_to_convert:
-			gpp = gitfolder_to_gitparent(g, session)
-			session.add(gpp)
-			session.commit()
-			main_scanpath(gpp, session)
+				sf.is_parent = True
+				session.commit()
+				# newgpp = gitfolder_to_gitparent(sf, session)
+				# logger.debug(f'[chk] {sf} contains {len(sub_gits)} subgitfolders converted to {gpp}')
+				#session.add(newgpp)
+				#session.commit()
+				#new_gfl = get_folder_list(newgpp, session)
+				#scanpath(newgpp, session)
 		gppcnt = session.query(GitParentPath).count()
-		logger.debug(f'[chk] {gppcnt} gitparentpaths in db, was {ggp_count}')
+		subfcnt = session.query(GitFolder).filter(GitFolder.is_parent == True).count()
+		logger.debug(f'[chk] gppcntt:{gppcnt}  subfcnt:{subfcnt}')
 	else:
 		logger.info(f'[cgk] no folders to convbert to gitparentpath')
 	return len(gflist_to_convert)

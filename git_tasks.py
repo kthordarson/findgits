@@ -41,7 +41,10 @@ def run_full_scan(dbmode: str) -> dict:
 			logger.debug(f'[runscan] {tx0} {git_parentpath} firstscan:{git_parentpath.first_scan} lastscan:{git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
 		for res in as_completed(tasks):
 			tx1 = datetime.now()
-			r = res.result()
+			try:
+				r = res.result()
+			except DetachedInstanceError as e:
+				logger.error(f'[runscan] {e} {type(e)} res = {res}')
 			git_paths = r["res"]
 			gitparent = session.query(GitParentPath).filter(GitParentPath.id == r["gitparent"]).first()
 			gitparent.last_scan = datetime.now()
@@ -60,6 +63,10 @@ def run_full_scan(dbmode: str) -> dict:
 					# add new entries
 					_t0_ = datetime.now()
 					git_folder = GitFolder(gitpath, gitparent)
+					sub_git_folder = [k for k in glob.glob(str(Path(git_folder.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+					if len(sub_git_folder) > 1:
+						git_folder.is_parent = True
+						logger.info(f'[*] {git_folder} is a parent folder with {len(sub_git_folder)} subfolders]')
 					git_folder.scan_time = (datetime.now() - _t0_).total_seconds()
 					session.add(git_folder)
 					session.commit()
@@ -125,6 +132,11 @@ def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
 		if not git_folder:
 			# new git folder
 			git_folder = GitFolder(g, gpp)
+			sub_git_folder = [k for k in glob.glob(str(Path(git_folder.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+			if len(sub_git_folder) > 1:
+				git_folder.is_parent = True
+				logger.info(f'[*] {git_folder} is a parent folder with {len(sub_git_folder)} subfolders]')
+			#logger.info(f'[scanpath] new gitfolder={git_folder.git_path} gpp={gpp}')
 			session.add(git_folder)
 		else:
 			git_folder.get_stats()
@@ -153,6 +165,7 @@ def get_repos(gpp: GitParentPath, session: sessionmaker) -> list:
 			# new git repo
 			git_repo = GitRepo(git_folder)
 			gpp.repo_count += 1
+			# logger.info(f'[getrepos] new repo={git_repo} gpp={gpp}')
 		else:
 			git_repo.get_stats()
 		repos.append(git_repo)

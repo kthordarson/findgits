@@ -98,6 +98,7 @@ class GitFolder(Base):
 	gitfolder_mtime = Column('gitfolder_mtime', DateTime)
 	dupe_flag = Column('dupe_flag', Boolean)
 	valid = Column(Boolean, default=True)
+	is_parent = Column(Boolean, default=False)
 
 	def __init__(self, gitfolder: str, gsp: GitParentPath):
 		self.parent_path = str(gsp.folder)
@@ -109,6 +110,7 @@ class GitFolder(Base):
 		self.scan_count = 0
 		self.get_stats()
 		self.dupe_flag = False
+		self.is_parent = False
 
 	def __repr__(self):
 		return f'<GitFolder {self.git_path} size={self.folder_size} fc={self.file_count} sc={self.subdir_count} t:{self.scan_time}>'
@@ -329,14 +331,20 @@ def get_db_info(session):
 	print(f'{"="*90}')
 	print(f'{format_bytes(total_size):>52} {tt:>15}')
 
-def gitfolder_to_gitparent(gitfolder, session) -> GitParentPath:
+def gitfolder_to_gitparent(gitfolder:GitFolder, session:sessionmaker) -> GitParentPath:
 	"""
 	Convert a gitfolder to a gitparent. Used when gitfolder contains more than one git repo
-	Remove the gitfolder from db, create a new gitparentpath and return it
+	Removes the gitfolder and any repos from that folder from db, create a new gitparentpath and return it
 	Parameters: gitfolder (GitFolder) - gitfolder to convert
 	Returns: gitparent (GitParentPath)
 	"""
+	repos_to_del = session.query(GitRepo).filter(GitRepo.id == gitfolder.id).all()
+	for r in repos_to_del:
+		logger.warning(f'[gtp] removing {r} from db')
+		session.delete(r)
 	session.delete(gitfolder)
-	session.commit()
+	logger.warning(f'[gtp] removing {gitfolder} from db')
 	# logger.debug(f'[gto] removed {gitfolder}')
-	return GitParentPath(gitfolder.git_path)
+	gpp = GitParentPath(gitfolder.git_path)
+	logger.info(f'[gtp] new {gpp} created')
+	return gpp
