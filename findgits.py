@@ -51,7 +51,7 @@ def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
 	gpp.scan_time = scantime_end
 	gpp.last_scan = datetime.now()
 	session.commit()
-	logger.debug(f'[mainscanpath] {gpp} scan_time:{gpp.scan_time}')
+	logger.debug(f'[msp] {gpp} scan_time:{gpp.scan_time}')
 
 def dbcheck(session) -> str:
 	"""
@@ -72,7 +72,7 @@ def dbcheck(session) -> str:
 			logger.error(f'[chk] {e} gp: {gp}')
 			continue
 		for sf in subfolders:
-			sub_gits = [k for k in glob.glob(str(Path(sf.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+			sub_gits = [k for k in glob.glob(sf.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
 			# check if the folder contains more than one git repo
 			if len(sub_gits) > 1:
 				sub_count += len(sub_gits)
@@ -140,5 +140,6 @@ if __name__ == '__main__':
 		except (MissingGitFolderException, OperationalError) as e:
 			logger.error(e)
 		if new_gpp:
+			main_scanpath(new_gpp, session)
 			gppcount = session.query(GitParentPath).count()
 			logger.debug(f'[*] gppcount:{gppcount}')

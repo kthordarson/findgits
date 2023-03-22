@@ -87,7 +87,7 @@ def run_full_scan(dbmode: str) -> dict:
 					# add new entries
 					_t0_ = datetime.now()
 					git_folder = GitFolder(gitpath, gitparent)
-					sub_git_folder = [k for k in glob.glob(str(Path(git_folder.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+					sub_git_folder = [k for k in glob.glob(git_folder.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
 					if len(sub_git_folder) > 1:
 						git_folder.is_parent = True
 						logger.info(f'[*] {git_folder} is a parent folder with {len(sub_git_folder)} subfolders]')
@@ -149,17 +149,17 @@ def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
 	Returns: None
 	"""
 	gfl = get_folder_list(gpp)
-	logger.info(f'[scanpath] scanpath={gpp.folder} gpp={gpp} found {len(gfl["res"])} gitfolders gpp.scan_time={gpp.scan_time} gflrescantime={gfl["scan_time"]}')
+	logger.info(f'[sp] scanning {gpp.folder} found {len(gfl["res"])} gitfolders gppst={gpp.scan_time} gflst={gfl["scan_time"]}')
 	for g in gfl['res']:
 		git_folder = session.query(GitFolder).filter(GitFolder.git_path == str(g)).first()
 		if not git_folder:
 			# new git folder
 			git_folder = GitFolder(g, gpp)
-			sub_git_folder = [k for k in glob.glob(str(Path(git_folder.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+			sub_git_folder = [k for k in glob.glob(git_folder.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
 			if len(sub_git_folder) > 1:
 				git_folder.is_parent = True
-				logger.info(f'[scanpath] {git_folder.git_path} is a parent folder with {len(sub_git_folder)} subfolders]')
-			#logger.info(f'[scanpath] new gitfolder={git_folder.git_path} gpp={gpp}')
+				logger.info(f'[sp] {git_folder.git_path} is a parent folder with {len(sub_git_folder)} subfolders]')
+			#logger.info(f'[sp] new gitfolder={git_folder.git_path} gpp={gpp}')
 			session.add(git_folder)
 		else:
 			git_folder.get_stats()
@@ -172,7 +172,7 @@ def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
 		session.add(repo)
 	session.commit()
 	gpp_folders = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
-	logger.info(f'[scanpath] Done gpp={gpp} res:{len(gfl["res"])} gppfolders={gpp_folders}')
+	logger.info(f'[sp] Done gpp={gpp} res:{len(gfl["res"])} gppfolders={gpp_folders}')
 
 def get_repos(gpp: GitParentPath, session: sessionmaker) -> list:
 	"""
@@ -202,16 +202,17 @@ def get_folder_list(gitparent: GitParentPath) -> dict:
 	Returns: dict with keys 'gitparent', 'res', 'scan_time'
 	"""
 	# todo: maybe this should be a method of GitParentPath
-	startpath = gitparent.folder
 	t0 = datetime.now()
 	#cmdstr = ['find', startpath + '/', '-type', 'd', '-name', '.git']
 	#out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 	#g_out = out.decode('utf8').split('\n')
 	#if err != b'':
 	#	logger.warning(f'[get_folder_list] {cmdstr} {err}')
+
+	g_out = glob.glob(gitparent.folder+'/**/.git',recursive=True, include_hidden=True)
+
 	# only return folders that have a config file
-	g_out = glob.glob(str(Path(startpath))+'/**/.git',recursive=True, include_hidden=True)
-	res = [Path(k).parent for k in g_out if os.path.exists(k + '/config')]
+	res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 	scan_time = (datetime.now() - t0).total_seconds()
 	# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
 	return {'gitparent': gitparent, 'res': res, 'scan_time': scan_time}

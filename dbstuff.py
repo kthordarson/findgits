@@ -44,7 +44,7 @@ class GitParentPath(Base):
 	file_count = Column(BigInteger)
 	repo_count = Column(Integer)
 
-	def __init__(self, folder):
+	def __init__(self, folder:str):
 		self.folder = folder
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
@@ -67,8 +67,8 @@ class GitParentPath(Base):
 		#cmdstr = ['find', self.folder + '/', '-type', 'd', '-name', '.git']
 		#out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 		#g_out = out.decode('utf8').split('\n')
-		g_out = glob.glob(str(Path(self.folder))+'/**/.git',recursive=True, include_hidden=True)
-		res = [Path(k).parent for k in g_out if os.path.exists(k + '/config')]
+		g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
+		res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
 		# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
 		self.gfl = res
