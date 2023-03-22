@@ -46,13 +46,12 @@ def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
 	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
 	"""
 	scantime_start = datetime.now()
-	gppscantime0 = gpp.scan_time
 	scanpath(gpp, session)
 	scantime_end = (datetime.now() - scantime_start).total_seconds()
 	gpp.scan_time = scantime_end
 	gpp.last_scan = datetime.now()
 	session.commit()
-	logger.debug(f'[mainscanpath] timecheck scantime_start: {scantime_start} gpt0:{gppscantime0} gpt1:{gpp.scan_time} scantime:{scantime_end}')
+	logger.debug(f'[mainscanpath] {gpp} scan_time:{gpp.scan_time}')
 
 def dbcheck(session) -> str:
 	"""
@@ -140,5 +139,6 @@ if __name__ == '__main__':
 			new_gpp = add_path(args.addpath, session)
 		except (MissingGitFolderException, OperationalError) as e:
 			logger.error(e)
-		gppcount = session.query(GitParentPath).count()
-		logger.debug(f'[*] new gpp: {new_gpp} gppcount:{gppcount}')
+		if new_gpp:
+			gppcount = session.query(GitParentPath).count()
+			logger.debug(f'[*] gppcount:{gppcount}')

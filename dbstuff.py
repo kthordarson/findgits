@@ -56,7 +56,7 @@ class GitParentPath(Base):
 		self.repo_count = 0
 
 	def __repr__(self):
-		return f'<GPP id={self.id} {self.folder} st:{self.scan_time}>'
+		return f'<GPP id={self.id} {self.folder}>'
 
 	def get_git_folders(self) -> dict:
 		"""

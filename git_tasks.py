@@ -66,7 +66,6 @@ def run_full_scan(dbmode: str) -> dict:
 		for git_parentpath in gpp:
 			tasks.append(executor.submit(git_parentpath.get_git_folders,))
 			git_parentpath.last_scan = datetime.now()
-			tx0 = (datetime.now() - t0).total_seconds()
 			logger.debug(f'[runscan] get_folder_list threads {len(tasks)} {git_parentpath} ')
 		for res in as_completed(tasks):
 			tx1 = datetime.now()
@@ -79,10 +78,6 @@ def run_full_scan(dbmode: str) -> dict:
 			gitparent.last_scan = datetime.now()
 			gitparent.scan_time = r["scan_time"] # todo: this needs to be fixed
 			session.commit()
-			tx0 = (datetime.now() - t0).total_seconds()
-			tx1_0 = (datetime.now() - tx1).total_seconds()
-			logger.info(f'[runscan] timercheck gitparent.scan_time: {gitparent.scan_time} resscantime: {r["scan_time"]} tx1: {tx1_0}')
-			#logger.info(f'[runscan] t0:{tx0} t1:{tx1_0} {len(git_folders)} gitfolders from {gitparent} gpscantime={gitparent.scan_time} gitparent.folder_count:{gitparent.folder_count}')
 			new_folders = 0
 			updated_folders = 0
 			for gitpath in git_paths:
@@ -118,8 +113,7 @@ def run_full_scan(dbmode: str) -> dict:
 				session.commit()
 			# logger.debug(f'[runscan] gitparent={gitparent} fc={len(folder_check)} gc0={folder_check[0]} updatefolder_={updatefolder_} gf_update={gf_update} gr_update={gr_update}')
 			tx0 = (datetime.now() - t0).total_seconds()
-			tx0_1 = (datetime.now() - tx1).total_seconds()
-			logger.info(f'[runscan] tx0:{tx0} tx0_1:{tx0_1} reslen:{len(r["res"])} gitfolders from {gitparent} newfolders:{new_folders} updates:{updated_folders} ')
+			logger.info(f'[runscan] t:{tx0} reslen:{len(r["res"])} gitfolders from {gitparent} newfolders:{new_folders} updates:{updated_folders} ')
 
 	gpp = session.query(GitParentPath).count()
 	repos = session.query(GitRepo).count()
@@ -145,7 +139,7 @@ def add_path(newpath: str, session: sessionmaker) -> GitParentPath:
 		session.commit()
 		return gpp
 	else:
-		logger.warning(f'[add_path] path={newpath} {path_check} already in config')
+		logger.warning(f'[add_path] path={newpath} {gpp} already in config')
 		return None
 
 def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
@@ -164,7 +158,7 @@ def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
 			sub_git_folder = [k for k in glob.glob(str(Path(git_folder.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
 			if len(sub_git_folder) > 1:
 				git_folder.is_parent = True
-				logger.info(f'[*] {git_folder} is a parent folder with {len(sub_git_folder)} subfolders]')
+				logger.info(f'[scanpath] {git_folder.git_path} is a parent folder with {len(sub_git_folder)} subfolders]')
 			#logger.info(f'[scanpath] new gitfolder={git_folder.git_path} gpp={gpp}')
 			session.add(git_folder)
 		else:
