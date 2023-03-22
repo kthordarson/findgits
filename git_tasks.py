@@ -10,6 +10,7 @@ from threading import Thread
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
 from subprocess import Popen, PIPE
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
@@ -18,6 +19,32 @@ from dbstuff import get_engine
 from dbstuff import MissingGitFolderException, MissingConfigException
 
 CPU_COUNT = cpu_count()
+
+def check_missing(gp:GitParentPath, session:sessionmaker) -> None:
+	"""
+	Checks for missing gitfolders and gitrepos, removes them from db
+	Parameters: gp: GitParentPath - gitparentpath to check, session: sessionmaker object
+	Returns: None
+	"""
+	logger.info(f'[rs] checking {gp} gitfolders = {len(gp.gitfolders)} ')
+	if not os.path.exists(gp.folder):
+		logger.error(f'[runscan] {gp.folder} does not exist')
+	for gf in gp.gitfolders: # check for missing folders, remove that gitfolder and gitrepo from db
+		#logger.debug(f'\tchecking {gf} {gf.git_path}')
+		if not os.path.exists(gf.git_path):
+			repo = session.query(GitRepo).filter(GitRepo.gitfolder_id == gf.id).first()
+			logger.error(f'[rc] {gf.git_path} not found, linked to {repo} removing both from db')
+			session.delete(gf)
+			session.delete(repo)
+	repos = session.query(GitRepo).filter(GitRepo.parent_id == gp.id).all()
+	for repo in repos:
+		if not os.path.exists(repo.git_path):
+			gitfolder = session.query(GitFolder).filter(GitFolder.git_path == repo.git_path).first()
+			logger.error(f'[rc] {repo} and {gitfolder} not found, removing from db')
+			if gitfolder:
+				session.delete(gitfolder)
+			session.delete(repo)
+	session.commit()
 
 def run_full_scan(dbmode: str) -> dict:
 	"""
@@ -30,15 +57,17 @@ def run_full_scan(dbmode: str) -> dict:
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	tasks = []
-	gsp = session.query(GitParentPath).all()
-	logger.info(f'[runscan] {datetime.now() - t0} CPU_COUNT={CPU_COUNT} gsp={len(gsp)}')
+	gpp = session.query(GitParentPath).all()
+	for gp in gpp:
+		check_missing(gp, session)
 	with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
 		# start thread for each gitparentpath
-		for git_parentpath in gsp:
+		gpp = session.query(GitParentPath).all()
+		for git_parentpath in gpp:
 			tasks.append(executor.submit(git_parentpath.get_git_folders,))
 			git_parentpath.last_scan = datetime.now()
 			tx0 = (datetime.now() - t0).total_seconds()
-			logger.debug(f'[runscan] {tx0} {git_parentpath} firstscan:{git_parentpath.first_scan} lastscan:{git_parentpath.last_scan} get_folder_list threads {len(tasks)} ')
+			logger.debug(f'[runscan] get_folder_list threads {len(tasks)} {git_parentpath} ')
 		for res in as_completed(tasks):
 			tx1 = datetime.now()
 			try:
@@ -92,10 +121,10 @@ def run_full_scan(dbmode: str) -> dict:
 			tx0_1 = (datetime.now() - tx1).total_seconds()
 			logger.info(f'[runscan] tx0:{tx0} tx0_1:{tx0_1} reslen:{len(r["res"])} gitfolders from {gitparent} newfolders:{new_folders} updates:{updated_folders} ')
 
-	gsp = session.query(GitParentPath).count()
+	gpp = session.query(GitParentPath).count()
 	repos = session.query(GitRepo).count()
 	folders = session.query(GitFolder).count()
-	results = {'gsp': gsp, 'repos': repos, 'folders': folders}
+	results = {'gpp': gpp, 'repos': repos, 'folders': folders}
 	return results
 
 def add_path(newpath: str, session: sessionmaker) -> GitParentPath:
@@ -111,10 +140,10 @@ def add_path(newpath: str, session: sessionmaker) -> GitParentPath:
 		raise MissingGitFolderException(f'[addpath] {newpath} not found')
 	gpp = session.query(GitParentPath).filter(GitParentPath.folder == newpath).first()
 	if not gpp:
-		gsp = GitParentPath(newpath)
-		session.add(gsp)
+		gpp = GitParentPath(newpath)
+		session.add(gpp)
 		session.commit()
-		return gsp
+		return gpp
 	else:
 		logger.warning(f'[add_path] path={newpath} {path_check} already in config')
 		return None
@@ -149,7 +178,7 @@ def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
 		session.add(repo)
 	session.commit()
 	gpp_folders = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
-	logger.info(f'[scanpath] Done gsp={gpp} res:{len(gfl["res"])} gppfolders={gpp_folders}')
+	logger.info(f'[scanpath] Done gpp={gpp} res:{len(gfl["res"])} gppfolders={gpp_folders}')
 
 def get_repos(gpp: GitParentPath, session: sessionmaker) -> list:
 	"""

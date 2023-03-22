@@ -56,7 +56,7 @@ class GitParentPath(Base):
 		self.repo_count = 0
 
 	def __repr__(self):
-		return f'<GSP id={self.id} {self.folder} st:{self.scan_time}>'
+		return f'<GPP id={self.id} {self.folder} st:{self.scan_time}>'
 
 	def get_git_folders(self) -> dict:
 		"""
@@ -100,9 +100,9 @@ class GitFolder(Base):
 	valid = Column(Boolean, default=True)
 	is_parent = Column(Boolean, default=False)
 
-	def __init__(self, gitfolder: str, gsp: GitParentPath):
-		self.parent_path = str(gsp.folder)
-		self.parent_id = gsp.id
+	def __init__(self, gitfolder: str, gpp: GitParentPath):
+		self.parent_path = str(gpp.folder)
+		self.parent_id = gpp.id
 		self.git_path = str(gitfolder)
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan

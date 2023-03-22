@@ -46,13 +46,13 @@ def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
 	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
 	"""
 	scantime_start = datetime.now()
-	gspscantime0 = gpp.scan_time
+	gppscantime0 = gpp.scan_time
 	scanpath(gpp, session)
 	scantime_end = (datetime.now() - scantime_start).total_seconds()
 	gpp.scan_time = scantime_end
 	gpp.last_scan = datetime.now()
 	session.commit()
-	logger.debug(f'[mainscanpath] timecheck scantime_start: {scantime_start} gspt0:{gspscantime0} gspt1:{gpp.scan_time} scantime:{scantime_end}')
+	logger.debug(f'[mainscanpath] timecheck scantime_start: {scantime_start} gpt0:{gppscantime0} gpt1:{gpp.scan_time} scantime:{scantime_end}')
 
 def dbcheck(session) -> str:
 	"""
@@ -74,16 +74,12 @@ def dbcheck(session) -> str:
 			continue
 		for sf in subfolders:
 			sub_gits = [k for k in glob.glob(str(Path(sf.git_path))+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+			# check if the folder contains more than one git repo
 			if len(sub_gits) > 1:
 				sub_count += len(sub_gits)
 				sf.is_parent = True
+				# set is_parent on that gitfolder
 				session.commit()
-				# newgpp = gitfolder_to_gitparent(sf, session)
-				# logger.debug(f'[chk] {sf} contains {len(sub_gits)} subgitfolders converted to {gpp}')
-				#session.add(newgpp)
-				#session.commit()
-				#new_gfl = get_folder_list(newgpp, session)
-				#scanpath(newgpp, session)
 		gppcnt = session.query(GitParentPath).count()
 		subfcnt = session.query(GitFolder).filter(GitFolder.is_parent == True).count()
 		logger.debug(f'[chk] gppcntt:{gppcnt}  subfcnt:{subfcnt}')
@@ -141,8 +137,8 @@ if __name__ == '__main__':
 		get_db_info(session)
 	if args.addpath:
 		try:
-			new_gsp = add_path(args.addpath, session)
+			new_gpp = add_path(args.addpath, session)
 		except (MissingGitFolderException, OperationalError) as e:
 			logger.error(e)
-		gspcount = session.query(GitParentPath).count()
-		logger.debug(f'[*] new gsp: {new_gsp} gspcount:{gspcount}')
+		gppcount = session.query(GitParentPath).count()
+		logger.debug(f'[*] new gpp: {new_gpp} gppcount:{gppcount}')
