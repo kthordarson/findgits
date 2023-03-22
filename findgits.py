@@ -1,126 +1,144 @@
 #!/usr/bin/python3
 import argparse
 import os
+import glob
+from pathlib import Path
 from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor, as_completed)
 from datetime import datetime, timedelta, timezone
 from multiprocessing import cpu_count
 from threading import Thread
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
-from dbstuff import drop_database, dupe_view_init,get_engine, db_init, get_dupes
+from dbstuff import drop_database, get_engine, db_init, get_dupes, db_dupe_info, get_db_info,gitfolder_to_gitparent
 from dbstuff import MissingGitFolderException, MissingConfigException
-from git_tasks import run_scanpath_threads, run_full_scan
+from git_tasks import run_full_scan
 from git_tasks import (add_path, scanpath)
 from git_tasks import (get_git_log, get_git_show, get_git_status)
 from utils import format_bytes
 CPU_COUNT = cpu_count()
 
 
-def import_paths(pathfile, session: sessionmaker):
-	# import paths from file
-	if not os.path.exists(pathfile):
-		logger.error(f'[importpaths] {pathfile} not found')
-		return
-	with open(pathfile, 'r') as f:
-		fdata_ = f.readlines()
-	fdata = [k.strip() for k in fdata_]
-
-def dbdump(backupfile, engine):
-	# todo finish
-	# dump db to file
-	pass
-
-def get_cxdupes(session:sessionmaker):
-	sql = text('select giturl, count(*) as count from gitrepo group by giturl having count(*)>1;')
-	dupes = None
+def show_dupe_info(dupes):
+	"""
+	show info about dupes
+	Parameters: dupes: list - list of dupes
+	"""
 	dupe_counter = 0
-	try:
-		dupes = session.execute(sql).all()
-	except ProgrammingError as e:
-		logger.error(f'[getdupes] {e}')
-	return dupes
+	for d in dupes:
+		repdupe = session.query(GitRepo).filter(GitRepo.git_url == d.git_url).all()
+		dupe_counter += len(repdupe)
+		print(f'[d] gitrepo url:{d.git_url} has {len(repdupe)} dupes found in:')
+		for r in repdupe:
+			grepo = session.query(GitRepo).filter(GitRepo.git_path == r.git_path).first()
+			g_show = get_git_show(grepo)
+			lastcommitdate = g_show["last_commit"]
+			timediff = grepo.config_ctime - lastcommitdate
+			timediff2 = datetime.now() - lastcommitdate
+			print(f'\tid:{grepo.id} path={r.git_path} age {timediff.days} days td2={timediff2.days}')
+	print(f'[getdupes] {dupe_counter} dupes found')
 
+def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
+	"""
+	main scanpath function
+	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
+	"""
+	scantime_start = datetime.now()
+	gspscantime0 = gpp.scan_time
+	scanpath(gpp, session)
+	scantime_end = (datetime.now() - scantime_start).total_seconds()
+	gpp.scan_time = scantime_end
+	gpp.last_scan = datetime.now()
+	session.commit()
+	logger.debug(f'[mainscanpath] timecheck scantime_start: {scantime_start} gspt0:{gspscantime0} gspt1:{gpp.scan_time} scantime:{scantime_end}')
+
+def dbcheck(session) -> str:
+	"""
+	run db checks:
+		* check if any subfolders of each gitparentpath contain more than one gitfolder, if so, turn into gitparentpath
+		* todo check for missing folders
+		* todo check for missing repos
+	"""
+	gpp = session.query(GitParentPath).all()
+	ggp_count = len(gpp)
+	gflist_to_convert = []
+	for gp in gpp:
+		sub_count = 0
+		logger.info(f'[chk] scanning {gp} for subgitfolders')
+		subfolders = session.query(GitFolder).filter(GitFolder.parent_id == gp.id).all()
+		for sf in subfolders:
+			sub_gits = glob.glob(str(Path(sf.git_path))+'/**/.git',recursive=True, include_hidden=True)
+			if len(sub_gits) > 1:
+				logger.warning(f'[chk] {sf.git_path} contains {len(sub_gits)} subgitfolders')
+				gflist_to_convert.append(sf)
+				sub_count += len(sub_gits)
+	if len(gflist_to_convert) > 0:
+		logger.debug(f'[chk] {len(gflist_to_convert)} gitfolders to convert to gitparentpaths')
+		for g in gflist_to_convert:
+			gpp = gitfolder_to_gitparent(g, session)
+			session.add(gpp)
+			session.commit()
+			main_scanpath(gpp, session)
+		gppcnt = session.query(GitParentPath).count()
+		logger.debug(f'[chk] {gppcnt} gitparentpaths in db, was {ggp_count}')
+	else:
+		logger.info(f'[cgk] no folders to convbert to gitparentpath')
+	return len(gflist_to_convert)
 
 if __name__ == '__main__':
 	myparse = argparse.ArgumentParser(description="findgits")
 	myparse.add_argument('--addpath', dest='addpath')
 	myparse.add_argument('--importpaths', dest='importpaths')
-	myparse.add_argument('--listpaths', action='store', default='all', help='list paths in db, specify "all" or id', dest='listpaths', metavar='krem')
-	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
+	myparse.add_argument('--listpaths', action='store_true', help='list gitparentpaths in db', dest='listpaths')
 	myparse.add_argument('--fullscan', action='store_true', default=False, dest='fullscan')
-	myparse.add_argument('--scanpath', help='run scan on path, specify pathid', action='store', dest='scanpath')
+	myparse.add_argument('--scanpath', help='Scan single GitParent, specified by ID. Use listpaths to get IDs', action='store', dest='scanpath')
 	myparse.add_argument('--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
 	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', required=True, action='store', metavar='dbmode')
 	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database')
+	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
+	myparse.add_argument('--dbcheck', help='run checks', action='store_true', default=False, dest='dbcheck')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 	engine = get_engine(dbtype=args.dbmode)
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
+	if args.dbcheck:
+		res = dbcheck(session)
+		print(f'dbcheck res: {res}')
 	if args.dropdatabase:
 		drop_database(engine)
-	if args.getdupes:
+	if args.listpaths:
+		gpp = session.query(GitParentPath).all()
+		for gp in gpp:
+			print(f'[listpaths] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')
+	if args.getdupes and (args.dbmode == 'mysql' or args.dbmode == 'sqlite'):
+		# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
 		dupes = get_dupes(session)
-		dupe_counter = 0
-		for d in dupes:
-			repdupe = session.query(GitRepo).filter(GitRepo.giturl == d.giturl).all()
-			dupe_counter += len(repdupe)
-			print(f'[d] gitrepo url:{d.giturl} has {len(repdupe)} dupes found in:')
-			for r in repdupe:
-				grepo = session.query(GitRepo).filter(GitRepo.git_path == r.git_path).first()
-				g_show = get_git_show(grepo)
-				if g_show:
-					try:
-						# timediff=datetime.now(timezone.utc)-datetime.fromisoformat(str(g_show["last_commit"]))
-						lastcommitdate = g_show["last_commit"]
-						timediff = grepo.config_ctime - lastcommitdate
-						timediff2 = datetime.now() - lastcommitdate
-					except TypeError as e:
-						logger.error(f'[!] {e} ')
-					print(f'\tid:{grepo.id} path={r.git_path} age {timediff.days} days td2={timediff2.days}')
-		print(f'[getdupes] {dupe_counter} dupes found')
 	if args.scanpath:
-		gsp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
-		entries = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).count()
-		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)}')
-		scanpath(gsp, session)
-		entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gsp.id).count()
-		logger.info(f'[scanpath] scanning {gsp.folder} id={gsp.id} existing_entries={len(entries)} after scan={len(entries_afterscan)}')
-	if args.scanpath_threads:
-		run_scanpath_threads(args.scanpath_threads, session)
+		gpp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
+		if gpp:
+			existing_entries = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
+			main_scanpath(gpp, session)
+			entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
+			logger.info(f'[scanpath] scanning {gpp.folder} id={gpp.id} existing_entries={existing_entries} after scan={entries_afterscan}')
+		else:
+			logger.warning(f'Path with id {args.scanpath} not found')
 	if args.fullscan:
 		scan_results = run_full_scan(args.dbmode)
 		logger.info(f'[*] runscan done res={scan_results} ')
-	if args.dbinfo:
-		# show db info
-		git_parent_entries = session.query(GitParentPath).all() #filter(GitParentPath.id == str(args.listpaths)).all()
-		total_size = 0
-		total_time = 0
-		#print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
-		print(f"{'id' : <3}{'folder' : <31}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <10}")
-		for gpe in git_parent_entries:
-			fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
-			f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-			total_size += f_size
-			f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-			total_time += f_scantime
-			rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-			scant = str(timedelta(seconds=f_scantime))
-			print(f'{gpe.id:<3}{gpe.folder:<31}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{scant:<10}')
-		print(f'[*] total_size={format_bytes(total_size)} total_time={timedelta(seconds=total_time)}')
+	if args.dbinfo and args.dbmode == 'postgresql':
+		logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
+	if args.dbinfo and (args.dbmode == 'mysql' or args.dbmode == 'sqlite'):
+		db_dupe_info(session)
+		get_db_info(session)
 	if args.addpath:
 		try:
 			new_gsp = add_path(args.addpath, session)
-		except MissingGitFolderException as e:
+		except (MissingGitFolderException, OperationalError) as e:
 			logger.error(e)
 		gspcount = session.query(GitParentPath).count()
 		logger.debug(f'[*] new gsp: {new_gsp} gspcount:{gspcount}')
-	# scanpath(new_gsp.id, session)
-	if args.importpaths:
-		# read paths from text file and import
-		import_paths(args.importpaths, session)
