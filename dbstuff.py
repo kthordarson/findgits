@@ -49,12 +49,11 @@ class GitParentPath(Base):
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_time = 0.0
-		self.gfl = []
+		self.git_folder_list = []
 		self.folder_count = 0
 		self.folder_size = 0
 		self.file_count = 0
 		self.repo_count = 0
-		self.git_folder_list = []
 		self.base_folders = []
 
 	def __repr__(self):
@@ -66,12 +65,15 @@ class GitParentPath(Base):
 		Returns: dict with gitparentpath id, list of gitfolders and scantime
 		"""
 		t0 = datetime.now()
-		g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
-		res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
+		logger.debug(f'[gfl] scanning {self.folder}')
+		git_folder_list = [k for k in glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder+'/']
+		#g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
+		#res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
+		logger.debug(f'[gfl] done scanning {self.folder} found {len(git_folder_list)} folders in {self.scan_time} seconds')
 		# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
-		self.gfl = res
-		return {'gitparent': self.id, 'res': res, 'scan_time': self.scan_time}
+		#self.gfl = res
+		return {'gitparent': self.id, 'res': git_folder_list, 'scan_time': self.scan_time}
 
 
 
@@ -114,16 +116,22 @@ class GitFolder(Base):
 	def __repr__(self):
 		return f'<GitFolder {self.id} {self.git_path} >'
 
+	def scan_subfolders(self):
+		"""
+		scan subfolders for more git repos, if found, tag as parent
+		todo make that folder a GPP and add to db
+		"""
+		sub_git_folders = [k for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+		if len(sub_git_folders) > 1:
+			self.is_parent = True
+			logger.info(f'{self.git_path} is a parent folder with {len(sub_git_folders)} subfolders]')
+
 	def get_stats(self):
 		""" Get stats for this gitfolder"""
 		if not os.path.exists(self.git_path): # redundant check, but just in case?
 			self.valid = False
 			raise MissingGitFolderException(f'{self} does not exist')
 		t0 = datetime.now()
-		sub_git_folders = [k for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
-		if len(sub_git_folders) > 1:
-			self.is_parent = True
-			logger.info(f'{self.git_path} is a parent folder with {len(sub_git_folders)} subfolders]')
 		self.scan_count += 1
 		self.last_scan = datetime.now()
 		stat = os.stat(self.git_path)
@@ -135,7 +143,6 @@ class GitFolder(Base):
 		self.file_count = get_subfilecount(self.git_path)
 		self.subdir_count = get_subdircount(self.git_path)
 		self.scan_time = (datetime.now() - t0).total_seconds()
-
 
 # todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
 class GitRepo(Base):
@@ -157,7 +164,6 @@ class GitRepo(Base):
 	last_scan = Column('last_scan', DateTime)
 	scan_count = Column('scan_count', Integer)
 
-	git_config_file = Column('git_config_file', String(255))
 	config_ctime = Column('config_ctime', DateTime)
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
@@ -169,15 +175,11 @@ class GitRepo(Base):
 	def __init__(self, gitfolder: GitFolder):
 		self.gitfolder_id = gitfolder.id
 		self.parent_id = gitfolder.parent_id
-		self.git_config_file = gitfolder.git_path + '/.git/config'
 		self.git_path = gitfolder.git_path
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_count = 0
 		self.dupe_flag = False
-		if not os.path.exists(self.git_config_file): # redundant check, but just in case?
-			self.valid = False
-			raise MissingConfigException(f'{self} {self.git_config_file} git config not found')
 		self.get_stats()
 
 	def __repr__(self):
@@ -187,33 +189,37 @@ class GitRepo(Base):
 		""" Collect stats and read config for this git repo """
 		#c = self.
 		self.scan_count += 1
-		st = os.stat(self.git_config_file)
-		self.config_ctime = datetime.fromtimestamp(st.st_ctime)
-		self.config_atime = datetime.fromtimestamp(st.st_atime)
-		self.config_mtime = datetime.fromtimestamp(st.st_mtime)
-		conf = ConfigParser(strict=False) # todo: make this better
-		c = conf.read(self.git_config_file)
-		remote_section = None
-		if conf.has_section('remote "origin"'):
-			try:
-				remote_section = [k for k in conf.sections() if 'remote' in k][0]
-			except IndexError as e:
-				logger.error(f'[err] {self} {e} git_config_file={self.git_config_file} conf={conf.sections()}')
-				self.valid = False
-				return
-			if remote_section:
-				self.remote = remote_section.split(' ')[1].replace('"', '')
-				branch_section = [k for k in conf.sections() if 'branch' in k][0]
-				self.branch = branch_section.split(' ')[1].replace('"', '')
+		git_config_file = self.git_path + '.git/config'
+		if not os.path.exists(git_config_file):
+			logger.warning(f'{self} configfile {git_config_file} does not exist')
+		else:
+			st = os.stat(git_config_file)
+			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
+			self.config_atime = datetime.fromtimestamp(st.st_atime)
+			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
+			conf = ConfigParser(strict=False) # todo: make this better
+			c = conf.read(git_config_file)
+			remote_section = None
+			if conf.has_section('remote "origin"'):
 				try:
-					# git_url = [k for k in conf['remote "origin"'].items()][0][1]
-					self.git_url = conf[remote_section]['url']
-				except TypeError as e:
-					logger.warning(f'[!] {self} typeerror {e} git_config_file={self.git_config_file} ')
+					remote_section = [k for k in conf.sections() if 'remote' in k][0]
+				except IndexError as e:
+					logger.error(f'[err] {self} {e} git_config_file={git_config_file} conf={conf.sections()}')
 					self.valid = False
-				except KeyError as e:
-					logger.warning(f'[!] {self} KeyError {e} git_config_file={self.git_config_file}')
-					self.valid = False
+					return
+				if remote_section:
+					self.remote = remote_section.split(' ')[1].replace('"', '')
+					branch_section = [k for k in conf.sections() if 'branch' in k][0]
+					self.branch = branch_section.split(' ')[1].replace('"', '')
+					try:
+						# git_url = [k for k in conf['remote "origin"'].items()][0][1]
+						self.git_url = conf[remote_section]['url']
+					except TypeError as e:
+						logger.warning(f'[!] {self} typeerror {e} git_config_file={git_config_file} ')
+						self.valid = False
+					except KeyError as e:
+						logger.warning(f'[!] {self} KeyError {e} git_config_file={git_config_file}')
+						self.valid = False
 
 def db_init(engine: Engine) -> None:
 	Base.metadata.create_all(bind=engine)
@@ -272,6 +278,7 @@ def db_dupe_info(session) -> None:
 	Returns: None
 	"""
 	dupes = None
+	total_dupes = 0
 	try:
 		dupes = session.query(GitRepo.id, GitRepo.git_url, GitRepo.parent_id, func.count(GitRepo.git_url).label("count")).\
 			group_by(GitRepo.git_url).\

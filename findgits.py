@@ -14,7 +14,7 @@ from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityErr
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import drop_database, get_engine, db_init, get_dupes, db_dupe_info, get_db_info,gitfolder_to_gitparent
 from dbstuff import MissingGitFolderException, MissingConfigException
-from git_tasks import run_full_scan, scan_subfolders
+from git_tasks import collect_folders, scan_subfolders,create_git_folders,create_git_repos
 from git_tasks import (add_parent_path, scanpath)
 from git_tasks import (get_git_log, get_git_show, get_git_status)
 from utils import format_bytes
@@ -46,12 +46,14 @@ def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
 	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
 	"""
 	scantime_start = datetime.now()
-	scanpath(gpp, session)
+	try:
+		scanpath(gpp, session)
+	except OperationalError as e:
+		logger.error(f'[msp] OperationalError: {e}')
+		return None
 	scantime_end = (datetime.now() - scantime_start).total_seconds()
-	#gpp.scan_time = scantime_end
-	#gpp.last_scan = datetime.now()
-	#session.commit()
 	logger.debug(f'[msp] scan_time:{scantime_end}')
+	return 0
 
 def dbcheck(session) -> int:
 	"""
@@ -98,19 +100,32 @@ if __name__ == '__main__':
 			dupes = get_dupes(session)
 			# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
 	if args.scanpath:
+		mainres = None
 		gpp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
 		if gpp:
 			existing_entries = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
-			main_scanpath(gpp, session)
-			entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
-			logger.info(f'[scanpath] scanning {gpp.folder} id={gpp.id} existing_entries={existing_entries} after scan={entries_afterscan}')
+			try:
+				mainres = main_scanpath(gpp, session)
+			except OperationalError as e:
+				logger.error(f'[scanpath] error: {e}')
+			if mainres:
+				entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
+				logger.info(f'[scanpath] scanning {gpp.folder} id={gpp.id} existing_entries={existing_entries} after scan={entries_afterscan}')
 		else:
 			logger.warning(f'Path with id {args.scanpath} not found')
 	if args.fullscan:
 		t0 = datetime.now()
-		scan_results = run_full_scan(args.dbmode)
+		scan_result = collect_folders(args.dbmode)
+		for gp in session.query(GitParentPath).all():
+			logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time} res={len(scan_result[gp.id])}')
 		t1 = (datetime.now() - t0).total_seconds()
-		logger.info(f'[*] fullscan done res={scan_results} t:{t1}')
+		logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
+		git_folders_result = create_git_folders(args.dbmode, scan_result)
+		t1 = (datetime.now() - t0).total_seconds()
+		logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting create_git_repos')
+		git_repo_result = create_git_repos(args.dbmode)
+		t1 = (datetime.now() - t0).total_seconds()
+		logger.info(f'[*] create_git_repos done t:{t1} git_folders_result:{git_folders_result} starting create_git_repos')
 	if args.dbinfo:
 		if args.dbmode == 'postgresql':
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
@@ -123,16 +138,20 @@ if __name__ == '__main__':
 		if new_gpp:
 			session.add(new_gpp)
 			session.commit()
-			parent_subfolders = scan_subfolders(new_gpp)
-			logger.debug(f'[addpath] {new_gpp} parent_subfolders:{len(parent_subfolders)}')
-			if len(parent_subfolders) > 0:
-				for new_subgpp in parent_subfolders:
-					sub_gpp = GitParentPath(new_subgpp)
-					session.add(sub_gpp)
-					session.commit()
-					logger.info(f'[*] {new_subgpp} from {new_gpp}')
-					scanpath(sub_gpp, session)
-			scanpath(new_gpp, session)
-		gppcount = session.query(GitParentPath).count()
-		t1 = (datetime.now() - t0).total_seconds()
-		logger.debug(f'[*] gppcount:{gppcount} t:{t1}')
+			logger.debug(f'[addpath] {new_gpp}')
+		else:
+			logger.warning(f'[addpath] {args.addpath} already in db')
+
+
+		# 	parent_subfolders = scan_subfolders(new_gpp)
+		# 	if len(parent_subfolders) > 0:
+		# 		for new_subgpp in parent_subfolders:
+		# 			sub_gpp = GitParentPath(new_subgpp)
+		# 			session.add(sub_gpp)
+		# 			session.commit()
+		# 			logger.info(f'[*] {new_subgpp} from {new_gpp}')
+		# 			scanpath(sub_gpp, session)
+		# 	scanpath(new_gpp, session)
+		# gppcount = session.query(GitParentPath).count()
+		# t1 = (datetime.now() - t0).total_seconds()
+		# logger.debug(f'[*] gppcount:{gppcount} t:{t1}')
