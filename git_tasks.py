@@ -47,6 +47,32 @@ def check_missing(gp:GitParentPath, session:sessionmaker) -> None:
 	session.commit()
 
 def update_gitfolder_stats(dbmode:str) -> dict:
+
+	engine = get_engine(dbtype=dbmode)
+	Session = sessionmaker(bind=engine)
+	tasks = []
+	results = {}
+	with Session() as session:
+		parent_paths = session.query(GitParentPath).all()
+		# start thread for each gitparentpath
+		with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+			#for git_parentpath in gpp:
+			t0x = datetime.now()
+			for gpp in parent_paths:
+				t0 = datetime.now()
+				gfl = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).all()
+				tasks = [executor.submit(gitfolder.get_folder_stats,) for gitfolder in gfl]
+				logger.debug(f'[ugf] {gpp} gfl:{len(gfl)} get_folder_list threads {len(tasks)}')
+				for res in as_completed(tasks):
+					r = res.result()
+					results[r['id']] = r
+				t1 = (datetime.now() - t0).total_seconds()
+				gpp.scan_time = t1
+				logger.debug(f'[ugf] {gpp} done t1={t1} task results {len(results)} ')
+				session.commit()
+	return results
+
+def xupdate_gitfolder_stats(dbmode:str) -> dict:
 	t0 = datetime.now()
 	engine = get_engine(dbtype=dbmode)
 	Session = sessionmaker(bind=engine)
@@ -54,15 +80,19 @@ def update_gitfolder_stats(dbmode:str) -> dict:
 	results = []
 	with Session() as session:
 		folders = session.query(GitFolder).all()
-		logger.info(f'[cgf] {len(gpp)} gitparentpaths to scan')
+		logger.info(f'[cgf] {len(folders)} gitparentpaths to scan')
 		# start thread for each gitparentpath
 		with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
 			#for git_parentpath in gpp:
 			tasks = [executor.submit(gitfolder.get_folder_stats,) for gitfolder in folders]
+			t0x = datetime.now()
 			logger.debug(f'[cgf] get_folder_list threads {len(tasks)}')
 			for res in as_completed(tasks):
 				r = res.result()
-				results[r] = r
+				results[r['id']] = r
+				t1 = (datetime.now() - t0).total_seconds()
+				t1x = (datetime.now() - t0x).total_seconds()
+				logger.debug(f'[cgf] t1={t1} t1x={t1x} task result {type(r)} from {res}')
 	return results
 
 def create_git_folders(dbmode:str, scan_result:dict) -> int:

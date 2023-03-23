@@ -128,7 +128,7 @@ if __name__ == '__main__':
 		logger.info(f'[*] create_git_repos done t:{t1} git_repo_result:{git_repo_result} starting update_gitfolder_stats')
 		folder_results = update_gitfolder_stats(args.dbmode)
 		t1 = (datetime.now() - t0).total_seconds()
-		logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{folder_results}')
+		logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{len(folder_results)}')
 	if args.dbinfo:
 		if args.dbmode == 'postgresql':
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')

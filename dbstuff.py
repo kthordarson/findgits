@@ -143,10 +143,12 @@ class GitFolder(Base):
 		self.gitfolder_mtime = datetime.fromtimestamp(stat.st_mtime)
 
 	def get_folder_stats(self):
+		t0 = datetime.now()
 		self.folder_size = get_directory_size(self.git_path)
 		self.file_count = get_subfilecount(self.git_path)
 		self.subdir_count = get_subdircount(self.git_path)
-		return {'foldersize':self.folder_size, 'filecount':self.file_count, 'subdircount':self.subdir_count}
+		self.scan_time = (datetime.now() - t0).total_seconds()
+		return {'id':self.id, 'foldersize':self.folder_size, 'filecount':self.file_count, 'subdircount':self.subdir_count}
 
 # todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
 class GitRepo(Base):
@@ -243,7 +245,7 @@ def get_engine(dbtype: str) -> Engine:
 		dbuser = os.getenv('gitdbUSER')
 		dbpass = os.getenv('gitdbPASS')
 		dbhost = os.getenv('gitdbHOST')
-		dbname = 'gitdbdev'#os.getenv('gitdbNAME')
+		dbname = os.getenv('gitdbNAME')
 		if not dbuser or not dbpass or not dbhost or not dbname:
 			raise AttributeError(f'[db] missing db env variables')
 		dburl = f"mysql+pymysql://{dbuser}:{dbpass}@{dbhost}/{dbname}?charset=utf8mb4"
