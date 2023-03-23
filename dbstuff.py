@@ -142,13 +142,13 @@ class GitFolder(Base):
 		self.gitfolder_atime = datetime.fromtimestamp(stat.st_atime)
 		self.gitfolder_mtime = datetime.fromtimestamp(stat.st_mtime)
 
-	def get_folder_stats(self):
+	def get_folder_stats(self, id, git_path):
 		t0 = datetime.now()
-		self.folder_size = get_directory_size(self.git_path)
-		self.file_count = get_subfilecount(self.git_path)
-		self.subdir_count = get_subdircount(self.git_path)
-		self.scan_time = (datetime.now() - t0).total_seconds()
-		return {'id':self.id, 'foldersize':self.folder_size, 'filecount':self.file_count, 'subdircount':self.subdir_count}
+		folder_size = get_directory_size(git_path)
+		file_count = get_subfilecount(git_path)
+		subdir_count = get_subdircount(git_path)
+		scan_time = (datetime.now() - t0).total_seconds()
+		return {'id':id, 'folder_size':folder_size, 'file_count':file_count, 'subdir_count':subdir_count, 'scan_time':scan_time}
 
 # todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
 class GitRepo(Base):
@@ -277,33 +277,38 @@ def get_dupes(session: sessionmaker) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
-def db_dupe_info(session) -> None:
+def db_dupe_info(session:sessionmaker, maxdupes=10) -> None:
 	"""
-	Get some info about the db
-	Parameters: session (sessionmaker) - sqlalchemy session
+	Get dupe info from db
+	Parameters: session (sessionmaker) - sqlalchemy session, maxdupes int - max number of dupes to show
 	Returns: None
 	"""
 	dupes = None
 	total_dupes = 0
 	try:
-		dupes = session.query(GitRepo.id, GitRepo.git_url, GitRepo.parent_id, func.count(GitRepo.git_url).label("count")).\
+		dupes = session.query(
+			GitRepo.id.label('repoid'),
+			GitRepo.git_url.label('repourl'),
+			GitRepo.gitfolder_id.label('folderid'),
+			GitRepo.parent_id.label('parentid'),
+			func.count(GitRepo.git_url).label("count")).\
 			group_by(GitRepo.git_url).\
 			having(func.count(GitRepo.git_url)>1).\
 			order_by(func.count(GitRepo.git_url).desc()).\
-			limit(10).all()
+			limit(maxdupes).all()
 	except ProgrammingError as e:
 		logger.error(e)
 	if dupes == []:
 		print(f'[db] No dupes')
-	if dupes:
+	else:
 		total_dupes = len(dupes)
-		for d in dupes:
-			dcount = session.query(GitRepo).filter(GitRepo.git_url == d.git_url).count()
-	print(f"{'id' : <5}{'fid' : <5}{'repo' : <55}{'dupes' : <5}")
-	for gpe in dupes:
-		fc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-		print(f'{gpe.id:<5}{gpe[2]:<5}{gpe[1]:<55}{gpe[3]:<5}')
-	print(f'{"="*20} {total_dupes}')
+		#for d in dupes:
+		#	dcount = session.query(GitRepo).filter(GitRepo.git_url == d.git_url).count()
+		print(f"{'id' : <5}{'pid' : <5}{'repo' : <55}{'dupes' : <5}")
+		for gpe in dupes:
+			#fc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
+			print(f'{gpe.repoid:<5}{gpe.parentid:<5}{gpe.repourl:<55}{gpe.count:<5}')
+		print(f'{"="*20} {total_dupes}')
 
 def xget_db_info(session):
 	git_parent_entries = session.query(GitParentPath).all() #filter(GitParentPath.id == str(args.listpaths)).all()
@@ -324,26 +329,26 @@ def xget_db_info(session):
 
 def get_db_info(session):
 	git_parent_entries = session.query(GitParentPath).all() #filter(GitParentPath.id == str(args.listpaths)).all()
-	slowscans = session.query(GitFolder).order_by(GitFolder.scan_time.desc()).limit(10).all()
-	git_parent_scantimesum = sum([k.scan_time for k in session.query(GitParentPath).all()])
-	allfolderscantimesum = sum([k.scan_time for k in session.query(GitFolder).all()])
+	#slowscans = session.query(GitFolder).order_by(GitFolder.scan_time.desc()).limit(10).all()
+	#git_parent_scantimesum = sum([k.scan_time for k in session.query(GitParentPath).all()])
+	#allfolderscantimesum = sum([k.scan_time for k in session.query(GitFolder).all()])
 	total_size = 0
 	total_time = 0
 	#print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
-	print(f"{'id' : <3}{'folder' : <47}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <16}{'gp_scantime' : <15}")
+	print(f"{'id' : <3}{'folder' : <47}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <15}")
 	for gpe in git_parent_entries:
 		fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
 		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
 		total_size += f_size
-		f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-		total_time += f_scantime
+		#f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
+		#total_time += f_scantime
 		rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-		scant = str(timedelta(seconds=f_scantime))
+		#scant = str(timedelta(seconds=f_scantime))
 		gpscant = str(timedelta(seconds=gpe.scan_time))
-		print(f'{gpe.id:<3}{gpe.folder:<47}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{scant:<16}{gpscant:<14}')
-	tt = str(timedelta(seconds=total_time))
+		print(f'{gpe.id:<3}{gpe.folder:<47}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{gpscant:<14}')
+	#tt = str(timedelta(seconds=total_time))
 	print(f'{"="*90}')
-	print(f'{format_bytes(total_size):>52} {tt:>15}')
+	print(f'{format_bytes(total_size):>52} ')
 
 def gitfolder_to_gitparent(gitfolder:GitFolder, session:sessionmaker) -> GitParentPath:
 	"""

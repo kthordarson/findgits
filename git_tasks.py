@@ -61,15 +61,36 @@ def update_gitfolder_stats(dbmode:str) -> dict:
 			for gpp in parent_paths:
 				t0 = datetime.now()
 				gfl = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).all()
-				tasks = [executor.submit(gitfolder.get_folder_stats,) for gitfolder in gfl]
+				tasks = [executor.submit(gitfolder.get_folder_stats, gitfolder.id, gitfolder.git_path) for gitfolder in gfl]
 				logger.debug(f'[ugf] {gpp} gfl:{len(gfl)} get_folder_list threads {len(tasks)}')
 				for res in as_completed(tasks):
 					r = res.result()
 					results[r['id']] = r
+					gpp.folder_size += r['folder_size']
+					gpp.folder_count += r['subdir_count']
+					gpp.file_count += r['file_count']
+					gpp.scan_time += r['scan_time']
+					gf = session.query(GitFolder).filter(GitFolder.id == r['id']).first()
+					gf.folder_size = r['folder_size']
+					gf.folder_count = r['subdir_count']
+					gf.file_count = r['file_count']
+					gf.scan_time = r['scan_time']
+					session.commit()
 				t1 = (datetime.now() - t0).total_seconds()
 				gpp.scan_time = t1
 				logger.debug(f'[ugf] {gpp} done t1={t1} task results {len(results)} ')
-				session.commit()
+	# for r in results:
+	# 	folderid = results[r]['id']
+	# 	folder_size = results[r]['folder_size']
+	# 	file_count = results[r]['file_count']
+	# 	subdir_count = results[r]['subdir_count']
+	# 	scan_time = results[r]['scan_time']
+	# 	gf = session.query(GitFolder).filter(GitFolder.id == folderid).first()
+	# 	gf.folder_size = folder_size
+	# 	gf.file_count = file_count
+	# 	gf.subdir_count = subdir_count
+	# 	gf.scan_time = scan_time
+	session.commit()
 	return results
 
 def xupdate_gitfolder_stats(dbmode:str) -> dict:
