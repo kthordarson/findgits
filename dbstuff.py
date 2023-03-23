@@ -66,9 +66,6 @@ class GitParentPath(Base):
 		Returns: dict with gitparentpath id, list of gitfolders and scantime
 		"""
 		t0 = datetime.now()
-		#cmdstr = ['find', self.folder + '/', '-type', 'd', '-name', '.git']
-		#out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
-		#g_out = out.decode('utf8').split('\n')
 		g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
 		res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
@@ -110,35 +107,34 @@ class GitFolder(Base):
 		self.last_scan = self.first_scan
 		self.scan_time = 0.0
 		self.scan_count = 0
-		self.get_stats()
 		self.dupe_flag = False
 		self.is_parent = False
+		self.get_stats()
 
 	def __repr__(self):
 		return f'<GitFolder {self.id} {self.git_path} >'
 
 	def get_stats(self):
 		""" Get stats for this gitfolder"""
-		t0 = datetime.now()
-		sub_git_folder = [k for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
-		if len(sub_git_folder) > 1:
-			self.is_parent = True
-			logger.info(f'{self.git_path} is a parent folder with {len(sub_git_folder)} subfolders]')
-		if os.path.exists(self.git_path): # redundant check, but just in case?
-			self.scan_count += 1
-			self.last_scan = datetime.now()
-			stat = os.stat(self.git_path)
-			self.gitfolder_ctime = datetime.fromtimestamp(stat.st_ctime)
-			self.gitfolder_atime = datetime.fromtimestamp(stat.st_atime)
-			self.gitfolder_mtime = datetime.fromtimestamp(stat.st_mtime)
-
-			self.folder_size = get_directory_size(self.git_path)
-			self.file_count = get_subfilecount(self.git_path)
-			self.subdir_count = get_subdircount(self.git_path)
-			self.scan_time = (datetime.now() - t0).total_seconds()
-		else:
+		if not os.path.exists(self.git_path): # redundant check, but just in case?
 			self.valid = False
 			raise MissingGitFolderException(f'{self} does not exist')
+		t0 = datetime.now()
+		sub_git_folders = [k for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+		if len(sub_git_folders) > 1:
+			self.is_parent = True
+			logger.info(f'{self.git_path} is a parent folder with {len(sub_git_folders)} subfolders]')
+		self.scan_count += 1
+		self.last_scan = datetime.now()
+		stat = os.stat(self.git_path)
+		self.gitfolder_ctime = datetime.fromtimestamp(stat.st_ctime)
+		self.gitfolder_atime = datetime.fromtimestamp(stat.st_atime)
+		self.gitfolder_mtime = datetime.fromtimestamp(stat.st_mtime)
+
+		self.folder_size = get_directory_size(self.git_path)
+		self.file_count = get_subfilecount(self.git_path)
+		self.subdir_count = get_subdircount(self.git_path)
+		self.scan_time = (datetime.now() - t0).total_seconds()
 
 
 # todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
@@ -173,52 +169,51 @@ class GitRepo(Base):
 	def __init__(self, gitfolder: GitFolder):
 		self.gitfolder_id = gitfolder.id
 		self.parent_id = gitfolder.parent_id
-		self.git_config_file = gitfolder.git_path + '/config'
+		self.git_config_file = gitfolder.git_path + '/.git/config'
 		self.git_path = gitfolder.git_path
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_count = 0
 		self.dupe_flag = False
+		if not os.path.exists(self.git_config_file): # redundant check, but just in case?
+			self.valid = False
+			raise MissingConfigException(f'{self} {self.git_config_file} git config not found')
 		self.get_stats()
 
 	def __repr__(self):
-		return f'<GitRepo id={self.id} {self.git_url} fid={self.gitfolder_id} r:{self.remote}/{self.branch}>'
+		return f'<GitRepo id={self.id} {self.git_url} fid={self.gitfolder_id}>'
 
 	def get_stats(self):
 		""" Collect stats and read config for this git repo """
-		if not os.path.exists(self.git_config_file): # redundant check, but just in case?
-			self.valid = False
-			raise MissingGitFolderException(f'{self} git config not found')
-		else:
-			#c = self.
-			self.scan_count += 1
-			st = os.stat(self.git_config_file)
-			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
-			self.config_atime = datetime.fromtimestamp(st.st_atime)
-			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
-			conf = ConfigParser(strict=False) # todo: make this better
-			c = conf.read(self.git_config_file)
-			remote_section = None
-			if conf.has_section('remote "origin"'):
+		#c = self.
+		self.scan_count += 1
+		st = os.stat(self.git_config_file)
+		self.config_ctime = datetime.fromtimestamp(st.st_ctime)
+		self.config_atime = datetime.fromtimestamp(st.st_atime)
+		self.config_mtime = datetime.fromtimestamp(st.st_mtime)
+		conf = ConfigParser(strict=False) # todo: make this better
+		c = conf.read(self.git_config_file)
+		remote_section = None
+		if conf.has_section('remote "origin"'):
+			try:
+				remote_section = [k for k in conf.sections() if 'remote' in k][0]
+			except IndexError as e:
+				logger.error(f'[err] {self} {e} git_config_file={self.git_config_file} conf={conf.sections()}')
+				self.valid = False
+				return
+			if remote_section:
+				self.remote = remote_section.split(' ')[1].replace('"', '')
+				branch_section = [k for k in conf.sections() if 'branch' in k][0]
+				self.branch = branch_section.split(' ')[1].replace('"', '')
 				try:
-					remote_section = [k for k in conf.sections() if 'remote' in k][0]
-				except IndexError as e:
-					logger.error(f'[err] {self} {e} git_config_file={self.git_config_file} conf={conf.sections()}')
+					# git_url = [k for k in conf['remote "origin"'].items()][0][1]
+					self.git_url = conf[remote_section]['url']
+				except TypeError as e:
+					logger.warning(f'[!] {self} typeerror {e} git_config_file={self.git_config_file} ')
 					self.valid = False
-					return
-				if remote_section:
-					self.remote = remote_section.split(' ')[1].replace('"', '')
-					branch_section = [k for k in conf.sections() if 'branch' in k][0]
-					self.branch = branch_section.split(' ')[1].replace('"', '')
-					try:
-						# git_url = [k for k in conf['remote "origin"'].items()][0][1]
-						self.git_url = conf[remote_section]['url']
-					except TypeError as e:
-						logger.warning(f'[!] {self} typeerror {e} git_config_file={self.git_config_file} ')
-						self.valid = False
-					except KeyError as e:
-						logger.warning(f'[!] {self} KeyError {e} git_config_file={self.git_config_file}')
-						self.valid = False
+				except KeyError as e:
+					logger.warning(f'[!] {self} KeyError {e} git_config_file={self.git_config_file}')
+					self.valid = False
 
 def db_init(engine: Engine) -> None:
 	Base.metadata.create_all(bind=engine)
@@ -322,7 +317,7 @@ def get_db_info(session):
 	total_size = 0
 	total_time = 0
 	#print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
-	print(f"{'id' : <3}{'folder' : <31}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <16}{'gp_scantime' : <15}")
+	print(f"{'id' : <3}{'folder' : <47}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <16}{'gp_scantime' : <15}")
 	for gpe in git_parent_entries:
 		fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
 		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
@@ -332,7 +327,7 @@ def get_db_info(session):
 		rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
 		scant = str(timedelta(seconds=f_scantime))
 		gpscant = str(timedelta(seconds=gpe.scan_time))
-		print(f'{gpe.id:<3}{gpe.folder:<31}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{scant:<16}{gpscant:<14}')
+		print(f'{gpe.id:<3}{gpe.folder:<47}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{scant:<16}{gpscant:<14}')
 	tt = str(timedelta(seconds=total_time))
 	print(f'{"="*90}')
 	print(f'{format_bytes(total_size):>52} {tt:>15}')

@@ -14,7 +14,7 @@ from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityErr
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import drop_database, get_engine, db_init, get_dupes, db_dupe_info, get_db_info,gitfolder_to_gitparent
 from dbstuff import MissingGitFolderException, MissingConfigException
-from git_tasks import run_full_scan, scan_parent_subfolders
+from git_tasks import run_full_scan, scan_subfolders
 from git_tasks import (add_parent_path, scanpath)
 from git_tasks import (get_git_log, get_git_show, get_git_status)
 from utils import format_bytes
@@ -123,14 +123,15 @@ if __name__ == '__main__':
 		if new_gpp:
 			session.add(new_gpp)
 			session.commit()
-			parent_subfolders = scan_parent_subfolders(new_gpp)
+			parent_subfolders = scan_subfolders(new_gpp)
+			logger.debug(f'[addpath] {new_gpp} parent_subfolders:{len(parent_subfolders)}')
 			if len(parent_subfolders) > 0:
-				logger.debug(f'[addpath] {new_gpp} parent_subfolders:{len(parent_subfolders)}')
 				for new_subgpp in parent_subfolders:
-					session.add(new_subgpp)
+					sub_gpp = GitParentPath(new_subgpp)
+					session.add(sub_gpp)
 					session.commit()
 					logger.info(f'[*] {new_subgpp} from {new_gpp}')
-					scanpath(new_subgpp, session)
+					scanpath(sub_gpp, session)
 			scanpath(new_gpp, session)
 		gppcount = session.query(GitParentPath).count()
 		t1 = (datetime.now() - t0).total_seconds()
