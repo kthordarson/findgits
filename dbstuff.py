@@ -111,6 +111,9 @@ class GitFolder(Base):
 		self.scan_count = 0
 		self.dupe_flag = False
 		self.is_parent = False
+		self.folder_size = 0
+		self.file_count = 0
+		self.subdir_count = 0
 		self.get_stats()
 
 	def __repr__(self):
@@ -139,10 +142,11 @@ class GitFolder(Base):
 		self.gitfolder_atime = datetime.fromtimestamp(stat.st_atime)
 		self.gitfolder_mtime = datetime.fromtimestamp(stat.st_mtime)
 
+	def get_folder_stats(self):
 		self.folder_size = get_directory_size(self.git_path)
 		self.file_count = get_subfilecount(self.git_path)
 		self.subdir_count = get_subdircount(self.git_path)
-		self.scan_time = (datetime.now() - t0).total_seconds()
+		return {'foldersize':self.folder_size, 'filecount':self.file_count, 'subdircount':self.subdir_count}
 
 # todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
 class GitRepo(Base):

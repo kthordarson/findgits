@@ -46,6 +46,25 @@ def check_missing(gp:GitParentPath, session:sessionmaker) -> None:
 			session.delete(repo)
 	session.commit()
 
+def update_gitfolder_stats(dbmode:str) -> dict:
+	t0 = datetime.now()
+	engine = get_engine(dbtype=dbmode)
+	Session = sessionmaker(bind=engine)
+	tasks = []
+	results = []
+	with Session() as session:
+		folders = session.query(GitFolder).all()
+		logger.info(f'[cgf] {len(gpp)} gitparentpaths to scan')
+		# start thread for each gitparentpath
+		with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+			#for git_parentpath in gpp:
+			tasks = [executor.submit(gitfolder.get_folder_stats,) for gitfolder in folders]
+			logger.debug(f'[cgf] get_folder_list threads {len(tasks)}')
+			for res in as_completed(tasks):
+				r = res.result()
+				results[r] = r
+	return results
+
 def create_git_folders(dbmode:str, scan_result:dict) -> int:
 	"""
 	Scan all gitparentspath in db and create gitfolder objects in db
@@ -236,8 +255,8 @@ def scanpath(gpp: GitParentPath, session:sessionmaker) -> None:
 	"""
 	#gfl = gpp.git_folder_list # get_folder_list(gpp)
 	#gfl = [k for k in glob.glob(gpp.folder+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != gpp.folder+'/']
-	logger.info(f'[sp] scanning {gpp.folder} {len(gpp.git_folder_list)}')
-	for g in gpp.self.git_folder_list: #gfl['res']:
+	logger.info(f'[sp] scanning {gpp.folder}')
+	for g in gpp.get_git_folders(): #gfl['res']:
 		if g.endswith('/.git'):
 			logger.warning(f'[sp] {gpp} {g} ends with /.git')
 			g = g[:-5]

@@ -14,7 +14,7 @@ from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityErr
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import drop_database, get_engine, db_init, get_dupes, db_dupe_info, get_db_info,gitfolder_to_gitparent
 from dbstuff import MissingGitFolderException, MissingConfigException
-from git_tasks import collect_folders, scan_subfolders,create_git_folders,create_git_repos
+from git_tasks import collect_folders, scan_subfolders,create_git_folders,create_git_repos,update_gitfolder_stats
 from git_tasks import (add_parent_path, scanpath)
 from git_tasks import (get_git_log, get_git_show, get_git_status)
 from utils import format_bytes
@@ -125,7 +125,10 @@ if __name__ == '__main__':
 		logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting create_git_repos')
 		git_repo_result = create_git_repos(args.dbmode)
 		t1 = (datetime.now() - t0).total_seconds()
-		logger.info(f'[*] create_git_repos done t:{t1} git_folders_result:{git_folders_result} starting create_git_repos')
+		logger.info(f'[*] create_git_repos done t:{t1} git_repo_result:{git_repo_result} starting update_gitfolder_stats')
+		folder_results = update_gitfolder_stats(args.dbmode)
+		t1 = (datetime.now() - t0).total_seconds()
+		logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{folder_results}')
 	if args.dbinfo:
 		if args.dbmode == 'postgresql':
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
