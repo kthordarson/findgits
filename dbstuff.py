@@ -66,7 +66,7 @@ class GitParentPath(Base):
 		"""
 		t0 = datetime.now()
 		logger.debug(f'[gfl] scanning {self.folder}')
-		git_folder_list = [k for k in glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder+'/']
+		git_folder_list = [str(Path(k).parent) for k in glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder+'/']
 		#g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
 		#res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
@@ -114,7 +114,7 @@ class GitFolder(Base):
 		self.folder_size = 0
 		self.file_count = 0
 		self.subdir_count = 0
-		self.get_stats()
+		self.get_folder_time()
 
 	def __repr__(self):
 		return f'<GitFolder {self.id} {self.git_path} >'
@@ -124,18 +124,17 @@ class GitFolder(Base):
 		scan subfolders for more git repos, if found, tag as parent
 		todo make that folder a GPP and add to db
 		"""
-		sub_git_folders = [k for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
+		sub_git_folders = [str(Path(k).parent) for k in glob.glob(self.git_path+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir()]
 		if len(sub_git_folders) > 1:
 			self.is_parent = True
 			logger.info(f'{self.git_path} is a parent folder with {len(sub_git_folders)} subfolders]')
 
-	def get_stats(self):
+	def get_folder_time(self):
 		""" Get stats for this gitfolder"""
 		if not os.path.exists(self.git_path): # redundant check, but just in case?
 			self.valid = False
 			raise MissingGitFolderException(f'{self} does not exist')
 		t0 = datetime.now()
-		self.scan_count += 1
 		self.last_scan = datetime.now()
 		stat = os.stat(self.git_path)
 		self.gitfolder_ctime = datetime.fromtimestamp(stat.st_ctime)
@@ -186,16 +185,16 @@ class GitRepo(Base):
 		self.last_scan = self.first_scan
 		self.scan_count = 0
 		self.dupe_flag = False
-		self.get_stats()
+		self.get_repo_stats()
 
 	def __repr__(self):
 		return f'<GitRepo id={self.id} {self.git_url} fid={self.gitfolder_id}>'
 
-	def get_stats(self):
+	def get_repo_stats(self):
 		""" Collect stats and read config for this git repo """
 		#c = self.
 		self.scan_count += 1
-		git_config_file = self.git_path + '.git/config'
+		git_config_file = self.git_path + '/.git/config'
 		if not os.path.exists(git_config_file):
 			logger.warning(f'{self} configfile {git_config_file} does not exist')
 		else:
@@ -235,13 +234,13 @@ def drop_database(engine: Engine) -> None:
 	Base.metadata.drop_all(bind=engine)
 	Base.metadata.create_all(bind=engine)
 
-def get_engine(dbtype: str) -> Engine:
+def get_engine(args) -> Engine:
 	"""
 	Get a db engine, uses os.getenv for db credentials
 	Parameters: dbtype (str) - mysql/postgresql/sqlite
 	Returns: sqlalchemy Engine
 	"""
-	if dbtype == 'mysql':
+	if args.dbmode == 'mysql':
 		dbuser = os.getenv('gitdbUSER')
 		dbpass = os.getenv('gitdbPASS')
 		dbhost = os.getenv('gitdbHOST')
@@ -251,7 +250,7 @@ def get_engine(dbtype: str) -> Engine:
 		dburl = f"mysql+pymysql://{dbuser}:{dbpass}@{dbhost}/{dbname}?charset=utf8mb4"
 		return create_engine(dburl)
 	# return create_engine(dburl, pool_size=200, max_overflow=0)
-	elif dbtype == 'postgresql':
+	elif args.dbmode == 'postgresql':
 		dbuser = os.getenv('gitdbUSER')
 		dbpass = os.getenv('gitdbPASS')
 		dbhost = os.getenv('gitdbHOST')
@@ -260,10 +259,10 @@ def get_engine(dbtype: str) -> Engine:
 			raise AttributeError(f'[db] missing db env variables')
 		dburl = f"postgresql://{dbuser}:{dbpass}@{dbhost}/{dbname}"
 		return create_engine(dburl)
-	elif dbtype == 'sqlite':
-		return create_engine('sqlite:///gitrepo1.db', echo=False, connect_args={'check_same_thread': False})
+	elif args.dbmode == 'sqlite':
+		return create_engine(f'sqlite:///{args.dbsqlitefile}', echo=False, connect_args={'check_same_thread': False})
 	else:
-		raise TypeError(f'[db] unknown dbtype {dbtype} ')
+		raise TypeError(f'[db] unknown dbtype {args} ')
 
 def get_dupes(session: sessionmaker) -> list:
 	"""
@@ -277,7 +276,7 @@ def get_dupes(session: sessionmaker) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
-def db_dupe_info(session:sessionmaker, maxdupes=10) -> None:
+def db_dupe_info(session:sessionmaker, maxdupes=30) -> None:
 	"""
 	Get dupe info from db
 	Parameters: session (sessionmaker) - sqlalchemy session, maxdupes int - max number of dupes to show
@@ -367,3 +366,5 @@ def gitfolder_to_gitparent(gitfolder:GitFolder, session:sessionmaker) -> GitPare
 	gpp = GitParentPath(gitfolder.git_path)
 	logger.info(f'[gtp] new {gpp} created')
 	return gpp
+if __name__ == '__main__':
+	pass

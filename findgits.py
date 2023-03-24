@@ -65,7 +65,8 @@ def dbcheck(session) -> int:
 	ggp_count = len(gpp)
 	return ggp_count
 
-if __name__ == '__main__':
+
+def main():
 	myparse = argparse.ArgumentParser(description="findgits")
 	myparse.add_argument('--addpath', dest='addpath', help='add new parent path to db and run scan on it')
 	myparse.add_argument('--importpaths', dest='importpaths')
@@ -75,12 +76,13 @@ if __name__ == '__main__':
 	myparse.add_argument('--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
 	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', required=True, action='store', metavar='dbmode')
+	myparse.add_argument('--dbsqlitefile', help='sqlitedb filename', default='gitrepo.db', dest='dbsqlitefile', action='store', metavar='dbsqlitefile')
 	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
 	myparse.add_argument('--dbcheck', help='run checks', action='store_true', default=False, dest='dbcheck')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
-	engine = get_engine(dbtype=args.dbmode)
+	engine = get_engine(args)
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	db_init(engine)
@@ -97,7 +99,8 @@ if __name__ == '__main__':
 		if args.dbmode == 'postgresql':
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
 		else:
-			dupes = get_dupes(session)
+			db_dupe_info(session)
+			#dupes = get_dupes(session)
 			# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
 	if args.scanpath:
 		mainres = None
@@ -105,7 +108,8 @@ if __name__ == '__main__':
 		if gpp:
 			existing_entries = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
 			try:
-				mainres = main_scanpath(gpp, session)
+				# mainres = main_scanpath(gpp, session)
+				mainres = scanpath(gpp, session)
 			except OperationalError as e:
 				logger.error(f'[scanpath] error: {e}')
 			if mainres:
@@ -115,25 +119,32 @@ if __name__ == '__main__':
 			logger.warning(f'Path with id {args.scanpath} not found')
 	if args.fullscan:
 		t0 = datetime.now()
-		scan_result = collect_folders(args.dbmode)
+
+		# collect all folders from all gitparentpaths
+		scan_result = collect_folders(args)
 		for gp in session.query(GitParentPath).all():
 			logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time} res={len(scan_result[gp.id])}')
 		t1 = (datetime.now() - t0).total_seconds()
 		logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
-		git_folders_result = create_git_folders(args.dbmode, scan_result)
+
+		# create gitfolders in db
+		git_folders_result = create_git_folders(args, scan_result)
 		t1 = (datetime.now() - t0).total_seconds()
 		logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting create_git_repos')
-		git_repo_result = create_git_repos(args.dbmode)
+
+		# create gitrepos in db
+		git_repo_result = create_git_repos(args)
 		t1 = (datetime.now() - t0).total_seconds()
 		logger.info(f'[*] create_git_repos done t:{t1} git_repo_result:{git_repo_result} starting update_gitfolder_stats')
-		folder_results = update_gitfolder_stats(args.dbmode)
+
+		# update gitfolder stats
+		folder_results = update_gitfolder_stats(args)
 		t1 = (datetime.now() - t0).total_seconds()
 		logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{len(folder_results)}')
 	if args.dbinfo:
 		if args.dbmode == 'postgresql':
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
 		else:
-			db_dupe_info(session)
 			get_db_info(session)
 	if args.addpath:
 		t0 = datetime.now()
@@ -145,6 +156,8 @@ if __name__ == '__main__':
 		else:
 			logger.warning(f'[addpath] {args.addpath} already in db')
 
+if __name__ == '__main__':
+	main()
 
 		# 	parent_subfolders = scan_subfolders(new_gpp)
 		# 	if len(parent_subfolders) > 0:

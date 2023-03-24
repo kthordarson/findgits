@@ -28,7 +28,11 @@ def get_directory_size(directory: str) -> int:
 			if entry.is_symlink():
 				break
 			if entry.is_file():
-				total += entry.stat().st_size
+				try:
+					total += entry.stat().st_size
+				except FileNotFoundError as e:
+					logger.warning(f'[err] {e} dir:{directory} ')
+					continue
 			elif entry.is_dir():
 				try:
 					total += get_directory_size(entry.path)
@@ -100,3 +104,6 @@ def format_bytes(num_bytes):
             return f"{num_bytes:.2f} {unit}"
         num_bytes /= 1024.0
     return f"{num_bytes:.2f} TB"
+
+if __name__ == '__main__':
+	pass

@@ -1,3 +1,6 @@
+*.json
+*.png
+*.out
 gitrepo.db
 gitrepo.db.bak
 gitrepo.db.bak1

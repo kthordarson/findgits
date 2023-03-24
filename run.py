@@ -114,7 +114,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
             item_1.setText(2, f"{k.dupe_flag}")
 
 if __name__ == '__main__':
-    engine = get_engine(dbtype='mysql')
+    engine = get_engine(args='mysql')
     Session = sessionmaker(bind=engine)
     session = Session()
     app = QApplication(sys.argv)
