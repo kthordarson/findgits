@@ -1,27 +1,23 @@
 #!/usr/bin/python3
 import argparse
-import os
-import glob
-from pathlib import Path
-from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor, as_completed)
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from multiprocessing import cpu_count
-from threading import Thread
+
 from loguru import logger
-from sqlalchemy import text, func
+from sqlalchemy.exc import (OperationalError)
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
+from sqlalchemy.orm import Session
+
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
-from dbstuff import drop_database, get_engine, db_init, get_dupes, db_dupe_info, get_db_info,gitfolder_to_gitparent
-from dbstuff import MissingGitFolderException, MissingConfigException
-from git_tasks import collect_folders, scan_subfolders,create_git_folders,create_git_repos,update_gitfolder_stats
+from dbstuff import drop_database, get_engine, db_init, db_dupe_info, get_db_info
 from git_tasks import (add_parent_path, scanpath)
-from git_tasks import (get_git_log, get_git_show, get_git_status)
-from utils import format_bytes
+from git_tasks import collect_folders, create_git_folders, create_git_repos, update_gitfolder_stats
+from git_tasks import (get_git_show)
+
 CPU_COUNT = cpu_count()
 
 
-def show_dupe_info(dupes):
+def show_dupe_info(dupes, session: Session):
 	"""
 	show info about dupes
 	Parameters: dupes: list - list of dupes
@@ -40,7 +36,8 @@ def show_dupe_info(dupes):
 			print(f'\tid:{grepo.id} path={r.git_path} age {timediff.days} days td2={timediff2.days}')
 	print(f'[getdupes] {dupe_counter} dupes found')
 
-def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
+
+def main_scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
 	"""
 	main scanpath function
 	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
@@ -54,6 +51,7 @@ def main_scanpath(gpp:GitParentPath, session:sessionmaker) -> None:
 	scantime_end = (datetime.now() - scantime_start).total_seconds()
 	logger.debug(f'[msp] scan_time:{scantime_end}')
 	return 0
+
 
 def dbcheck(session) -> int:
 	"""
@@ -71,7 +69,7 @@ def main():
 	myparse.add_argument('--addpath', dest='addpath', help='add new parent path to db and run scan on it')
 	myparse.add_argument('--importpaths', dest='importpaths')
 	myparse.add_argument('--listpaths', action='store_true', help='list gitparentpaths in db', dest='listpaths')
-	myparse.add_argument('--fullscan', action='store_true', default=False, dest='fullscan',help='run full scan on all parent paths in db')
+	myparse.add_argument('--fullscan', action='store_true', default=False, dest='fullscan', help='run full scan on all parent paths in db')
 	myparse.add_argument('--scanpath', help='Scan single GitParent, specified by ID. Use --listpaths to get IDs', action='store', dest='scanpath')
 	myparse.add_argument('--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
 	myparse.add_argument('--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
@@ -100,8 +98,8 @@ def main():
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
 		else:
 			db_dupe_info(session)
-			#dupes = get_dupes(session)
-			# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
+		# dupes = get_dupes(session)
+		# session.query(GitRepo.id, GitRepo.git_url, func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).order_by(func.count(GitRepo.git_url).desc()).limit(10).all()
 	if args.scanpath:
 		mainres = None
 		gpp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
@@ -109,12 +107,9 @@ def main():
 			existing_entries = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
 			try:
 				# mainres = main_scanpath(gpp, session)
-				mainres = scanpath(gpp, session)
+				scanpath(gpp, session)
 			except OperationalError as e:
 				logger.error(f'[scanpath] error: {e}')
-			if mainres:
-				entries_afterscan = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
-				logger.info(f'[scanpath] scanning {gpp.folder} id={gpp.id} existing_entries={existing_entries} after scan={entries_afterscan}')
 		else:
 			logger.warning(f'Path with id {args.scanpath} not found')
 	if args.fullscan:
@@ -156,18 +151,19 @@ def main():
 		else:
 			logger.warning(f'[addpath] {args.addpath} already in db')
 
+
 if __name__ == '__main__':
 	main()
 
-		# 	parent_subfolders = scan_subfolders(new_gpp)
-		# 	if len(parent_subfolders) > 0:
-		# 		for new_subgpp in parent_subfolders:
-		# 			sub_gpp = GitParentPath(new_subgpp)
-		# 			session.add(sub_gpp)
-		# 			session.commit()
-		# 			logger.info(f'[*] {new_subgpp} from {new_gpp}')
-		# 			scanpath(sub_gpp, session)
-		# 	scanpath(new_gpp, session)
-		# gppcount = session.query(GitParentPath).count()
-		# t1 = (datetime.now() - t0).total_seconds()
-		# logger.debug(f'[*] gppcount:{gppcount} t:{t1}')
+# 	parent_subfolders = scan_subfolders(new_gpp)
+# 	if len(parent_subfolders) > 0:
+# 		for new_subgpp in parent_subfolders:
+# 			sub_gpp = GitParentPath(new_subgpp)
+# 			session.add(sub_gpp)
+# 			session.commit()
+# 			logger.info(f'[*] {new_subgpp} from {new_gpp}')
+# 			scanpath(sub_gpp, session)
+# 	scanpath(new_gpp, session)
+# gppcount = session.query(GitParentPath).count()
+# t1 = (datetime.now() - t0).total_seconds()
+# logger.debug(f'[*] gppcount:{gppcount} t:{t1}')

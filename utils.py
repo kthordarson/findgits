@@ -1,27 +1,20 @@
-from loguru import logger
-import random
-import os
-from pathlib import Path
-from datetime import datetime, timedelta
 import glob
-from subprocess import Popen, PIPE
-from sqlalchemy import Engine
-from threading import Thread
-from multiprocessing import cpu_count
+import os
+import random
+from pathlib import Path
+
+from loguru import logger
 
 
-from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor, as_completed)
-from sqlalchemy import MetaData, create_engine, text
-from sqlalchemy.exc import (ArgumentError, CompileError, DataError,
-							IntegrityError, OperationalError, ProgrammingError, InvalidRequestError)
 # from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+
 
 def generate_id() -> str:
 	return ''.join(random.choices('0123456789abcdef', k=16))
 
+
 def get_directory_size(directory: str) -> int:
-	#directory = Path(directory)
+	# directory = Path(directory)
 	total = 0
 	try:
 		for entry in os.scandir(directory):
@@ -46,6 +39,7 @@ def get_directory_size(directory: str) -> int:
 	# 	return 0
 	return total
 
+
 def get_subfilecount(directory: str) -> int:
 	directory = Path(directory)
 	try:
@@ -55,14 +49,16 @@ def get_subfilecount(directory: str) -> int:
 		return 0
 	return filecount
 
+
 def get_subdircount(directory: str) -> int:
 	directory = Path(directory)
 	dc = 0
 	try:
 		dc = len([k for k in directory.glob('**/*') if k.is_dir()])
-	except (PermissionError,FileNotFoundError) as e:
+	except (PermissionError, FileNotFoundError) as e:
 		logger.warning(f'[err] {e} d:{directory}')
 	return dc
+
 
 def valid_git_folder(k: str) -> bool:
 	k = Path(k)
@@ -77,33 +73,36 @@ def valid_git_folder(k: str) -> bool:
 
 
 def xxget_folder_list(startpath: str) -> list:
-	return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and os.path.exists(path+'/config')]
-	#return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and valid_git_folder(path)]
+	return [Path(path).parent for path, subdirs, files in os.walk(startpath) if path.endswith('.git') and os.path.exists(path + '/config')]
+
+
+# return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and valid_git_folder(path)]
 
 def zget_folder_list(startpath):
 	# [path for path,subdirs,files in os.walk(startpath) if path.endswith('.git')]
-	for k in glob.glob(str(Path(startpath))+'/**/.git/',recursive=True, include_hidden=True):
+	for k in glob.glob(str(Path(startpath)) + '/**/.git/', recursive=True, include_hidden=True):
 		if valid_git_folder(k):
 			yield Path(k).parent
 
+
 def xget_folder_list(startpath):
-	for k in glob.glob(str(Path(startpath))+'/**/.git',recursive=True, include_hidden=True):
+	for k in glob.glob(str(Path(startpath)) + '/**/.git', recursive=True, include_hidden=True):
 		if Path(k).is_dir() and Path(k).name == '.git':
 			if os.path.exists(os.path.join(Path(k), 'config')):
 				yield Path(k).parent
 
+
 def format_bytes(num_bytes):
-    """Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
-    Args:
-        num_bytes (int): The byte value to format.
-    Returns:
-        str: A string with a formatted byte value and unit prefix.
+	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
+	Args: num_bytes (int): The byte value to format.
+	Returns: str: A string with a formatted byte value and unit prefix.
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if abs(num_bytes) < 1024.0:
-            return f"{num_bytes:.2f} {unit}"
-        num_bytes /= 1024.0
-    return f"{num_bytes:.2f} TB"
+	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+		if abs(num_bytes) < 1024.0:
+			return f"{num_bytes:.2f} {unit}"
+		num_bytes /= 1024.0
+	return f"{num_bytes:.2f} TB"
+
 
 if __name__ == '__main__':
 	pass
