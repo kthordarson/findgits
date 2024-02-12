@@ -1,3 +1,4 @@
+from __future__ import annotations
 import glob
 import os
 from configparser import ConfigParser
@@ -11,7 +12,11 @@ from sqlalchemy import orm
 from sqlalchemy import func
 from sqlalchemy import (Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
 from sqlalchemy.exc import ProgrammingError
-from sqlalchemy.orm import (Mapped, relationship, sessionmaker) # DeclarativeBase,   mapped_column,
+from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import relationship
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import mapped_column # DeclarativeBase,   mapped_column,
 from sqlalchemy.orm import Session
 
 from utils import (get_directory_size, get_subdircount, get_subfilecount, format_bytes)
@@ -26,7 +31,7 @@ class MissingGitFolderException(Exception):
 	pass
 
 
-class Base(orm.DeclarativeBase):
+class Base(DeclarativeBase):
 	pass
 
 
@@ -37,7 +42,7 @@ class Base(orm.DeclarativeBase):
 class GitParentPath(Base):
 	""" GitParentPath class, this is a folder that contains more than one git repos"""
 	__tablename__ = 'gitparentpath'
-	id: Mapped[int] = orm.mapped_column(primary_key=True)
+	id: Mapped[int] = mapped_column(primary_key=True)
 	folder = Column('folder', String(255))
 	gitfolders: Mapped[List['GitFolder']] = relationship()
 	first_scan = Column('first_scan', DateTime)
@@ -48,6 +53,7 @@ class GitParentPath(Base):
 	file_count = Column(BigInteger)
 	repo_count = Column(Integer)
 	scanned = Column[bool]
+	# git_folder_list = ''
 
 	def __init__(self, folder: str):
 		self.folder = folder
@@ -63,7 +69,7 @@ class GitParentPath(Base):
 		self.scanned = False
 
 	def __repr__(self):
-		return f'<GPP id={self.id} folder: {self.folder} scanned:{self.scanned}>'
+		return f'<GPP id={self.id} folder: {self.folder} >'
 
 	def xget_git_folders(self):
 		return self.git_folder_list
@@ -76,15 +82,22 @@ class GitParentPath(Base):
 		t0 = datetime.now()
 		self.last_scan = t0
 		self.scanned = True
-		logger.debug(f'[gfl] scanning {self.folder}')
-		self.git_folder_list = [str(Path(k).parent) for k in glob.glob(self.folder + '/**/.git', recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder + '/']
+		logger.debug(f'[gfl] {self} scanning {self.folder}')
+		#self.git_folder_list = [str(Path(k).parent) for k in glob.glob(self.folder + '/**/.git', recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder + '/']
+		git_folder_list = []
+		for gitfolder in glob.glob(self.folder + '/**/.git', recursive=False, include_hidden=True):
+			if Path(gitfolder).is_dir() and gitfolder != self.folder + '/':
+				#logger.debug(f'[gfl] {self} {gitfolder}')
+				# check subdircount
+				#subdircount = glob.glob(k, recursive=True, include_hidden=True)
+				git_folder_list.append(Path(gitfolder).parent)
 		# g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
 		# res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
-		logger.debug(f'[gfl] done scanning {self.folder} found {len(self.git_folder_list)} folders in {self.scan_time} seconds')
+		logger.debug(f'[gfl] done scanning {self.folder} found {len(git_folder_list)} folders in {self.scan_time} seconds')
 		# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
 		# self.gfl = res
-		return {'gitparent': self.id, 'res': self.git_folder_list, 'scan_time': self.scan_time}
+		return {'gitparent': self.id, 'res': git_folder_list, 'scan_time': self.scan_time}
 
 
 # todo: remove git_path and use parent_id to get parent path string
@@ -92,10 +105,10 @@ class GitFolder(Base):
 	""" A folder containing one git repo """
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
-	id: Mapped[int] = orm.mapped_column(primary_key=True)
+	id: Mapped[int] = mapped_column(primary_key=True)
 	git_path = Column('git_path', String(255))
 	gitrepo_id = Column('gitrepo_id', Integer) # id of gitrepo found in this folder
-	parent_id: Mapped[int] = orm.mapped_column(ForeignKey('gitparentpath.id'))
+	parent_id: Mapped[int] = mapped_column(ForeignKey('gitparentpath.id'))
 	# gitparent = relationship("GitParentPath", backref="git_path")
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
@@ -109,6 +122,7 @@ class GitFolder(Base):
 	gitfolder_atime = Column('gitfolder_atime', DateTime)
 	gitfolder_mtime = Column('gitfolder_mtime', DateTime)
 	dupe_flag = Column('dupe_flag', Boolean)
+	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
 	is_parent = Column(Boolean, default=False)
 	scanned = Column[bool]
@@ -123,6 +137,7 @@ class GitFolder(Base):
 		self.scan_time = 0.0
 		self.scan_count = 0
 		self.dupe_flag = False
+		self.dupe_count = 0
 		self.is_parent = False
 		self.folder_size = 0
 		self.file_count = 0
@@ -131,7 +146,7 @@ class GitFolder(Base):
 		self.get_folder_time()
 
 	def __repr__(self):
-		return f'<GitFolder {self.id} gitpath={self.git_path} scanned:{self.scanned}>'
+		return f'<GitFolder {self.id} gitpath={self.git_path}>'
 
 	def scan_subfolders(self):
 		"""
@@ -169,11 +184,11 @@ class GitFolder(Base):
 class GitRepo(Base):
 	""" A git repo, linked to one gitfolder and one gitparentpath """
 	__tablename__ = 'gitrepo'
-	id: Mapped[int] = orm.mapped_column(primary_key=True)
+	id: Mapped[int] = mapped_column(primary_key=True)
 	# gitfolder_id = Column('gitfolder_id', Integer)
 	# parent_id = Column('parent_id', Integer)
-	gitfolder_id: Mapped[int] = orm.mapped_column(ForeignKey('gitfolder.id'))
-	parent_id: Mapped[int] = orm.mapped_column(ForeignKey('gitparentpath.id'))
+	gitfolder_id: Mapped[int] = mapped_column(ForeignKey('gitfolder.id'))
+	parent_id: Mapped[int] = mapped_column(ForeignKey('gitparentpath.id'))
 	# parentid = Column('parentid', BigInteger)
 	git_url = Column('git_url', String(255))
 	git_path = Column('git_path', String(255))
@@ -206,7 +221,7 @@ class GitRepo(Base):
 		self.get_repo_stats()
 
 	def __repr__(self):
-		return f'<GitRepo id={self.id} url: {self.git_url} fid={self.gitfolder_id} scanned:{self.scanned}>'
+		return f'<GitRepo id={self.id} url: {self.git_url} fid={self.gitfolder_id}>'
 
 	def get_repo_stats(self):
 		""" Collect stats and read config for this git repo """
@@ -232,8 +247,13 @@ class GitRepo(Base):
 					self.valid = False
 				if remote_section:
 					self.remote = remote_section.split(' ')[1].replace('"', '')
-					branch_section = [k for k in conf.sections() if 'branch' in k][0]
-					self.branch = branch_section.split(' ')[1].replace('"', '')
+					branch_section = None
+					try:
+						branch_section = [k for k in conf.sections() if 'branch' in k][0]
+					except IndexError as e:
+						logger.warning(f'{e} {self} {conf.sections()}')
+					if branch_section:
+						self.branch = branch_section.split(' ')[1].replace('"', '')
 					try:
 						# git_url = [k for k in conf['remote "origin"'].items()][0][1]
 						self.git_url = conf[remote_section]['url']
@@ -313,10 +333,12 @@ def check_dupe_status(session) -> None:
 		dupe_folder = session.query(GitFolder).filter(GitFolder.id == dupe_repo.gitfolder_id).first()
 		if dupe_folder:
 			dupe_folder.dupe_flag = True
+			dupe_folder.dupe_count = dupe.count
 			session.add(dupe_folder)
 		dupe_repo.dupe_flag = True
+		dupe_repo.dupe_count = dupe.count
 		session.add(dupe_repo)
-		logger.info(f'dupe: {dupe} setting dupe_flag on repo: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id} dupefolder: {dupe_folder}')
+		logger.info(f'setting dupe_flag on repoid: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id}')
 	session.commit()
 
 

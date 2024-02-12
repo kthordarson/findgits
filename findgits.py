@@ -105,7 +105,7 @@ def main():
 		gpp = session.query(GitParentPath).filter(GitParentPath.id == args.scanpath).first()
 		if gpp:
 			existing_entries = session.query(GitFolder).filter(GitFolder.parent_id == gpp.id).count()
-			logger.info(f'existing_entries:{existing_entries}')
+			logger.info(f'existing_entries:{existing_entries} scanning:{gpp}')
 			try:
 				# mainres = main_scanpath(gpp, session)
 				scanpath(gpp, session)
@@ -119,7 +119,7 @@ def main():
 		# collect all folders from all gitparentpaths
 		scan_result = collect_folders(args)
 		for gp in session.query(GitParentPath).all():
-			logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time} res={len(scan_result[gp.id])}')
+			logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')# res={len(scan_result[gp.id])}')
 		t1 = (datetime.now() - t0).total_seconds()
 		logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
 
@@ -148,15 +148,7 @@ def main():
 			get_db_info(session)
 	elif args.add_parent_path:
 		t0 = datetime.now()
-		new_gpp = add_parent_path(args.add_parent_path, session)
-		if new_gpp:
-			session.add(new_gpp)
-			session.commit()
-			logger.debug(f'new_gpp={new_gpp}')
-			scanpath(new_gpp, session)
-			check_dupe_status(session)
-		else:
-			logger.warning(f'{args.add_parent_path} already in db')
+		add_parent_path(args.add_parent_path, session)
 	else:
 		logger.warning(f'missing args? {args}')
 
