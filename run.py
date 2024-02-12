@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import os, sys
+from argparse import ArgumentParser
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from dbstuff import GitRepo, GitFolder, GitParentPath, get_engine, get_dupes
@@ -102,7 +103,7 @@ class MainApp(QWidget, Ui_FindGitsApp):
 		self.treeWidget.setColumnCount(3)
 		self.treeWidget.headerItem().setText(0, "id")
 		self.treeWidget.headerItem().setText(1, "path")
-		self.treeWidget.headerItem().setText(2, "dupes")
+		self.treeWidget.headerItem().setText(2, "dupe_flag")
 		if self.dupefilter:
 			gitfolders = session.query(GitFolder).filter(GitFolder.dupe_flag == self.dupefilter).all()
 		else:
@@ -115,7 +116,11 @@ class MainApp(QWidget, Ui_FindGitsApp):
 
 
 if __name__ == '__main__':
-	engine = get_engine(args='mysql')
+	myparse = ArgumentParser(description="findgits")
+	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', required=True, action='store', metavar='dbmode')
+	myparse.add_argument('--dbsqlitefile', help='sqlitedb filename', default='gitrepo.db', dest='dbsqlitefile', action='store', metavar='dbsqlitefile')
+	args = myparse.parse_args()
+	engine = get_engine(args)
 	Session = sessionmaker(bind=engine)
 	session = Session()
 	app = QApplication(sys.argv)

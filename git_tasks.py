@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import DetachedInstanceError
-from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError, IllegalStateChangeError)
+from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError,)
 from subprocess import Popen, PIPE
 from dbstuff import (GitFolder, GitParentPath, GitRepo)
 from dbstuff import get_engine
@@ -161,10 +161,10 @@ def collect_folders(args) -> dict:
 	return results
 
 
-def add_parent_path(newpath: str, session: sessionmaker) -> GitParentPath:
+def add_parent_path(newpath: str, session):#  -> GitParentPath:
 	"""
 	Add new gitparentpath to db
-	Parameters: newpath: str full path to new gitparentpath , session: sessionmaker
+	Parameters: newpath: str full path to new gitparentpath , sessionmaker
 	Returns: GitParentPath object if the path is new, None if the path already exists
 	raises MissingGitFolderException if the path does not exist
 	"""
@@ -183,10 +183,9 @@ def add_parent_path(newpath: str, session: sessionmaker) -> GitParentPath:
 		return newgpp
 	else:
 		logger.warning(f'[app] path={newpath} {gpp} already in config')
-		return None
 
 
-def scan_subfolders(gitparent: GitParentPath) -> list:
+def scan_subfolders_task(gitparent: GitParentPath) -> list:
 	"""
 	Scan a parent folder for subfolders that contain .git folders
 	Parameters: newpath: str - full path to parent folder
@@ -215,7 +214,7 @@ def scan_subfolders(gitparent: GitParentPath) -> list:
 	return gp_list
 
 
-def scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
+def scanpath(gpp: GitParentPath, session) -> None:
 	"""
 	scan a single gitparentpath, create new or update existing gitfolders and commits to db
 	Parameters: gpp: GitParentPath object, session: sqlalchemy session
@@ -224,7 +223,8 @@ def scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
 	# gfl = gpp.git_folder_list # get_folder_list(gpp)
 	# gfl = [k for k in glob.glob(gpp.folder+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != gpp.folder+'/']
 	logger.info(f'[sp] scanning {gpp.folder}')
-	for g in gpp.get_git_folders()['res']:  # gfl['res']:
+	ggf_len = len(gpp.get_git_folders()['res'])
+	for idx,g in enumerate(gpp.get_git_folders()['res']):  # gfl['res']:
 		if g.endswith('.git'):
 			logger.warning(f'[sp] {gpp} {g} ends with /.git')
 			g = g[:-4]
@@ -234,13 +234,13 @@ def scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
 				# new git folder
 				git_folder = GitFolder(g, gpp)
 				session.add(git_folder)
-				logger.info(f'[sp] new {git_folder}')
+				logger.info(f'[sp-{idx}/{ggf_len}] new {git_folder}')
 			else:
 				# update
 				git_folder.scan_count += 1
 				git_folder.get_folder_time()
 				git_folder.get_folder_stats(git_folder.id, git_folder.git_path)
-			# logger.info(f'[sp] {git_folder} already in db')
+				logger.info(f'[sp] {git_folder} already in db')
 			# check if gitrepo exists with this path
 			session.commit()
 			git_repo = session.query(GitRepo).filter(GitRepo.git_path == git_folder.git_path).first()
@@ -257,6 +257,7 @@ def scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
 				if git_repo:
 					session.add(git_repo)
 					gpp.repo_count += 1
+					logger.info(f'[sp-{idx}/{ggf_len}] newrepo {gpp.repo_count} {git_repo}')
 			# logger.info(f'[getrepos] new repo={git_repo} gpp={gpp}')
 			else:
 				git_repo.get_repo_stats()
@@ -269,11 +270,11 @@ def scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
 	logger.info(f'[sp] Done gpp={gpp} gppfolders={gpp_folders}')
 
 
-def get_repos(gpp: GitParentPath, session: sessionmaker) -> list:
+def get_repos(gpp: GitParentPath, session) -> list:
 	"""
 	scans all git folders in a gitparentpath for git repos returns a list of GitRepo objects.
 	Caller must commit new objects to db
-	Prameters: gpp: GitParentPath object, session: sessionmaker object
+	Prameters: gpp: GitParentPath object, sessionmaker object
 	Returns: list of GitRepo objects
 	"""
 	repos = []
@@ -327,39 +328,32 @@ def get_git_log(gitrepo: GitRepo) -> list:
 	return log_out
 
 
-def get_git_show(gitrepo: GitRepo) -> list:
+def get_git_show(gitrepo: GitRepo) -> dict:
 	# git -P log    --format="%aI %H %T %P %ae subject=%s"
+	result = {}
 	if os.path.exists(gitrepo.git_path):
 		try:
 			os.chdir(gitrepo.git_path)
 		except FileNotFoundError as e:
 			logger.error(f'{e} {type(e)} gitrepo={gitrepo}')
-			return None
 		# cmdstr = ['git', 'show', '--raw', '--format="%aI %H %T %P %ae subject=%s"']
 		cmdstr = ['git', 'show', '--raw', '-s', '--format="date:%at%nsubject:%s%ncommitemail:%ce"']
 
 		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 		if err != b'':
 			logger.warning(f'[get_git_show] {cmdstr} {err} {os.path.curdir}')
-			return None
 		show_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
 		dsplit = show_out[0].split(':')[1]
 		last_commit = datetime.fromtimestamp(int(dsplit))
-		try:
-			result = {
-				# 'last_commit':datetime.fromisoformat(show_out[0].split('date:')[1]),
-				'last_commit': last_commit,
-				'subject': show_out[1].split('subject:')[1],
-				'commitemail': show_out[2].split('commitemail:')[1]
-			}
-
-		except (IndexError, ValueError, AttributeError) as e:
-			logger.error(f'{e} {type(e)} sout={show_out} out={out} err={err}')
-			return None
+		result['last_commit'] = last_commit
+		result['subject'] = show_out[1].split('subject:')[1]
+		result['commitemail'] = show_out[2].split('commitemail:')[1]
 		return result
 	else:
-		logger.warning(f'[get_git_show] gitrepo={gitrepo} does not exist')
-		return None
+		resmsg = f'[get_git_show] gitrepo={gitrepo} does not exist'
+		logger.warning(resmsg)
+		result['result'] = resmsg
+		return result
 
 
 def get_git_status(gitrepo: GitRepo) -> list:
@@ -371,10 +365,10 @@ def get_git_status(gitrepo: GitRepo) -> list:
 	return status_out
 
 
-def check_missing(gp: GitParentPath, session: sessionmaker) -> None:
+def check_missing(gp: GitParentPath, session) -> None:
 	"""
 	Checks for missing gitfolders and gitrepos, removes them from db
-	Parameters: gp: GitParentPath - gitparentpath to check, session: sessionmaker object
+	Parameters: gp: GitParentPath - gitparentpath to check, sessionmaker object
 	Returns: None
 	"""
 	# logger.info(f'[rs] checking {gp} gitfolders = {len(gp.gitfolders)} ')
