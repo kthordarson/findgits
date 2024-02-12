@@ -18,41 +18,6 @@ from git_tasks import (get_git_show)
 CPU_COUNT = cpu_count()
 
 
-def show_dupe_info(dupes, session: Session):
-	"""
-	show info about dupes
-	Parameters: dupes: list - list of dupes
-	"""
-	dupe_counter = 0
-	for d in dupes:
-		repdupe = session.query(GitRepo).filter(GitRepo.git_url == d.git_url).all()
-		dupe_counter += len(repdupe)
-		print(f'[d] gitrepo url:{d.git_url} has {len(repdupe)} dupes found in:')
-		for r in repdupe:
-			grepo = session.query(GitRepo).filter(GitRepo.git_path == r.git_path).first()
-			g_show = get_git_show(grepo)
-			lastcommitdate = g_show["last_commit"]
-			timediff = grepo.config_ctime - lastcommitdate
-			timediff2 = datetime.now() - lastcommitdate
-			print(f'\tid:{grepo.id} path={r.git_path} age {timediff.days} days td2={timediff2.days}')
-	print(f'[getdupes] {dupe_counter} dupes found')
-
-
-def main_scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
-	"""
-	main scanpath function
-	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
-	"""
-	scantime_start = datetime.now()
-	try:
-		scanpath(gpp, session)
-	except OperationalError as e:
-		logger.error(f'[msp] OperationalError: {e}')
-		return None
-	scantime_end = (datetime.now() - scantime_start).total_seconds()
-	logger.debug(f'[msp] scan_time:{scantime_end}')
-
-
 def dbcheck(session) -> dict:
 	"""
 	run db checks:
@@ -92,7 +57,7 @@ def main():
 	elif args.listpaths:
 		gpp = session.query(GitParentPath).all()
 		for gp in gpp:
-			print(f'[listpaths] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')
+			print(f'[gpp] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')
 	elif args.getdupes:
 		if args.dbmode == 'postgresql':
 			logger.warning(f'[dbinfo] postgresql dbinfo not implemented')
@@ -118,20 +83,20 @@ def main():
 
 		# collect all folders from all gitparentpaths
 		scan_result = collect_folders(args)
-		for gp in session.query(GitParentPath).all():
-			logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')# res={len(scan_result[gp.id])}')
+		#for gp in session.query(GitParentPath).all():
+		#	logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')# res={len(scan_result[gp.id])}')
 		t1 = (datetime.now() - t0).total_seconds()
 		logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
 
 		# create gitfolders in db
 		git_folders_result = create_git_folders(args, scan_result)
 		t1 = (datetime.now() - t0).total_seconds()
-		logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting create_git_repos')
+		logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting update_gitfolder_stats')
 
 		# create gitrepos in db
-		git_repo_result = create_git_repos(args)
-		t1 = (datetime.now() - t0).total_seconds()
-		logger.info(f'[*] create_git_repos done t:{t1} git_repo_result:{git_repo_result} starting update_gitfolder_stats')
+		# git_repo_result = create_git_repos(args)
+		# t1 = (datetime.now() - t0).total_seconds()
+		# logger.info(f'[*] create_git_repos done t:{t1} git_repo_result:{git_repo_result} starting update_gitfolder_stats')
 
 		# update gitfolder stats
 		folder_results = update_gitfolder_stats(args)
