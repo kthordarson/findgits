@@ -84,7 +84,7 @@ class GitParentPath(Base):
 		t0 = datetime.now()
 		self.last_scan = t0
 		self.scanned = True
-		logger.debug(f'[gp] scanning {self.folder}')
+		#logger.debug(f'[gp] scanning {self.folder}')
 		#self.git_folder_list = [str(Path(k).parent) for k in glob.glob(self.folder + '/**/.git', recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder + '/']
 		git_folder_list = []
 		for gitfolder in glob.glob(self.folder + '/**/.git', recursive=False, include_hidden=True):
@@ -96,7 +96,7 @@ class GitParentPath(Base):
 		# g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
 		# res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
-		logger.debug(f'[gp] done scanning {self.folder} found {len(git_folder_list)} folders in {self.scan_time} seconds')
+		# logger.debug(f'[gp] done scanning {self.folder} found {len(git_folder_list)} folders in {self.scan_time} seconds')
 		# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
 		# self.gfl = res
 		return {'gitparent': self.id, 'res': git_folder_list, 'scan_time': self.scan_time}

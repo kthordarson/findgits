@@ -85,15 +85,12 @@ def create_git_folders(args, scan_result: dict) -> int:
 		for gp_id in scan_result:
 			gpp = session.query(GitParentPath).filter(GitParentPath.id == gp_id).first()
 			for fscanres in scan_result[gp_id]:
-				try:
-					gitfolder_one = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
-				except Exception as e:
-					logger.error(f'{type(e)} {e} f={fscanres} gpid:{gp_id} {scan_result}')
-				if not gitfolder_one:
+				gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
+				if not gitfolder:
 					gitfolder = GitFolder(str(fscanres), gpp)
 					gitfolder.scan_count += 1
-					session.add(gitfolder)
-					session.commit()
+					# session.add(gitfolder)
+					# session.commit()
 				gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
 				gitrepo = session.query(GitRepo).filter(GitRepo.git_path == str(fscanres)).first()
 				# print(f'gitfolder={gitfolder} fscanres:{fscanres} gitrepo:{gitrepo}')
@@ -150,15 +147,15 @@ def create_git_repos(args) -> int:
 	return total_res
 
 
-def collect_folders(args) -> dict:
+def collect_folders(args, Session) -> dict:
 	"""
 	Scan all gitparentpaths, creates gitparentpath objects in db
 	Prameters: dbmode: str - database mode (sqlite, mysql, etc)
 	Returns: dict - results of scan {'gitparent' :id of gitparent, 'res': list of gitfolders}
 	"""
 	t0 = datetime.now()
-	engine = get_engine(args)
-	Session = sessionmaker(bind=engine)
+	#engine = get_engine(args)
+	#Session = sessionmaker(bind=engine)
 	# session = Session()
 	tasks = []
 	# for gp in gpp:
@@ -185,7 +182,7 @@ def collect_folders(args) -> dict:
 					git_parentpath.scan_time = r['scan_time']
 					# gitparent = session.query(GitParentPath).filter(GitParentPath.id == r["gitparent"]).first()
 					git_parentpath.last_scan = datetime.now()
-					session.commit()
+					# session.commit()
 					total_t = (datetime.now() - t0).total_seconds()
 					results[r['gitparent']] = r['res']
 					# logger.info(f'[cgf] {total_t} git_parentpath {git_parentpath.id} done gfl={len(git_folder_list)} res:{len(results)}')

@@ -82,7 +82,7 @@ def main():
 		t0 = datetime.now()
 
 		# collect all folders from all gitparentpaths
-		scan_result = collect_folders(args)
+		scan_result = collect_folders(args, Session)
 		#for gp in session.query(GitParentPath).all():
 		#	logger.info(f'[fullscan] id={gp.id} path={gp.folder} last_scan={gp.last_scan} scan_time={gp.scan_time}')# res={len(scan_result[gp.id])}')
 		t1 = (datetime.now() - t0).total_seconds()
