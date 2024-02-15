@@ -344,6 +344,15 @@ def check_dupe_status(session) -> None:
 				# logger.info(f'setting dupe_flag on repoid: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id}')
 	session.commit()
 
+def db_get_dupes(session, repo_url):
+	dupes = session.query(
+		GitRepo.id.label('id'),
+		GitRepo.git_url.label('git_url'),
+		GitRepo.gitfolder_id.label('folderid'),
+		GitRepo.parent_id.label('parentid'),
+		func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).having(func.count(GitRepo.git_url) > 1).order_by(func.count(GitRepo.git_url).desc()).filter(GitRepo.git_url == repo_url).all()
+	return dupes
+
 
 def db_dupe_info(session: Session, maxdupes=30) -> None:
 	"""

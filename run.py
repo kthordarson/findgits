@@ -4,7 +4,7 @@ import os, sys
 from argparse import ArgumentParser
 from loguru import logger
 from ui_main import Ui_FindGitsApp
-from dbstuff import GitRepo, GitFolder, GitParentPath, get_engine, get_dupes
+from dbstuff import GitRepo, GitFolder, GitParentPath, get_engine, get_dupes, db_get_dupes
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
@@ -15,7 +15,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
                            QImage, QKeySequence, QLinearGradient, QPainter,
                            QPalette, QPixmap, QRadialGradient, QTransform, QStandardItemModel, QStandardItem)
 # from PySide6.QtWidgets import (QApplication, QSizePolicy, QWidget)
-from PySide6.QtWidgets import (QApplication, QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget, QListWidgetItem, QTableWidgetItem)
+from PySide6.QtWidgets import (QApplication, QFormLayout, QLabel, QLineEdit,QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget, QListWidgetItem, QTableWidgetItem)
 
 
 class MainApp(QWidget, Ui_FindGitsApp):
@@ -23,16 +23,16 @@ class MainApp(QWidget, Ui_FindGitsApp):
 		self.session = session
 		super(MainApp, self).__init__()
 		self.setupUi(self)
-		self.repotree.itemClicked.connect(self.tree_item_clicked)
+		self.repotree.itemClicked.connect(self.repo_item_clicked)
 		self.folderButton.clicked.connect(self.folderButton_clicked)
 		self.getdupes_button.clicked.connect(self.getdupes_button_clicked)
-		self.checkBox_filterdupes.toggled.connect(self.checkBox_filterdupes_toggle)
+		# self.checkBox_filterdupes.toggled.connect(self.checkBox_filterdupes_toggle)
 		self.searchpaths_button.clicked.connect(self.searchpaths_button_clicked)
 		self.gitshow_button.clicked.connect(self.gitshow_button_clicked)
 		self.gitlog_button.clicked.connect(self.gitlog_button_clicked)
 		self.gitstatus_button.clicked.connect(self.gitstatus_button_clicked)
 		self.dupefilter = False
-		self.folderButton_clicked(None)
+		self.repotree_populate()
 
 	def gitshow_button_clicked(self, widget):
 		pass
@@ -46,12 +46,12 @@ class MainApp(QWidget, Ui_FindGitsApp):
 	def searchpaths_button_clicked(self, widget):
 		pass
 
-	def checkBox_filterdupes_toggle(self, *args):
-		self.dupefilter = self.checkBox_filterdupes.isChecked()
-		self.folderButton_clicked(self)
+	# def checkBox_filterdupes_toggle(self, *args):
+	# 	self.dupefilter = self.checkBox_filterdupes.isChecked()
+	# 	self.folderButton_clicked(self)
 
 	def getdupes_button_clicked(self, widget):
-		self.checkBox_filterdupes.setEnabled(False)
+		# self.checkBox_filterdupes.setEnabled(False)
 		self.repotree.clear()
 		self.repotree.setColumnCount(3)
 		self.repotree.headerItem().setText(0, "id")
@@ -72,21 +72,19 @@ class MainApp(QWidget, Ui_FindGitsApp):
 			#     logger.error(e)
 		# self.retranslateUi(self)
 
-	def tree_item_clicked(self, widget):
-		try:
-			repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
-		except IndexError as e:
-			logger.error(f'[tic] indexerror {e} widget={widget.text(0)} {widget.text(1)}')
-			return
-		self.idLineEdit.setText(f'{repo.id}')
-		self.urlLineEdit.setText(f'{repo.git_url}')
-		self.dupecountlabel.setText(f'Dupes: {repo.dupe_count}')
-		itemdupes = self.session.query(GitRepo).filter(GitRepo.git_url == repo.git_url).all()
-		folderdupes = [session.query(GitFolder).filter(GitFolder.id == d.gitfolder_id).first() for d in itemdupes]
-		self.dupetree.clear()
-		for f in folderdupes:
-			item1 = QTreeWidgetItem(self.dupetree)
-			item1.setText(0, f"{f.git_path}")
+	def repo_item_clicked(self, widget):
+		repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
+		duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
+		dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.gitfolder_id).first() for k in duperepos]
+		logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
+		self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
+		self.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
+		self.dupe_paths_widget.clear()
+		self.dupe_paths_widget.setColumnCount(1)
+		self.dupe_paths_widget.headerItem().setText(0, "path")
+		for dp in dupe_locations:
+			item0 = QTreeWidgetItem(self.dupe_paths_widget)
+			item0.setText(0, f"{dp[0]}")
 
 	def populate_gitrepos(self):
 		self.repotree.clear()
@@ -100,24 +98,30 @@ class MainApp(QWidget, Ui_FindGitsApp):
 	def folderButton_clicked(self, widget):
 		if widget:
 			repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
-		self.checkBox_filterdupes.setEnabled(True)
+			logger.debug(f'folderButton_clicked {repo}')
+		# self.checkBox_filterdupes.setEnabled(True)
+
+	def repotree_populate(self):
 		self.repotree.clear()
 		self.repotree.setColumnCount(3)
-		self.repotree.headerItem().setText(0, "id")
-		self.repotree.headerItem().setText(1, "path")
-		self.repotree.headerItem().setText(2, "dupe")
-		self.repotree.headerItem().setText(3, "dupe_count")
+		[self.repotree.headerItem().setText(k[0],k[1]) for k in enumerate(["id", "dupes", "url"])]
+		# self.repotree.headerItem().setText(0, "id")
+		# self.repotree.headerItem().setText(1, "path")
+		# self.repotree.headerItem().setText(2, "dupe")
+		# self.repotree.headerItem().setText(3, "dupe_count")
 		if self.dupefilter:
-			gitfolders = session.query(GitFolder).filter(GitFolder.dupe_flag == self.dupefilter).all()
+			gitrepos = session.query(GitRepo).filter(GitRepo.dupe_flag == self.dupefilter).all()
 		else:
-			gitfolders = session.query(GitFolder).all()
-		for k in gitfolders:
+			gitrepos = session.query(GitRepo).all()
+		for k in gitrepos:
 			item_1 = QTreeWidgetItem(self.repotree)
 			item_1.setText(0, f"{k.id}")
-			item_1.setText(1, f"{k.git_path}")
-			item_1.setText(2, f"{k.dupe_flag}")
-			item_1.setText(3, f"{k.dupe_count}")
-			self.dupecountlabel.setText(f'Dupes: {k.dupe_count}')
+			item_1.setText(1, f"{k.dupe_count}")
+			item_1.setText(2, f"{k.git_url}")
+		self.repotree.resizeColumnToContents(0)
+		self.repotree.resizeColumnToContents(1)
+		self.repotree.resizeColumnToContents(2)
+			# self.dupecountlabel.setText(f'Dupes: {k.dupe_count}')
 
 
 if __name__ == '__main__':
