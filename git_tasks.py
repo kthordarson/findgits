@@ -45,7 +45,7 @@ def update_gitfolder_stats(args) -> dict:
 					try:
 						r = res.result()
 					except BrokenProcessPool as e:
-						logger.error(f'BrokenProcessPool {e} res={res}')
+						logger.error(f'BrokenProcessPool {e} {res=}')
 					results[r['id']] = r
 					gpp.folder_size += r['folder_size']
 					gpp.folder_count += r['subdir_count']
@@ -89,8 +89,8 @@ def create_git_folders(args, scan_result: dict) -> int:
 				if not gitfolder:
 					gitfolder = GitFolder(str(fscanres), gpp)
 					gitfolder.scan_count += 1
-					# session.add(gitfolder)
-					# session.commit()
+					session.add(gitfolder)
+					session.commit()
 				gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
 				gitrepo = session.query(GitRepo).filter(GitRepo.git_path == str(fscanres)).first()
 				# print(f'gitfolder={gitfolder} fscanres:{fscanres} gitrepo:{gitrepo}')
@@ -105,16 +105,19 @@ def create_git_folders(args, scan_result: dict) -> int:
 				else:
 					#gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
 					gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
-					gitrepo = GitRepo(gitfolder)
-					gitfolder.scan_count += 1
-					gitrepo.scan_count += 1
-					session.add(gitrepo)
-					session.commit()
-					gitfolder.gitrepo_id = gitrepo.id
-					gitfolder.gitrepo_id = gitrepo.id
-					#logger.warning(f'[cgf] {gitfolder} has no gitrepo fscanres:{fscanres} newrepo = {gitrepo}')
-					session.add(gitfolder)
-					session.commit()
+					if not gitfolder:
+						logger.error(f'nogitfolder {fscanres=} ')
+					else:
+						gitrepo = GitRepo(gitfolder)
+						gitfolder.scan_count += 1
+						gitrepo.scan_count += 1
+						session.add(gitrepo)
+						session.commit()
+						gitfolder.gitrepo_id = gitrepo.id
+						gitfolder.gitrepo_id = gitrepo.id
+						#logger.warning(f'[cgf] {gitfolder} has no gitrepo fscanres:{fscanres} newrepo = {gitrepo}')
+						session.add(gitfolder)
+						session.commit()
 				total_res += 1
 			session.commit()
 	logger.debug(f'[cgf] gitfolders:{total_res} ')
@@ -142,7 +145,7 @@ def create_git_repos(args) -> int:
 					repo = GitRepo(gf)
 					session.add(repo)
 					total_res += 1
-			logger.debug(f'[cgr] gpp:{gpp.id} gfl={len(gfl)} repos:{total_res} ')
+			logger.debug(f'[cgr] {gpp.id=} {len(gfl)=} {total_res=} ')
 			session.commit()
 	return total_res
 
@@ -174,7 +177,7 @@ def collect_folders(args, Session) -> dict:
 				try:
 					r = res.result()
 				except DetachedInstanceError as e:
-					logger.error(f'[cgf] {e} {type(e)} res = {res} gpp={gpp}')
+					logger.error(f'[cgf] {e} {type(e)} {res=} {gpp=}')
 				if r:
 					git_parentpath = session.query(GitParentPath).filter(GitParentPath.id == r["gitparent"]).first()
 					git_folder_list = r['res']
@@ -186,11 +189,11 @@ def collect_folders(args, Session) -> dict:
 					total_t = (datetime.now() - t0).total_seconds()
 					results[r['gitparent']] = r['res']
 					# logger.info(f'[cgf] {total_t} git_parentpath {git_parentpath.id} done gfl={len(git_folder_list)} res:{len(results)}')
-	logger.info(f'[cgf] {total_t} res:{len(results)}')
+	logger.info(f'[cgf] {total_t=} res:{len(results)}')
 	return results
 
 
-def add_parent_path(newpath: str, session):#  -> GitParentPath:
+def add_parent_path(newpath, session):#  -> GitParentPath:
 	"""
 	Add new gitparentpath to db
 	Parameters: newpath: str full path to new gitparentpath , sessionmaker
@@ -200,15 +203,16 @@ def add_parent_path(newpath: str, session):#  -> GitParentPath:
 
 	if newpath.endswith('/'):
 		newpath = newpath[:-1]
+	newpath = Path(newpath)
 	if not os.path.exists(newpath):
 		raise MissingGitFolderException(f'[addpath] {newpath} not found')
-	gpp = session.query(GitParentPath).filter(GitParentPath.folder == newpath).first()
+	gpp = session.query(GitParentPath).filter(GitParentPath.folder == str(newpath)).first()
 	newgplist = []
 	if not gpp:
 		# logger.debug(f'[add_path] scanning {newpath} for git folders ')
 		# todo check subfolders for git folders....
 		# subdirs = [Path(k) for k in os.scandir(Path(newpath)) if Path(k).is_dir()]
-		subdirs = [k for k in glob.glob(newpath + '/**', recursive=False) if Path(k).is_dir()]
+		subdirs = [k for k in glob.glob(str(newpath) + '/**', recursive=False) if Path(k).is_dir()]
 		# logger.info(f'subdirs={len(subdirs)}')
 		for subdir in subdirs:
 			# logger.debug(f'checksubdir {subdir} subdirs: {len(subdirs)}')
@@ -216,17 +220,19 @@ def add_parent_path(newpath: str, session):#  -> GitParentPath:
 			# scanstring = newpath+'/'+subdir.name+'/**/.git'
 			subgits = [k for k in glob.glob(subdir + '/**/.git', recursive=True)]
 			# logger.debug(f'checksubdir {scanstring} {subdir.name} subgits: {len(subgits)}')
-			if len(subgits) > 1:
+			if len(subgits) > 1: # folder has more than one git folder, make it a partent path
 				#logger.debug(f'checksubdir {subdir} subgits: {len(subgits)}')
-				session.add(GitParentPath(str(subdir)))
-		session.add(GitParentPath(newpath))
+				gp_check = session.query(GitParentPath).filter(GitParentPath.folder == str(newpath)).first()
+				if not gp_check:
+					session.add(GitParentPath(str(subdir).strip('.git')))
+		session.add(GitParentPath(str(newpath)))
 		session.commit()
 		# newgpp.git_folder_list = [str(Path(k).parent) for k in glob.glob(newpath+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != newpath+'/']
 		# newgpp.base_folders = [k for k in glob.glob(newpath+'/**/', include_hidden=True) if Path(k).is_dir() and k != newpath+'/']
 		# logger.info(f'[app] {newgpp}')# gfl:{len(newgpp.git_folder_list)} ')#bfl:{len(newgpp.base_folders)}')
 		#return newgplist
 	else:
-		logger.warning(f'[app] path={newpath} {gpp} already in config')
+		logger.warning(f'[app] {newpath=} {gpp=} already in config')
 
 
 def scan_subfolders_task(gitparent: GitParentPath) -> list:

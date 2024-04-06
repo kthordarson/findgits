@@ -18,8 +18,8 @@
     <rect>
      <x>10</x>
      <y>10</y>
-     <width>591</width>
-     <height>400</height>
+     <width>711</width>
+     <height>291</height>
     </rect>
    </property>
    <property name="sizePolicy">
@@ -38,13 +38,25 @@
   <widget class="QWidget" name="layoutWidget">
    <property name="geometry">
     <rect>
-     <x>50</x>
+     <x>10</x>
      <y>420</y>
      <width>491</width>
-     <height>29</height>
+     <height>40</height>
     </rect>
    </property>
    <layout class="QHBoxLayout" name="horizontalLayout">
+    <property name="leftMargin">
+     <number>7</number>
+    </property>
+    <property name="topMargin">
+     <number>7</number>
+    </property>
+    <property name="rightMargin">
+     <number>7</number>
+    </property>
+    <property name="bottomMargin">
+     <number>7</number>
+    </property>
     <item>
      <widget class="QPushButton" name="folderButton">
       <property name="text">
@@ -136,9 +148,9 @@
   <widget class="QWidget" name="infowidget" native="true">
    <property name="geometry">
     <rect>
-     <x>620</x>
+     <x>740</x>
      <y>20</y>
-     <width>411</width>
+     <width>291</width>
      <height>381</height>
     </rect>
    </property>
@@ -148,7 +160,7 @@
       <x>10</x>
       <y>10</y>
       <width>151</width>
-      <height>51</height>
+      <height>31</height>
      </rect>
     </property>
     <layout class="QFormLayout" name="formLayout">
@@ -185,9 +197,9 @@
    <widget class="QTreeWidget" name="dupe_paths_widget">
     <property name="geometry">
      <rect>
-      <x>10</x>
-      <y>251</y>
-      <width>391</width>
+      <x>0</x>
+      <y>260</y>
+      <width>281</width>
       <height>121</height>
      </rect>
     </property>
