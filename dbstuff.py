@@ -39,42 +39,21 @@ class Base(DeclarativeBase):
 # --addpath to GPP to db
 # todo: if a subfolder of a GPP contains other git repos, make those a GPP and add to db
 #       example: GPP folder ~/development2 has one called games, which should be a GPP
-class GitParentPath(Base):
-	""" GitParentPath class, this is a folder that contains more than one git repos"""
-	__tablename__ = 'gitparentpath'
+
+# todo: remove git_path and use searchpath_id to get parent path string
+class SearchPath(Base):
+	__tablename__ = 'searchpath'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	folder = Column('folder', String(255))
-	gitfolders: Mapped[List['GitFolder']] = relationship()
+	folder = Column('path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_time = Column('scan_time', Float)
-	folder_count = Column(Integer)
-	folder_size = Column(BigInteger)
-	file_count = Column(BigInteger)
-	repo_count = Column(Integer)
 	scanned = Column[bool]
 	scan_count = Column('scan_count', Integer)
-	# git_folder_list = ''
 
 	def __init__(self, folder: str):
 		self.folder = folder
-		self.first_scan = datetime.now()
-		self.last_scan = self.first_scan
-		self.scan_time = 0.0
-		self.git_folder_list = []
-		self.folder_count = 0
-		self.folder_size = 0
-		self.file_count = 0
-		self.repo_count = 0
-		self.base_folders = []
-		self.scanned = False
 		self.scan_count = 0
-
-	def __repr__(self):
-		return f'<GPP id={self.id} folder: {self.folder} >'
-
-	def xget_git_folders(self):
-		return self.git_folder_list
 
 	def get_git_folders(self) -> dict:
 		"""
@@ -84,34 +63,21 @@ class GitParentPath(Base):
 		t0 = datetime.now()
 		self.last_scan = t0
 		self.scanned = True
-		#logger.debug(f'[gp] scanning {self.folder}')
-		#self.git_folder_list = [str(Path(k).parent) for k in glob.glob(self.folder + '/**/.git', recursive=True, include_hidden=True) if Path(k).is_dir() and k != self.folder + '/']
 		git_folder_list = []
 		for gitfolder in glob.glob(self.folder + '/**/.git', recursive=False, include_hidden=True):
 			if Path(gitfolder).is_dir() and gitfolder != self.folder + '/':
-				#logger.debug(f'[gfl] {self} {gitfolder}')
-				# check subdircount
-				#subdircount = glob.glob(k, recursive=True, include_hidden=True)
 				git_folder_list.append(Path(gitfolder).parent)
-		# g_out = glob.glob(self.folder+'/**/.git',recursive=True, include_hidden=True)
-		# res = [Path(k).parent for k in g_out if os.path.exists(k + '/config') if Path(k).is_dir()]
 		self.scan_time = (datetime.now() - t0).total_seconds()
-		# logger.debug(f'[gp] done scanning {self.folder} found {len(git_folder_list)} folders in {self.scan_time} seconds')
-		# logger.debug(f'[get_folder_list] {datetime.now() - t0} gitparent={gitparent} cmd:{cmdstr} gout:{len(g_out)} out:{len(out)} res:{len(res)}')
-		# self.gfl = res
-		return {'gitparent': self.id, 'res': git_folder_list, 'scan_time': self.scan_time}
+		return {'SearchPath': self.id, 'res': git_folder_list, 'scan_time': self.scan_time}
 
-
-# todo: remove git_path and use parent_id to get parent path string
 class GitFolder(Base):
 	""" A folder containing one git repo """
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
+	searchpath_id: Mapped[int] = mapped_column(ForeignKey('searchpath.id'))
 	git_path = Column('git_path', String(255))
 	gitrepo_id = Column('gitrepo_id', Integer) # id of gitrepo found in this folder
-	parent_id: Mapped[int] = mapped_column(ForeignKey('gitparentpath.id'))
-	# gitparent = relationship("GitParentPath", backref="git_path")
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_count = Column('scan_count', Integer)
@@ -126,13 +92,11 @@ class GitFolder(Base):
 	dupe_flag = Column('dupe_flag', Boolean)
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
-	is_parent = Column(Boolean, default=False)
 	scanned = Column[bool]
 
-	def __init__(self, gitfolder: str, gpp: GitParentPath):
-		self.parent_path = gpp.folder
-		self.parent_id = gpp.id
+	def __init__(self, gitfolder: str, searchpath: SearchPath):
 		self.git_path = str(gitfolder)
+		self.searchpath_id = searchpath.id
 		# self.gitrepo_id = None
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
@@ -182,16 +146,14 @@ class GitFolder(Base):
 		return {'id': id, 'folder_size': folder_size, 'file_count': file_count, 'subdir_count': subdir_count, 'scan_time': scan_time}
 
 
-# todo: make this better, should only be linked to one gitfolder and that gitfolder links to a gitparentpath
+# todo: make this better, should only be linked to one gitfolder
 class GitRepo(Base):
-	""" A git repo, linked to one gitfolder and one gitparentpath """
+	""" A git repo, linked to one gitfolder  """
 	__tablename__ = 'gitrepo'
 	id: Mapped[int] = mapped_column(primary_key=True)
 	# gitfolder_id = Column('gitfolder_id', Integer)
-	# parent_id = Column('parent_id', Integer)
 	gitfolder_id: Mapped[int] = mapped_column(ForeignKey('gitfolder.id'))
-	parent_id: Mapped[int] = mapped_column(ForeignKey('gitparentpath.id'))
-	# parentid = Column('parentid', BigInteger)
+	searchpath_id: Mapped[int] = mapped_column(ForeignKey('searchpath.id'))
 	git_url = Column('git_url', String(255))
 	git_path = Column('git_path', String(255))
 	remote = Column('remote', String(255))
@@ -213,7 +175,6 @@ class GitRepo(Base):
 
 	def __init__(self, gitfolder: GitFolder):
 		self.gitfolder_id = gitfolder.id
-		self.parent_id = gitfolder.parent_id
 		self.git_path = gitfolder.git_path
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
@@ -349,7 +310,6 @@ def db_get_dupes(session, repo_url):
 		GitRepo.id.label('id'),
 		GitRepo.git_url.label('git_url'),
 		GitRepo.gitfolder_id.label('folderid'),
-		GitRepo.parent_id.label('parentid'),
 		func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).having(func.count(GitRepo.git_url) > 1).order_by(func.count(GitRepo.git_url).desc()).filter(GitRepo.git_url == repo_url).all()
 	return dupes
 
@@ -367,7 +327,6 @@ def db_dupe_info(session: Session, maxdupes=30) -> None:
 			GitRepo.id.label('id'),
 			GitRepo.git_url.label('git_url'),
 			GitRepo.gitfolder_id.label('folderid'),
-			GitRepo.parent_id.label('parentid'),
 			func.count(GitRepo.git_url).label("count")). \
 			group_by(GitRepo.git_url). \
 			having(func.count(GitRepo.git_url) > 1). \
@@ -383,46 +342,26 @@ def db_dupe_info(session: Session, maxdupes=30) -> None:
 		# dcount = session.query(GitRepo).filter(GitRepo.git_url == d.git_url).count()
 		print(f"{'id' : <5}{'pid' : <5}{'repo' : <55}{'dupes' : <5}")
 		for gpe in dupes:
-
-			# fc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-			print(f'{gpe.id:<5}{gpe.parentid:<5}{gpe.git_url:<55}{gpe.count:<5}')
+			print(f'{gpe.id:<5}{gpe.git_url:<55}{gpe.count:<5}')
 		print(f'{"=" * 20} {total_dupes}')
 
 
-def xget_db_info(session):
-	git_parent_entries = session.query(GitParentPath).all()  # filter(GitParentPath.id == str(args.listpaths)).all()
-	total_size = 0
-	total_time = 0
-	# print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
-	print(f"{'id' : <3}{'folder' : <31}{'fc' : <5}{'rc' : <5}{'size' : <10}{'scantime' : <10}")
-	for gpe in git_parent_entries:
-		fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
-		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-		total_size += f_size
-		f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
-		total_time += f_scantime
-		rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
-		scant = str(timedelta(seconds=f_scantime))
-		print(f'{gpe.id:<3}{gpe.folder:<31}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{scant:<10}')
-	print(f'[*] total_size={format_bytes(total_size)} total_time={timedelta(seconds=total_time)}')
-
-
 def get_db_info(session):
-	git_parent_entries = session.query(GitParentPath).all()  # filter(GitParentPath.id == str(args.listpaths)).all()
+	git_parent_entries = session.query(SearchPath).all()  # filter(SearchPath.id == str(args.listpaths)).all()
 	# slowscans = session.query(GitFolder).order_by(GitFolder.scan_time.desc()).limit(10).all()
-	# git_parent_scantimesum = sum([k.scan_time for k in session.query(GitParentPath).all()])
+	# git_parent_scantimesum = sum([k.scan_time for k in session.query(SearchPath).all()])
 	# allfolderscantimesum = sum([k.scan_time for k in session.query(GitFolder).all()])
 	total_size = 0
 	total_time = 0
 	# print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
 	print(f"{'id' : <3} {'folder' : <31}{'folders' : >7} {'repos' : >5} {'size' : <10} {'scantime' : <15}")
 	for gpe in git_parent_entries:
-		fc = session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).count()
-		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
+		fc = session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).count()
+		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
 		total_size += f_size
-		# f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.parent_id == gpe.id).all()])
+		# f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
 		# total_time += f_scantime
-		rc = session.query(GitRepo).filter(GitRepo.parent_id == gpe.id).count()
+		rc = session.query(GitRepo).filter(GitRepo.searchpath_id == gpe.id).count()
 		# scant = str(timedelta(seconds=f_scantime))
 		gpscant = str(timedelta(seconds=gpe.scan_time))
 		print(f'{gpe.id:<3}{gpe.folder:<47}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{gpscant:<14}')
@@ -435,12 +374,11 @@ def get_db_info(session):
 		print(f'duperepo id={d.id} url {d.git_url} count: {d.count}')
 
 
-def gitfolder_to_gitparent(gitfolder: GitFolder, session: Session) -> GitParentPath:
+def gitfolder_to_gitparent(gitfolder: GitFolder, session: Session) -> SearchPath:
 	"""
 	Convert a gitfolder to a gitparent. Used when gitfolder contains more than one git repo
-	Removes the gitfolder and any repos from that folder from db, create a new gitparentpath and return it
+	Removes the gitfolder and any repos from that folder from db, create a new SearchPath and return it
 	Parameters: gitfolder (GitFolder) - gitfolder to convert
-	Returns: gitparent (GitParentPath)
 	"""
 	repos_to_del = session.query(GitRepo).filter(GitRepo.id == gitfolder.id).all()
 	for r in repos_to_del:
@@ -449,7 +387,7 @@ def gitfolder_to_gitparent(gitfolder: GitFolder, session: Session) -> GitParentP
 	session.delete(gitfolder)
 	logger.warning(f'[gtp] removing {gitfolder} from db')
 	# logger.debug(f'[gto] removed {gitfolder}')
-	gpp = GitParentPath(gitfolder.git_path)
+	gpp = SearchPath(gitfolder.git_path)
 	logger.info(f'[gtp] new {gpp} created')
 	return gpp
 
@@ -475,10 +413,10 @@ def show_dupe_info(dupes, session: Session):
 	print(f'[getdupes] {dupe_counter} dupes found')
 
 
-def main_scanpath(gpp: GitParentPath, session: sessionmaker) -> None:
+def main_scanpath(gpp: SearchPath, session: sessionmaker) -> None:
 	"""
 	main scanpath function
-	Parameters: gpp: GitParentPath scan all subfolders if this gpp, session: sessionmaker object
+	Parameters: gpp: SearchPath scan all subfolders if this gpp, session: sessionmaker object
 	"""
 	scantime_start = datetime.now()
 	try:

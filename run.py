@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from ui_mainwindow import Ui_MainWindow
-from dbstuff import GitRepo, GitFolder, GitParentPath, get_engine, get_dupes, db_get_dupes
+from dbstuff import GitRepo, GitFolder, get_engine, get_dupes, db_get_dupes
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
@@ -106,11 +106,7 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 		# self.checkBox_filterdupes.setEnabled(True)
 
 	def repotree_populate(self):
-		#self.ui.repotree.clear()
-		#self.ui.repotree.setColumnCount(2)
-		#self.ui.repotree = QTreeWidget(self.ui.centralwidget)
-		#[self.ui.repotree.headerItem().setText(k[0],k[1]) for k in enumerate(["id", "parent"])] # , "size", "subfolders", "subfiles"
-		gpf = session.query(GitParentPath).all()
+		gpf = session.query(SearchPath).all()
 		self.ui.repotree.headerItem().setText(0, "id")
 		self.ui.repotree.headerItem().setText(1, "folder")
 		self.ui.repotree.headerItem().setText(2, "repos")
@@ -123,7 +119,7 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 			item.setText(1, f"{k.folder}")
 			item.setText(2, f"{k.repo_count}")
 			item.setText(3, f"{k.folder_size:,}")
-			gitpaths = session.query(GitFolder).filter(GitFolder.parent_id == k.id).all()
+			gitpaths = session.query(GitFolder).filter(GitFolder.searchpath_id == k.id).all()
 			for g in gitpaths:
 				item1 = QTreeWidgetItem(item)
 				item1.setText(0, f"{g.id}")
