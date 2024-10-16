@@ -1,20 +1,16 @@
 #!/usr/bin/python3
-import argparse
 import os
 from pathlib import Path
 import glob
-from configparser import ConfigParser
-from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor, as_completed)
+from concurrent.futures import (ProcessPoolExecutor, as_completed)
 from concurrent.futures.process import BrokenProcessPool
-from datetime import datetime, timedelta
+from datetime import datetime
 from multiprocessing import cpu_count
-from threading import Thread
 from loguru import logger
-from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlalchemy.exc import UnboundExecutionError
-from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError,)
+from sqlalchemy.exc import (OperationalError,)
 from subprocess import Popen, PIPE
 from dbstuff import (GitFolder, GitRepo,SearchPath)
 from dbstuff import get_engine
@@ -34,7 +30,6 @@ def update_gitfolder_stats(args) -> dict:
 		search_paths = session.query(SearchPath).all()
 		# start thread for each SearchPath
 		with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
-			t0x = datetime.now()
 			for gitsearchpath in search_paths:
 				# set gitpar path stats to 0
 				gitsearchpath.folder_size = 0
@@ -78,16 +73,18 @@ def create_git_folders(args, scan_result: dict) -> int:
 	Parameters: scan_result : dict - scan result from collect_folders
 	Returns: int - number of gitfolders added
 	"""
-	t0 = datetime.now()
 	engine = get_engine(args)
 	Session = sessionmaker(bind=engine)
 	session = Session()
-	tasks = []
-	total_res = 0
-	for gp_id in scan_result:
+	gp_id = scan_result['SearchPath']
+	try:
 		gitsearchpath = session.query(SearchPath).filter(SearchPath.id == gp_id).first()
-		logger.info(f'scanning {gitsearchpath}')
-		for fscanres in scan_result[gp_id]:
+	except OperationalError as e:
+		logger.error(f'[cgf] {e} {type(e)}\n{scan_result}\n ')
+		return 0
+	logger.info(f'scanning gp_id:{gp_id} {gitsearchpath}')
+	for fscanres in scan_result['res']:
+		try:
 			remoteurl = get_remote(fscanres)
 			if not remoteurl:
 				logger.warning(f'[cgf] {fscanres} not a git folder')
@@ -97,24 +94,36 @@ def create_git_folders(args, scan_result: dict) -> int:
 				git_repo = GitRepo(remoteurl)
 				session.add(git_repo)
 				session.commit()
+				git_repo = session.query(GitRepo).filter(GitRepo.id == git_repo.id).first()
 				if args.debug:
 					logger.debug(f'[cgf] new {git_repo}')
+			if git_repo.dupe_count > 1:
+				git_repo.dupe_flag = True
+				logger.info(f'[cgf] {git_repo} dupes: {git_repo.dupe_count}')
 			gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
 			if not gitfolder:
-				gitfolder = GitFolder(str(fscanres),gitsearchpath, git_repo.id)
+				gitfolder = GitFolder(str(fscanres),gp_id, git_repo.id)
 				gitfolder.scan_count += 1
 				session.add(gitfolder)
 				session.commit()
 				if args.debug:
 					logger.debug(f'[cgf] new {gitfolder.git_path} ')
+			# dupecount = session.query(GitRepo).filter(GitRepo.git_url == git_repo.git_url).count()
+			dupecount = session.query(GitFolder).filter(GitFolder.gitrepo_id == git_repo.id).count()
+			git_repo.dupe_count = dupecount
+			session.add(git_repo)
+			session.commit()
+		except Exception as e:
+			logger.error(f'[cgf] {e} {type(e)} {fscanres=}')
+			continue
 	session.close()
+	return True
 
 
 def create_git_repos(args) -> int:
 	engine = get_engine(args)
 	Session = sessionmaker(bind=engine)
 	session = Session()
-	tasks = []
 	total_res = 0
 	try:
 		git_folders = session.query(GitFolder).all()
@@ -169,7 +178,7 @@ def collect_folders(args) -> dict:
 	tasks = []
 	# for gp in gpp:
 	# check_missing(gp, session)
-	results = {}
+	results = []
 	with s() as session:
 		try:
 			gpp = session.query(SearchPath).all()
@@ -197,17 +206,19 @@ def collect_folders(args) -> dict:
 					git_parentpath.git_parentpath = len(git_folder_list)
 					git_parentpath.scan_time = r['scan_time']
 					git_parentpath.last_scan = datetime.now()
-					results[r['SearchPath']] = r['res']
+					results.append({'SearchPath': git_parentpath.id, 'res': git_folder_list})
+					# results['SearchPath'] = git_parentpath.id
+					# results['res'] = r['res']
 	total_t = (datetime.now() - t0).total_seconds()
 	logger.info(f'[cf] {total_t=} res:{len(results)}')
 	return results
 
 #  -> SearchPath:
-def add_path(args):
+def add_path(args) -> int:
 	"""
 	Add new SearchPath to db
 	Parameters: newpath: str full path to new SearchPath , sessionmaker
-	Returns: SearchPath object if the path is new, None if the path already exists
+	Returns: SearchPath.id if the path is new, None if the path already exists
 	raises MissingGitFolderException if the path does not exist
 	"""
 
@@ -219,14 +230,16 @@ def add_path(args):
 	if not os.path.exists(newpath):
 		raise MissingGitFolderException(f'[addpath] {newpath} not found')
 	gpp = session.query(SearchPath).filter(SearchPath.folder == str(newpath)).first()
-	newgplist = []
 	if not gpp:
-		logger.debug(f'[add_path] scanning {newpath} for git folders ')
+		sp = SearchPath(str(newpath))
+		logger.debug(f'[add_path] {sp} scanning {newpath} for git folders ')
 		# todo check subfolders for git folders....
-		session.add(SearchPath(str(newpath)))
+		session.add(sp)
 		session.commit()
+		return sp.id
 	else:
 		logger.warning(f'[app] {newpath=} {gpp=} already in config/database')
+		None
 
 
 def scan_subfolders_task(gitparent: SearchPath) -> list:

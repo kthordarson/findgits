@@ -78,7 +78,7 @@ class SearchPath(Base):
 		git_folder_list = []
 		for gitfolder in glob.glob(self.folder + '/**/.git', recursive=False, include_hidden=True):
 			if Path(gitfolder).is_dir() and gitfolder != self.folder + '/':
-				git_folder_list.append(Path(gitfolder).parent)
+				git_folder_list.append(str(Path(gitfolder).parent))
 		self.scan_time = (datetime.now() - t0).total_seconds()
 		logger.info(f'[gff] {self} {len(git_folder_list)} folders found in {self.folder} scan_time: {self.scan_time}')
 		return {'SearchPath': self.id, 'res': git_folder_list, 'scan_time': self.scan_time}
@@ -107,9 +107,9 @@ class GitFolder(Base):
 	valid = Column(Boolean, default=True)
 	scanned = Column[bool]
 
-	def __init__(self, gitfolder: str, searchpath: SearchPath, gitrepo_id):
+	def __init__(self, gitfolder: str, searchpathid, gitrepo_id):
 		self.git_path = str(gitfolder)
-		self.searchpath_id = searchpath.id
+		self.searchpath_id = searchpathid
 		self.gitrepo_id = gitrepo_id
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
@@ -142,7 +142,6 @@ class GitFolder(Base):
 		if not os.path.exists(self.git_path):  # redundant check, but just in case?
 			self.valid = False
 			raise MissingGitFolderException(f'{self} does not exist')
-		t0 = datetime.now()
 		self.last_scan = datetime.now()
 		stat = os.stat(self.git_path)
 		self.gitfolder_ctime = datetime.fromtimestamp(stat.st_ctime)
@@ -193,6 +192,7 @@ class GitRepo(Base):
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_count = 0
+		self.dupe_count = 0
 		self.dupe_flag = False
 		self.scanned = False
 		# self.get_repo_stats()
@@ -213,7 +213,7 @@ class GitRepo(Base):
 			self.config_atime = datetime.fromtimestamp(st.st_atime)
 			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
 			conf = ConfigParser(strict=False)  # todo: make this better
-			c = conf.read(git_config_file)
+			_ = conf.read(git_config_file)
 			remote_section = None
 			if conf.has_section('remote "origin"'):
 				try:
@@ -416,13 +416,6 @@ def show_dupe_info(dupes, session: Session):
 		repdupe = session.query(GitRepo).filter(GitRepo.git_url == d.git_url).all()
 		dupe_counter += len(repdupe)
 		print(f'[d] gitrepo url:{d.git_url} has {len(repdupe)} dupes found in:')
-		for r in repdupe:
-			grepo = None   # session.query(GitRepo).filter(GitRepo.git_path == r.git_path).first()
-			# g_show = get_git_show(grepo)
-			# lastcommitdate = g_show["last_commit"]
-			# timediff = grepo.config_ctime - lastcommitdate
-			# timediff2 = datetime.now() - lastcommitdate
-			# print(f'\tid:{grepo.id} path={r.git_path} age {timediff.days} days td2={timediff2.days}')
 	print(f'[getdupes] {dupe_counter} dupes found')
 
 

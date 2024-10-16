@@ -1,18 +1,15 @@
 #!/usr/bin/python3
 
-import os
 import sys
 from argparse import ArgumentParser
 from loguru import logger
-from ui_main import Ui_FindGitsApp
 from ui_mainwindow import Ui_MainWindow
-from dbstuff import GitRepo, GitFolder, SearchPath, get_engine, get_dupes, db_get_dupes
-from sqlalchemy import and_, text
+from dbstuff import GitRepo, GitFolder, SearchPath, get_engine, get_dupes
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor, QFont, QFontDatabase, QGradient, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPalette, QPixmap, QRadialGradient, QTransform, QStandardItemModel, QStandardItem)
+from PySide6.QtCore import (QCoreApplication)
 # from PySide6.QtWidgets import (QApplication, QSizePolicy, QWidget)
-from PySide6.QtWidgets import (QMainWindow, QApplication, QFormLayout, QLabel, QLineEdit,QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget, QListWidgetItem, QTableWidgetItem)
+from PySide6.QtWidgets import (QMainWindow, QApplication, QTreeWidgetItem)
 
 # QWidget, Ui_FindGitsApp):
 class MainApp(QMainWindow):

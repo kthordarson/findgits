@@ -6,13 +6,12 @@ from multiprocessing import cpu_count
 from loguru import logger
 # from sqlalchemy.exc import (OperationalError)
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import Session
 
 from dbstuff import (GitRepo, SearchPath)  #
 from dbstuff import drop_database, get_engine, db_init, db_dupe_info, get_db_info, check_dupe_status
 # from utils import (get_directory_size, get_subdircount, get_subfilecount, format_bytes, check_dupe_status)
 from git_tasks import (add_path)  # , scanpath
-from git_tasks import collect_folders, create_git_folders, update_gitfolder_stats, create_git_repos
+from git_tasks import collect_folders, create_git_folders
 
 CPU_COUNT = cpu_count()
 
@@ -73,26 +72,27 @@ def main():
 		t0 = datetime.now()
 
 		# collect all folders from all paths
-		scan_result = collect_folders(args)
-		if len(scan_result) > 0:
-			t1 = (datetime.now() - t0).total_seconds()
-			logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
+		scanresults = collect_folders(args)
+		if len(scanresults) > 0:
+			for scan_result in scanresults:
+				# create gitfolders in db
+				t1 = (datetime.now() - t0).total_seconds()
+				logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
+				# create gitfolders in db
+				git_folders_result = create_git_folders(args, scan_result)
+				t1 = (datetime.now() - t0).total_seconds()
+				logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result}')
 
-			# create gitfolders in db
-			git_folders_result = create_git_folders(args, scan_result)
-			t1 = (datetime.now() - t0).total_seconds()
-			logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting update_gitfolder_stats')
+				# create gitrepos in db
+				# git_repo_result = create_git_repos(args)
+				# update gitfolder stats
+				# folder_results = update_gitfolder_stats(args)
+				t1 = (datetime.now() - t0).total_seconds()
+				# logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{len(folder_results)}')
 
-			# create gitrepos in db
-			# git_repo_result = create_git_repos(args)
-			# update gitfolder stats
-			# folder_results = update_gitfolder_stats(args)
-			t1 = (datetime.now() - t0).total_seconds()
-			# logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{len(folder_results)}')
-
-			check_dupe_status(session)
-			t1 = (datetime.now() - t0).total_seconds()
-			logger.info(f'[*] check_dupe_status done t:{t1}')
+				# check_dupe_status(session)
+				t1 = (datetime.now() - t0).total_seconds()
+				logger.info(f'[*] check_dupe_status done t:{t1}')
 	elif args.dbinfo:
 		if args.dbmode == 'postgresql':
 			logger.warning('[dbinfo] postgresql dbinfo not implemented')
@@ -100,7 +100,14 @@ def main():
 			get_db_info(session)
 	elif args.add_path:
 		t0 = datetime.now()
-		add_path(args)
+		gpid = add_path(args)
+		if gpid:
+			gp = session.query(SearchPath).filter(SearchPath.id == gpid).first()
+			logger.info(f'[*] add_path done gpid:{gpid} gp: {gp}')
+			gitfolders = gp.get_git_folders()
+			logger.info(f'[*] get_git_folders done {len(gitfolders)}')
+			git_folders_result = create_git_folders(args, gitfolders)
+			logger.info(f'[*] create_git_folders done git_folders_result:{git_folders_result}')
 	else:
 		logger.warning(f'missing args? {args}')
 
