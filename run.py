@@ -1,32 +1,28 @@
 #!/usr/bin/python3
 
-import os, sys
+import os
+import sys
 from argparse import ArgumentParser
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from ui_mainwindow import Ui_MainWindow
-from dbstuff import GitRepo, GitFolder, get_engine, get_dupes, db_get_dupes
+from dbstuff import GitRepo, GitFolder, SearchPath, get_engine, get_dupes, db_get_dupes
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-                            QMetaObject, QObject, QPoint, QRect,
-                            QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-                           QFont, QFontDatabase, QGradient, QIcon,
-                           QImage, QKeySequence, QLinearGradient, QPainter,
-                           QPalette, QPixmap, QRadialGradient, QTransform, QStandardItemModel, QStandardItem)
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor, QFont, QFontDatabase, QGradient, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPalette, QPixmap, QRadialGradient, QTransform, QStandardItemModel, QStandardItem)
 # from PySide6.QtWidgets import (QApplication, QSizePolicy, QWidget)
 from PySide6.QtWidgets import (QMainWindow, QApplication, QFormLayout, QLabel, QLineEdit,QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget, QListWidgetItem, QTableWidgetItem)
 
-
-class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
+# QWidget, Ui_FindGitsApp):
+class MainApp(QMainWindow):
 	def __init__(self, session, parent=None):
 		self.session = session
 		# super(MainApp, self).__init__()
 		super(MainApp, self).__init__(parent=parent)
 		self.ui = Ui_MainWindow()
 		self.ui.setupUi(self)
-		#self.setupUi(self)
+		# self.setupUi(self)
 		self.ui.repotree.itemClicked.connect(self.repo_item_clicked)
 		self.ui.folderButton.clicked.connect(self.folderButton_clicked)
 		self.ui.getdupes_button.clicked.connect(self.getdupes_button_clicked)
@@ -76,7 +72,7 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 			#     logger.error(e)
 		# self.retranslateUi(self)
 
-	def repo_item_clicked(self, widget): # show info about selected repo
+	def repo_item_clicked(self, widget):  # show info about selected repo
 		repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
 		duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
 		dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.gitfolder_id).first() for k in duperepos]
@@ -99,7 +95,7 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 			item_1.setText(1, f"{k.git_url}")
 		self.ui.retranslateUi(self)
 
-	def folderButton_clicked(self, widget): # change to folder tree view
+	def folderButton_clicked(self, widget):  # change to folder tree view
 		if widget:
 			repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
 			logger.debug(f'folderButton_clicked {repo=}')
@@ -111,8 +107,8 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 		self.ui.repotree.headerItem().setText(1, "folder")
 		self.ui.repotree.headerItem().setText(2, "repos")
 		self.ui.repotree.headerItem().setText(3, "folder_size")
-		#self.ui.repotree.data()
-		#items = QTreeWidgetItem(self.ui.repotree)
+		# self.ui.repotree.data()
+		# items = QTreeWidgetItem(self.ui.repotree)
 		for k in gpf:
 			item = QTreeWidgetItem(self.ui.repotree)
 			item.setText(0, f"{k.id}")
@@ -127,7 +123,7 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 				item1.setText(3, f"{g.folder_size:,}")
 		self.ui.repotree.resizeColumnToContents(0)
 		self.ui.repotree.resizeColumnToContents(1)
-		#self.ui.repotree.addTopLevelItem(item_1)
+		# self.ui.repotree.addTopLevelItem(item_1)
 # QTreeWidget treeWidget = new QTreeWidget();
 # treeWidget->setColumnCount(1);
 # QList<QTreeWidgetItem > items;
@@ -155,12 +151,11 @@ class MainApp(QMainWindow):#QWidget, Ui_FindGitsApp):
 		self.ui.repotree.resizeColumnToContents(0)
 		self.ui.repotree.resizeColumnToContents(1)
 		self.ui.repotree.resizeColumnToContents(2)
-			# self.dupecountlabel.setText(f'Dupes: {k.dupe_count}')
-
+		# self.dupecountlabel.setText(f'Dupes: {k.dupe_count}')
 
 if __name__ == '__main__':
 	myparse = ArgumentParser(description="findgits")
-	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', required=True, action='store', metavar='dbmode')
+	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
 	myparse.add_argument('--dbsqlitefile', help='sqlitedb filename', default='gitrepo.db', dest='dbsqlitefile', action='store', metavar='dbsqlitefile')
 	args = myparse.parse_args()
 	engine = get_engine(args)
