@@ -8,8 +8,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 
 from dbstuff import GitRepo, GitFolder
-from dbstuff import drop_database, get_engine, db_init, db_dupe_info, get_db_info, check_dupe_status
-# from utils import (get_directory_size, get_subdircount, get_subfilecount, format_bytes, check_dupe_status)
+from dbstuff import drop_database, get_engine, db_init, db_dupe_info
 from git_tasks import create_git_folder,get_folder_list
 
 CPU_COUNT = cpu_count()
@@ -76,11 +75,6 @@ def main():
 				break
 	elif args.fullscan:
 		pass
-	elif args.dbinfo:
-		if args.dbmode == 'postgresql':
-			logger.warning('[dbinfo] postgresql dbinfo not implemented')
-		else:
-			get_db_info(session)
 	elif args.add_path:
 		pass
 	else:

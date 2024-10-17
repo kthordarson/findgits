@@ -293,25 +293,6 @@ def get_dupes(session: Session) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
-def check_dupe_status(session) -> None:
-	sql = text('select id, git_url,  count(*) as count from gitrepo group by git_url having count(*)>1;')
-	# sql = text('select * from dupeview;')
-	sqldupes = session.execute(sql).all()
-	for dupe in sqldupes:
-		dupe_repo = session.query(GitRepo).filter(GitRepo.id == dupe.id).filter(GitRepo.dupe_flag is False).first()
-		if dupe_repo:
-			dupe_repo.dupe_flag = True
-			dupe_repo.dupe_count = dupe.count
-			session.add(dupe_repo)
-			# logger.info(f'setting dupe_flag on repoid: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id}')
-			# dupe_folder = session.query(GitFolder).filter(GitFolder.id == dupe_repo.gitfolder_id).filter(GitFolder.dupe_flag is False).first()
-			dupe_folder = session.query(GitFolder).filter(GitFolder.dupe_flag is False).first()
-			if dupe_folder:
-				dupe_folder.dupe_flag = True
-				dupe_folder.dupe_count = dupe.count
-				session.add(dupe_folder)
-				# logger.info(f'setting dupe_flag on repoid: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id}')
-	session.commit()
 
 def db_get_dupes(session, repo_url):
 	dupes = session.query(
