@@ -65,12 +65,12 @@ def main():
 	elif args.scanpath:
 		db_gitfolders = session.query(GitFolder).all()
 		gitfolders = get_folder_list(args.scanpath)
-		logger.info(f'db_gitfolders: {len(db_gitfolders)} gitfolders: {len(gitfolders["res"])}')
 		new_folders = [k for k in gitfolders['res'] if k not in [x.git_path for x in db_gitfolders]]
+		logger.info(f'new_folders: {len(new_folders)} db_gitfolders: {len(db_gitfolders)} gitfolders: {len(gitfolders["res"])}')
 		for gf in new_folders:
 			logger.info(f'new gf: {gf}')
 			try:
-				create_git_folder(gf, args)
+				create_git_folder(gf, args, session)
 			except Exception as e:
 				logger.error(f'create_git_folder: {e} {type(e)} gf: {gf} args = {args}')
 				break

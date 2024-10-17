@@ -67,10 +67,10 @@ def create_git_folders(args, scan_result: dict) -> int:
 	session.close()
 	return True
 
-def create_git_folder(gitfolder, args) -> int:
-	engine = get_engine(args)
-	Session = sessionmaker(bind=engine)
-	session = Session()
+def create_git_folder(gitfolder, args, session) -> int:
+	# engine = get_engine(args)
+	# Session = sessionmaker(bind=engine)
+	# session = Session()
 	remoteurl = get_remote(gitfolder)
 	git_repo = None
 	if not remoteurl:
@@ -85,24 +85,24 @@ def create_git_folder(gitfolder, args) -> int:
 	if not git_repo:
 		git_repo = GitRepo(remoteurl)
 		session.add(git_repo)
-		session.commit()
-		if args.debug:
-			logger.debug(f'[cgf] new {git_repo}')
+	dupecount = session.query(GitRepo).filter(GitRepo.git_url == remoteurl).count()
+	git_repo.dupe_count = dupecount
+	if git_repo.dupe_count > 1:
+		git_repo.dupe_flag = True
+	logger.info(f'[cgf] {git_repo.git_url} dupes: {dupecount} {git_repo.dupe_count} {gitfolder=}')
+	session.commit()
+	if args.debug:
+		logger.debug(f'[cgf] new {git_repo.git_url} {git_repo.dupe_count}')
 	git_folder = session.query(GitFolder).filter(GitFolder.git_path == gitfolder).first()
 	if not git_folder:
-		gitfolder = GitFolder(gitfolder, git_repo.id)
-		gitfolder.scan_count += 1
-		session.add(gitfolder)
+		git_folder = GitFolder(gitfolder, git_repo.id)
+		git_folder.scan_count += 1
+		session.add(git_folder)
 		session.commit()
 		if args.debug:
-			logger.debug(f'[cgf] new {gitfolder.git_path} ')
+			logger.debug(f'[cgf] new {gitfolder} ')
 		# dupecount = session.query(GitRepo).filter(GitRepo.git_url == git_repo.git_url).count()
-		# dupecount = session.query(GitFolder).filter(GitFolder.gitrepo_id == git_repo.id).count()
-		# git_repo.dupe_count = dupecount
-		# session.add(git_repo)
-		# session.commit()
-		# session.close()
-		return True
+	return True
 
 
 def create_git_repos(args) -> int:
