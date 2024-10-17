@@ -41,7 +41,6 @@ class Base(DeclarativeBase):
 # todo: if a subfolder of a GPP contains other git repos, make those a GPP and add to db
 #       example: GPP folder ~/development2 has one called games, which should be a GPP
 
-# todo: remove git_path and use searchpath_id to get parent path string
 class SearchPath(Base):
 	__tablename__ = 'searchpath'
 	id: Mapped[int] = mapped_column(primary_key=True)
@@ -88,7 +87,6 @@ class GitFolder(Base):
 	__tablename__ = 'gitfolder'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
-	searchpath_id: Mapped[int] = mapped_column(ForeignKey('searchpath.id'))
 	gitrepo_id = Column('gitrepo_id', Integer)  # id of gitrepo found in this folder
 	git_path = Column('git_path', String(255))
 	first_scan = Column('first_scan', DateTime)
@@ -107,9 +105,8 @@ class GitFolder(Base):
 	valid = Column(Boolean, default=True)
 	scanned = Column[bool]
 
-	def __init__(self, gitfolder: str, searchpathid, gitrepo_id):
+	def __init__(self, gitfolder: str, gitrepo_id):
 		self.git_path = str(gitfolder)
-		self.searchpath_id = searchpathid
 		self.gitrepo_id = gitrepo_id
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
@@ -163,11 +160,7 @@ class GitRepo(Base):
 	""" A git repo, linked to one gitfolder  """
 	__tablename__ = 'gitrepo'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	# gitfolder_id = Column('gitfolder_id', Integer)
-	# gitfolder_id: Mapped[int] = mapped_column(ForeignKey('gitfolder.id'))
-	# searchpath_id: Mapped[int] = mapped_column(ForeignKey('searchpath.id'))
 	git_url = Column('git_url', String(255))
-	# git_path = Column('git_path', String(255))
 	remote = Column('remote', String(255))
 	branch = Column('branch', String(255))
 	dupe_flag = Column('dupe_flag', Boolean)
@@ -371,8 +364,8 @@ def get_db_info(session):
 	# print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
 	print(f"{'id': <3} {'folder': <31}{'folders': >7} {'repos': >5} {'size': <10} {'scantime': <15}")
 	for gpe in git_parent_entries:
-		fc = session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).count()
-		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
+		fc = 0
+		f_size = 0  # sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
 		total_size += f_size
 		# f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
 		# total_time += f_scantime
