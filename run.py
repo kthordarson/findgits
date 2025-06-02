@@ -63,28 +63,24 @@ class MainApp(QMainWindow):
 			item0.setText(0, f"{d.id}")
 			item0.setText(1, f"{d.count}")
 			item0.setText(2, f"{d.git_url}")
-			# try:
-			#     for f in d.get('folders'):
-			#         item1 = QTreeWidgetItem(item0)
-			#         item1.setText(0, f"{f.get('gitfolder_id')}")
-			#         item1.setText(2, f"{f.get('git_path')}")
-			# except TypeError as e:
-			#     logger.error(e)
-		# self.retranslateUi(self)
 
 	def repo_item_clicked(self, widget):  # show info about selected repo
 		repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
-		duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
-		dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.gitfolder_id).first() for k in duperepos]
-		logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
-		self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
-		self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
-		self.ui.dupe_paths_widget.clear()
-		self.ui.dupe_paths_widget.setColumnCount(1)
-		self.ui.dupe_paths_widget.headerItem().setText(0, "path")
-		for dp in dupe_locations:
-			item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
-			item0.setText(0, f"{dp[0]}")
+		if not repo:
+			logger.error(f'repo_item_clicked: no repo found for id {widget.text(0)}')
+			return
+		else:
+			duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
+			dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.id).first() for k in duperepos]
+			logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
+			self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
+			self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
+			self.ui.dupe_paths_widget.clear()
+			self.ui.dupe_paths_widget.setColumnCount(1)
+			self.ui.dupe_paths_widget.headerItem().setText(0, "path")
+			for dp in dupe_locations:
+				item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
+				item0.setText(0, f"{dp[0]}")
 
 	def populate_gitrepos(self):
 		self.ui.repotree.clear()

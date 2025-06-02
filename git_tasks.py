@@ -93,6 +93,8 @@ def create_git_folders(args, scan_result: dict) -> int:
 				logger.warning(f'[cgf] {fscanres} not a git folder')
 				continue
 			git_repo = session.query(GitRepo).filter(GitRepo.git_url == remoteurl).first()
+			if args.debug:
+				logger.debug(f'[cgf] git repo: {git_repo}')
 			if not git_repo:
 				git_repo = GitRepo(remoteurl)
 				session.add(git_repo)
@@ -100,6 +102,8 @@ def create_git_folders(args, scan_result: dict) -> int:
 				if args.debug:
 					logger.debug(f'[cgf] new {git_repo}')
 			gitfolder = session.query(GitFolder).filter(GitFolder.git_path == str(fscanres)).first()
+			if args.debug:
+				logger.debug(f'[cgf] git folder: {gitfolder}')
 			if not gitfolder:
 				gitfolder = GitFolder(str(fscanres),gitsearchpath, git_repo.id)
 				gitfolder.scan_count += 1
@@ -268,34 +272,25 @@ def scanpath(gpp: SearchPath, session) -> None:
 	# gfl = [k for k in glob.glob(gpp.folder+'/**/.git',recursive=True, include_hidden=True) if Path(k).is_dir() and k != gpp.folder+'/']
 	logger.info(f'[sp] scanning {gpp.folder}')
 	# ggf_len = len(gpp.get_git_folders()['res'])
-	for idx,g in enumerate(gpp.get_git_folders()['res']):  # gfl['res']:
+	gpp_folders = gpp.get_git_folders()['res']
+	for idx,g in enumerate(gpp_folders):  # gfl['res']:
 		if os.path.exists(str(g) + '/.git/config'):
 			git_folder = session.query(GitFolder).filter(GitFolder.git_path == str(g)).first()
 			if not git_folder:
 				# check if git_folder contains subdirs...
 				# new git folder
-				git_folder = GitFolder(g, gpp)
-				# logger.info(f'[sp-{idx}] new {git_folder}')
+				logger.info(f'[sp-{idx}] new git_folder={g} gpp={gpp}')
+				git_repo = GitRepo(g)
+				git_repo.scan_count += 1
+				git_folder = GitFolder(g, gpp, git_repo.id)
 			else:
 				# update
 				git_folder.scan_count += 1
 				git_folder.get_folder_time()
 				git_folder.get_folder_stats(git_folder.id, git_folder.git_path)
 				# logger.info(f'[sp] {git_folder} already in db')
-			# check if gitrepo exists with this path
-			git_repo = None  # session.query(GitRepo).filter(GitRepo.git_path == git_folder.git_path).first()
-			if not git_repo:
-				try:
-					# new git repo
-					git_repo = GitRepo(git_folder)
-					git_repo.scan_count += 1
-				except (MissingGitFolderException, MissingConfigException) as e:
-					gf_to_delete = session.query(GitFolder).filter(GitFolder.git_path == git_folder.git_path).first()
-					logger.warning(f'[getrepos] {type(e)} {e} path: {git_folder.git_path}\nremoving git_folder={gf_to_delete}')
-			if git_repo:
-				git_repo.scan_count += 1
-				gpp.repo_count += 1
-			git_folder.gitrepo_id = git_repo.id
+			gpp.repo_count = len(gpp_folders)
+			# git_folder.gitrepo_id = git_repo.id
 			# git_repo.get_repo_stats()
 	session.commit()
 	gpp_folders = session.query(GitFolder).filter(GitFolder.searchpath_id == gpp.id).count()
@@ -411,20 +406,6 @@ def check_missing(gp: SearchPath, session) -> None:
 		# logger.debug(f'\tchecking {gf} {gf.git_path}')
 		if not os.path.exists(gf.git_path):
 			pass
-			# repo = session.query(GitRepo).filter(GitRepo.gitfolder_id == gf.id).first()
-			# logger.error(f'[rc] {gf.git_path} not found, linked to {repo} removing both from db')
-			# session.delete(gf)
-			# session.delete(repo)
-	# repos = session.query(GitRepo).filter(GitRepo.searchpath_id == gp.id).all()
-	# for repo in repos:
-	# 	if not os.path.exists(repo.git_path):
-	# 		gitfolder = session.query(GitFolder).filter(GitFolder.git_path == repo.git_path).first()
-	# 		logger.error(f'[rc] {repo} and {gitfolder} not found, removing from db')
-	# 		if gitfolder:
-	# 			session.delete(gitfolder)
-	# 		session.delete(repo)
-	# session.commit()
-
 
 if __name__ == '__main__':
 	pass

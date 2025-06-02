@@ -151,12 +151,12 @@ class GitFolder(Base):
 
 	def get_folder_stats(self, id, git_path):
 		t0 = datetime.now()
-		folder_size = get_directory_size(git_path)
-		file_count = get_subfilecount(git_path)
-		subdir_count = get_subdircount(git_path)
+		self.folder_size = get_directory_size(git_path)
+		self.file_count = get_subfilecount(git_path)
+		self.subdir_count = get_subdircount(git_path)
 		scan_time = (datetime.now() - t0).total_seconds()
 		self.scanned = True
-		return {'id': id, 'folder_size': folder_size, 'file_count': file_count, 'subdir_count': subdir_count, 'scan_time': scan_time}
+		return {'id': id, 'folder_size': self.folder_size, 'file_count': self.file_count, 'subdir_count': self.subdir_count, 'scan_time': scan_time}
 
 
 # todo: make this better, should only be linked to one gitfolder
@@ -164,9 +164,7 @@ class GitRepo(Base):
 	""" A git repo, linked to one gitfolder  """
 	__tablename__ = 'gitrepo'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	# gitfolder_id = Column('gitfolder_id', Integer)
-	# gitfolder_id: Mapped[int] = mapped_column(ForeignKey('gitfolder.id'))
-	# searchpath_id: Mapped[int] = mapped_column(ForeignKey('searchpath.id'))
+	searchpath_id: Mapped[int] = mapped_column(ForeignKey('searchpath.id'))
 	git_url = Column('git_url', String(255))
 	# git_path = Column('git_path', String(255))
 	remote = Column('remote', String(255))
@@ -187,7 +185,6 @@ class GitRepo(Base):
 	# gitfolder = relationship("GitFolder", backref="git_path")
 
 	def __init__(self, remoteurl):  # , gitfolder: GitFolder
-		# self.gitfolder_id = gitfolder.id
 		# self.git_path = gitfolder.git_path
 		self.git_url = remoteurl
 		self.first_scan = datetime.now()
@@ -195,7 +192,7 @@ class GitRepo(Base):
 		self.scan_count = 0
 		self.dupe_flag = False
 		self.scanned = False
-		# self.get_repo_stats()
+		self.get_repo_stats()
 
 	def __repr__(self):
 		return f'<GitRepo id={self.id} url: {self.git_url} >'
@@ -203,48 +200,45 @@ class GitRepo(Base):
 	def get_repo_stats(self):
 		""" Collect stats and read config for this git repo """
 		# c = self.
-		git_config_file = self.git_path + '/.git/config'
-		if not os.path.exists(git_config_file):
-			logger.warning(f'{self} configfile {git_config_file} does not exist')
-		else:
-			self.scanned = True
-			st = os.stat(git_config_file)
-			self.config_ctime = datetime.fromtimestamp(st.st_ctime)
-			self.config_atime = datetime.fromtimestamp(st.st_atime)
-			self.config_mtime = datetime.fromtimestamp(st.st_mtime)
-			conf = ConfigParser(strict=False)  # todo: make this better
-			c = conf.read(git_config_file)
-			remote_section = None
-			if conf.has_section('remote "origin"'):
-				try:
-					remote_section = [k for k in conf.sections() if 'remote' in k][0]
-				except IndexError as e:
-					logger.error(f'[err] {self} {e} git_config_file={git_config_file} conf={conf.sections()}')
-					self.valid = False
-				if remote_section:
-					self.remote = remote_section.split(' ')[1].replace('"', '')
-					branch_section = None
-					try:
-						branch_section = [k for k in conf.sections() if 'branch' in k][0]
-					except IndexError as e:
-						logger.warning(f'{e} {self} {conf.sections()}')
-					if branch_section:
-						self.branch = branch_section.split(' ')[1].replace('"', '')
-					try:
-						# git_url = [k for k in conf['remote "origin"'].items()][0][1]
-						self.git_url = conf[remote_section]['url']
-						if not self.git_url:
-							logger.warning(f'missing git_url {self.git_path} git_config_file={git_config_file}')
-							self.valid = False
-					except TypeError as e:
-						logger.warning(f'[!] {self} typeerror {e} git_config_file={git_config_file} ')
-						self.valid = False
-					except KeyError as e:
-						logger.warning(f'[!] {self} KeyError {e} git_config_file={git_config_file}')
-						self.valid = False
-			else:
-				logger.warning(f'missing config remote origin {self.git_path} git_config_file={git_config_file}')
+		self.scanned = True
+		git_config_file = '.git/config'
+		st = os.stat(git_config_file)
+		self.config_ctime = datetime.fromtimestamp(st.st_ctime)
+		self.config_atime = datetime.fromtimestamp(st.st_atime)
+		self.config_mtime = datetime.fromtimestamp(st.st_mtime)
+		conf = ConfigParser(strict=False)  # todo: make this better
+		c = conf.read(git_config_file)
+		remote_section = None
+		if conf.has_section('remote "origin"'):
+			try:
+				remote_section = [k for k in conf.sections() if 'remote' in k][0]
+			except IndexError as e:
+				logger.error(f'[err] {self} {e} git_config_file={git_config_file} conf={conf.sections()}')
 				self.valid = False
+			if remote_section:
+				self.remote = remote_section.split(' ')[1].replace('"', '')
+				branch_section = None
+				try:
+					branch_section = [k for k in conf.sections() if 'branch' in k][0]
+				except IndexError as e:
+					logger.warning(f'{e} {self} {conf.sections()}')
+				if branch_section:
+					self.branch = branch_section.split(' ')[1].replace('"', '')
+				try:
+					# git_url = [k for k in conf['remote "origin"'].items()][0][1]
+					self.git_url = conf[remote_section]['url']
+					if not self.git_url:
+						logger.warning(f'missing git_url {self.git_path} git_config_file={git_config_file}')
+						self.valid = False
+				except TypeError as e:
+					logger.warning(f'[!] {self} typeerror {e} git_config_file={git_config_file} ')
+					self.valid = False
+				except KeyError as e:
+					logger.warning(f'[!] {self} KeyError {e} git_config_file={git_config_file}')
+					self.valid = False
+		else:
+			logger.warning(f'missing config remote origin {self} git_config_file={git_config_file}')
+			self.valid = False
 
 
 def db_init(engine: sqlalchemy.Engine) -> None:
@@ -310,21 +304,17 @@ def check_dupe_status(session) -> None:
 			dupe_repo.dupe_flag = True
 			dupe_repo.dupe_count = dupe.count
 			session.add(dupe_repo)
-			# logger.info(f'setting dupe_flag on repoid: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id}')
-			# dupe_folder = session.query(GitFolder).filter(GitFolder.id == dupe_repo.gitfolder_id).filter(GitFolder.dupe_flag is False).first()
 			dupe_folder = session.query(GitFolder).filter(GitFolder.dupe_flag is False).first()
 			if dupe_folder:
 				dupe_folder.dupe_flag = True
 				dupe_folder.dupe_count = dupe.count
 				session.add(dupe_folder)
-				# logger.info(f'setting dupe_flag on repoid: {dupe_repo.id} giturl: {dupe_repo.git_url} gitpath: {dupe_repo.git_path} gitfolder_id: {dupe_repo.gitfolder_id}')
 	session.commit()
 
 def db_get_dupes(session, repo_url):
 	dupes = session.query(
 		GitRepo.id.label('id'),
 		GitRepo.git_url.label('git_url'),
-		# GitRepo.gitfolder_id.label('folderid'),
 		func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).having(func.count(GitRepo.git_url) > 1).order_by(func.count(GitRepo.git_url).desc()).filter(GitRepo.git_url == repo_url).all()
 	return dupes
 
@@ -341,7 +331,6 @@ def db_dupe_info(session: Session, maxdupes=30) -> None:
 		dupes = session.query(
 			GitRepo.id.label('id'),
 			GitRepo.git_url.label('git_url'),
-			# GitRepo.gitfolder_id.label('folderid'),
 			func.count(GitRepo.git_url).label("count")). \
 			group_by(GitRepo.git_url). \
 			having(func.count(GitRepo.git_url) > 1). \
@@ -369,17 +358,21 @@ def get_db_info(session):
 	total_size = 0
 	# total_time = 0
 	# print(f"{'gpe.id':<3}{'gpe.folder':<30}{'fc:<5'}{'rc:<5'}{'f_size':<10}{'f_scantime':<10}")
-	print(f"{'id': <3} {'folder': <31}{'folders': >7} {'repos': >5} {'size': <10} {'scantime': <15}")
+	print(f"{'id':<3}{'folder': <31}{'subfolders': <11} {'repos': <5} {'size': <10} {'scantime': <15}")
 	for gpe in git_parent_entries:
 		fc = session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).count()
 		f_size = sum([k.folder_size for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
 		total_size += f_size
 		# f_scantime = sum([k.scan_time for k in session.query(GitFolder).filter(GitFolder.searchpath_id == gpe.id).all()])
 		# total_time += f_scantime
-		rc = 0  # session.query(GitRepo).filter(GitRepo.searchpath_id == gpe.id).count()
+		rc = session.query(GitRepo).filter(GitRepo.searchpath_id == gpe.id).count()
 		# scant = str(timedelta(seconds=f_scantime))
-		gpscant = str(timedelta(seconds=gpe.scan_time))
-		print(f'{gpe.id:<3}{gpe.folder:<47}{fc:<5}{rc:<5}{format_bytes(f_size):<10}{gpscant:<14}')
+		try:
+			gpscant = str(timedelta(seconds=gpe.scan_time))
+		except TypeError as e:
+			# logger.error(f'[gdbi] {e} {gpe}')
+			gpscant = '0'
+		print(f'{gpe.id:<3}{gpe.folder:<31}{fc:<11} {rc:<5} {format_bytes(f_size):<10} {gpscant:<14}')
 	# tt = str(timedelta(seconds=total_time))
 	print(f'{"=" * 90}')
 	print(f'{format_bytes(total_size):>52} ')
@@ -436,29 +429,12 @@ def get_remote(gitfolder: str) -> str:
 	cmdstr = ['git', 'remote', '-v']
 	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 	remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+	remote_url = '[no remote]'
 	try:
 		remote_url = remote_out[0].split()[1]
 	except IndexError as e:
-		logger.error(f'[gr] {e} {type(e)} {gitfolder=}')
-		return None
+		logger.warning(f'[gr] {e} {type(e)} {gitfolder=} remote_out: {remote_out}')
 	return remote_url
-
-
-def main_scanpath(gpp: SearchPath, session: sessionmaker) -> None:
-	"""
-	main scanpath function
-	Parameters: gpp: SearchPath scan all subfolders if this gpp, session: sessionmaker object
-	"""
-	pass
-	# scantime_start = datetime.now()
-	# try:
-	# 	scanpath(gpp, session)
-	# except OperationalError as e:
-	# 	logger.error(f'[msp] OperationalError: {e}')
-	# 	return None
-	# scantime_end = (datetime.now() - scantime_start).total_seconds()
-	# logger.debug(f'[msp] scan_time:{scantime_end}')
-
 
 if __name__ == '__main__':
 	pass

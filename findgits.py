@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from dbstuff import (GitRepo, SearchPath)  #
 from dbstuff import drop_database, get_engine, db_init, db_dupe_info, get_db_info, check_dupe_status
 # from utils import (get_directory_size, get_subdircount, get_subfilecount, format_bytes, check_dupe_status)
-from git_tasks import (add_path)  # , scanpath
+from git_tasks import (add_path, scanpath)
 from git_tasks import collect_folders, create_git_folders, update_gitfolder_stats, create_git_repos
 
 CPU_COUNT = cpu_count()
@@ -68,10 +68,8 @@ def main():
 			db_dupe_info(session)
 	elif args.scanpath:
 		pass
-		# todo
 	elif args.fullscan:
 		t0 = datetime.now()
-
 		# collect all folders from all paths
 		scan_result = collect_folders(args)
 		if len(scan_result) > 0:
@@ -93,6 +91,10 @@ def main():
 			check_dupe_status(session)
 			t1 = (datetime.now() - t0).total_seconds()
 			logger.info(f'[*] check_dupe_status done t:{t1}')
+		sp = session.query(SearchPath).all()
+		for s in sp:
+			print(f'scanpath {s.id} {s.folder}')
+			scanpath(gpp=s, session=session)
 	elif args.dbinfo:
 		if args.dbmode == 'postgresql':
 			logger.warning('[dbinfo] postgresql dbinfo not implemented')

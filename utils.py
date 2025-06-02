@@ -37,6 +37,7 @@ def get_directory_size(directory: str) -> int:
 	# except (PermissionError, FileNotFoundError) as e:
 	# 	logger.warning(f'[err] {e} {type(e)} dir:{directory} ')
 	# 	return 0
+	# logger.debug(f'[*] get_directory_size {directory} {total} bytes')
 	return total
 
 
@@ -96,7 +97,7 @@ def format_bytes(num_bytes):
 	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
 	Args: num_bytes (int): The byte value to format.
 	Returns: str: A string with a formatted byte value and unit prefix.
-    """
+	"""
 	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
 		if abs(num_bytes) < 1024.0:
 			return f"{num_bytes:.2f} {unit}"
