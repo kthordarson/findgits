@@ -2,16 +2,7 @@ import glob
 import os
 import random
 from pathlib import Path
-
 from loguru import logger
-
-
-# from sqlalchemy.ext.declarative import declarative_base
-
-
-def generate_id() -> str:
-	return ''.join(random.choices('0123456789abcdef', k=16))
-
 
 def get_directory_size(directory: str) -> int:
 	# directory = Path(directory)
@@ -72,27 +63,6 @@ def valid_git_folder(k: str) -> bool:
 		logger.warning(f'{k} {type(k)} not valid ')
 	return False
 
-
-def xxget_folder_list(startpath: str) -> list:
-	return [Path(path).parent for path, subdirs, files in os.walk(startpath) if path.endswith('.git') and os.path.exists(path + '/config')]
-
-
-# return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and valid_git_folder(path)]
-
-def zget_folder_list(startpath):
-	# [path for path,subdirs,files in os.walk(startpath) if path.endswith('.git')]
-	for k in glob.glob(str(Path(startpath)) + '/**/.git/', recursive=True, include_hidden=True):
-		if valid_git_folder(k):
-			yield Path(k).parent
-
-
-def xget_folder_list(startpath):
-	for k in glob.glob(str(Path(startpath)) + '/**/.git', recursive=True, include_hidden=True):
-		if Path(k).is_dir() and Path(k).name == '.git':
-			if os.path.exists(os.path.join(Path(k), 'config')):
-				yield Path(k).parent
-
-
 def format_bytes(num_bytes):
 	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
 	Args: num_bytes (int): The byte value to format.
@@ -103,6 +73,72 @@ def format_bytes(num_bytes):
 			return f"{num_bytes:.2f} {unit}"
 		num_bytes /= 1024.0
 	return f"{num_bytes:.2f} TB"
+
+def check_update_dupes(session) -> dict:
+	"""
+	Check for duplicate GitRepo entries (same git_url) and update their dupe_flag and dupe_count.
+	A duplicate repository is one with the same git_url in multiple locations.
+
+	Parameters:
+		session: SQLAlchemy session
+
+	Returns:
+		dict: Summary of results containing:
+			- total_repos: Total number of repositories
+			- unique_repos: Number of unique repositories
+			- dupe_repos: Number of repositories that are duplicates
+			- dupes_updated: Number of repositories updated
+	"""
+	from dbstuff import get_dupes, GitRepo
+	from sqlalchemy import text
+
+	logger.info("Checking for duplicate repositories...")
+
+	# Get all repositories
+	all_repos = session.query(GitRepo).all()
+	total_repos = len(all_repos)
+
+	# Reset duplicate flags on all repos
+	for repo in all_repos:
+		repo.dupe_flag = False
+		repo.dupe_count = 0
+
+	# Get list of duplicates (repos with same git_url)
+	dupes = get_dupes(session)
+	dupe_urls = set()
+	dupes_updated = 0
+
+	# Process each duplicate group
+	for dupe in dupes:
+		dupe_id = dupe.id
+		dupe_url = dupe.git_url
+		dupe_count = dupe.count
+		dupe_urls.add(dupe_url)
+
+		# Find all repos with this URL
+		same_url_repos = session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all()
+
+		# Update their dupe flags
+		for repo in same_url_repos:
+			repo.dupe_flag = True
+			repo.dupe_count = dupe_count
+			dupes_updated += 1
+
+	# Commit the changes
+	session.commit()
+
+	# Prepare result summary
+	result = {
+		'total_repos': total_repos,
+		'unique_repos': total_repos - len(dupes),
+		'dupe_repos': len(dupe_urls),
+		'dupes_updated': dupes_updated
+	}
+
+	logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
+	logger.info(f"Updated {dupes_updated} repository records")
+
+	return result
 
 
 if __name__ == '__main__':

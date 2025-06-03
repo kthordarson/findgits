@@ -1,18 +1,15 @@
 #!/usr/bin/python3
+import glob
+from pathlib import Path
 import argparse
-from datetime import datetime
 from multiprocessing import cpu_count
 
 from loguru import logger
 # from sqlalchemy.exc import (OperationalError)
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import Session
-
-from dbstuff import (GitRepo, SearchPath)  #
-from dbstuff import drop_database, get_engine, db_init, db_dupe_info, get_db_info, check_dupe_status
-# from utils import (get_directory_size, get_subdircount, get_subfilecount, format_bytes, check_dupe_status)
-from git_tasks import (add_path, scanpath)
-from git_tasks import collect_folders, create_git_folders, update_gitfolder_stats, create_git_repos
+from dbstuff import (GitRepo, GitFolder)
+from dbstuff import get_engine, db_init, drop_database, insert_update_git_folder
+from utils import check_update_dupes
 
 CPU_COUNT = cpu_count()
 
@@ -33,7 +30,7 @@ def get_args():
 	myparse.add_argument('--importpaths', dest='importpaths')
 	myparse.add_argument('-l', '--listpaths', action='store_true', help='list paths in db', dest='listpaths')
 	myparse.add_argument('-fs', '--fullscan', action='store_true', default=False, dest='fullscan', help='run full scan on all search paths in db')
-	myparse.add_argument('-sp','--scanpath', help='Scan single path, specified by ID. Use --listpaths to get IDs', action='store', dest='scanpath')
+	myparse.add_argument('-sp','--scanpath', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
 	myparse.add_argument('-spt', '--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
 	myparse.add_argument('-gd', '--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
@@ -55,57 +52,32 @@ def main():
 	if args.dbcheck:
 		res = dbcheck(session)
 		print(f'dbcheck res: {res}')
+	elif args.dbinfo:
+		git_folders = session.query(GitFolder).count()
+		git_repos = session.query(GitRepo).count()
+		dupes = check_update_dupes(session)
+		print(f'DB Engine: {engine} DB Type: {engine.name} DB URL: {engine.url}')
+		print(f'Git Folders: {git_folders} Git Repos: {git_repos} Dupes: {dupes['dupe_repos']} ')
 	elif args.dropdatabase:
 		drop_database(engine)
-	elif args.listpaths:
-		sp = session.query(SearchPath).all()
-		for s in sp:
-			print(f'{s.id} {s.folder}')
-	elif args.getdupes:
-		if args.dbmode == 'postgresql':
-			logger.warning('[dbinfo] postgresql dbinfo not implemented')
-		else:
-			db_dupe_info(session)
 	elif args.scanpath:
-		pass
-	elif args.fullscan:
-		t0 = datetime.now()
-		# collect all folders from all paths
-		scan_result = collect_folders(args)
-		if len(scan_result) > 0:
-			t1 = (datetime.now() - t0).total_seconds()
-			logger.info(f'[*] collect done t:{t1} scan_result:{len(scan_result)} starting create_git_folders')
+		scanpath = Path(args.scanpath[0])
+		if scanpath.is_dir():
+			# Find git folders
+			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir()]
+			logger.info(f'Scan path: {scanpath} found {len(git_folders)} git folders')
+			# Process each git folder
+			for git_folder in git_folders:
+				# The git folder is the parent directory of .git
+				git_path = git_folder.parent
+				insert_update_git_folder(git_path, session)
 
-			# create gitfolders in db
-			git_folders_result = create_git_folders(args, scan_result)
-			t1 = (datetime.now() - t0).total_seconds()
-			logger.info(f'[*] create_git_folders done t:{t1} git_folders_result:{git_folders_result} starting update_gitfolder_stats')
+			session.commit()
 
-			# create gitrepos in db
-			# git_repo_result = create_git_repos(args)
-			# update gitfolder stats
-			# folder_results = update_gitfolder_stats(args)
-			t1 = (datetime.now() - t0).total_seconds()
-			# logger.info(f'[*]  update_gitfolder_stats done t:{t1} folder_results:{len(folder_results)}')
-
-			check_dupe_status(session)
-			t1 = (datetime.now() - t0).total_seconds()
-			logger.info(f'[*] check_dupe_status done t:{t1}')
-		sp = session.query(SearchPath).all()
-		for s in sp:
-			print(f'scanpath {s.id} {s.folder}')
-			scanpath(gpp=s, session=session)
-	elif args.dbinfo:
-		if args.dbmode == 'postgresql':
-			logger.warning('[dbinfo] postgresql dbinfo not implemented')
+			print(f'Processed {len(git_folders)} git folders')
 		else:
-			get_db_info(session)
-	elif args.add_path:
-		t0 = datetime.now()
-		add_path(args)
-	else:
-		logger.warning(f'missing args? {args}')
-
+			logger.error(f'Scan path: {scanpath} is not a valid directory')
+			return
 
 if __name__ == '__main__':
 	main()
