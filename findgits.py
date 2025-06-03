@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
 from dbstuff import get_engine, db_init, drop_database
-from dbstuff import check_update_dupes, insert_update_git_folder, insert_update_starred_repo
+from dbstuff import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_starred_repos
 from gitstars import get_git_lists, get_git_stars
 from utils import flatten
 
@@ -40,6 +40,7 @@ def get_args():
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
 	myparse.add_argument('--dbcheck', help='run checks', action='store_true', default=False, dest='dbcheck')
 	myparse.add_argument('--gitstars', help='gitstars info', action='store_true', default=False, dest='gitstars')
+	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
@@ -91,6 +92,9 @@ def main():
 		else:
 			logger.error(f'Scan path: {scanpath} is not a valid directory')
 			# return
+	if args.populate:
+		stats = populate_starred_repos(session)
+		print(f"GitHub Stars Processing Stats:{stats}")
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
 		git_lists = get_git_lists()
