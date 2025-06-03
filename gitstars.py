@@ -4,34 +4,65 @@ from loguru import logger
 import requests
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
+import datetime
 
 CACHE_DIR = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
 
-def get_git_stars(max=10):
+def get_git_stars(max=70, use_cache=True):
 	"""
-	get all starred repos
-	param auth: HTTPBasicAuth
+	Get all starred repos with caching support
+
+	Parameters:
+		max: Maximum number of pages to fetch (0 for all)
+		use_cache: Whether to use cached data if available
+
+	Returns:
+		Tuple of (list of starred repos, dict of repos by id)
 	"""
-	# tmpfn = 'starred.tmp'
+	# Cache file for starred repos
+	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+
 	jsonbuffer = []
-	star_list = []
 	stars_dict = {}
+
+	# Try to load from cache first if use_cache is enabled
+	if use_cache:
+		try:
+			import json
+			with open(stars_cache_file, 'r') as f:
+				cache_data = json.load(f)
+				jsonbuffer = cache_data['repos']
+				# Rebuild the dictionary
+				for s in jsonbuffer:
+					stars_dict[s['id']] = s
+				logger.info(f"Loaded {len(jsonbuffer)} starred repos from cache")
+				return jsonbuffer, stars_dict
+		except FileNotFoundError:
+			logger.debug(f"Cache file not found: {stars_cache_file}")
+		except json.JSONDecodeError as e:
+			logger.error(f"Invalid JSON in cache file: {e}")
+		except Exception as e:
+			logger.error(f"Error loading from cache: {e}")
+
+	# If we get here, we need to fetch from the API
 	session = requests.session()
 	auth = get_auth_param()
 	if not auth:
 		logger.error('get_git_stars: no auth provided')
 		return [], {}
+
 	apiurl = 'https://api.github.com/user/starred'
 	headers = {
 		'Accept': 'application/vnd.github+json',
 		'Authorization': f'Bearer {auth.password}',
 		'X-GitHub-Api-Version': '2022-11-28'}
+
 	try:
 		r = session.get(apiurl, headers=headers)
 	except Exception as e:
 		logger.error(f"[r] {e}")
 		return [], {}
-	# logger.info(f"[r] {r.status_code}  ")
+
 	if r.status_code == 401:
 		logger.error(f"[r] autherr:401 a:{auth}")
 	elif r.status_code == 404:
@@ -42,23 +73,26 @@ def get_git_stars(max=10):
 		jsonbuffer.extend(r.json())
 		for s in r.json():
 			stars_dict[s['id']] = s
-	elif 'link' in r.headers:
-		page_count = 0
+
+	# Handle pagination
+	if 'link' in r.headers:
+		page_count = 1  # We've already got page 1
 		links = r.headers['link'].split(',')
 		nexturl = [k for k in links if 'next' in k][0].split('>')[0].replace('<','')
 		lasturl = [k for k in links if 'last' in k][0].split('>')[0].replace('<','')
-		last_page_no = lasturl.split('=')[1]
-		while 'link' in r.headers:
-			if max and page_count >= max:
-				logger.warning(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl} hit max: {max}')
-				break
+		last_page_no = int(lasturl.split('=')[1])
+
+		# Fetch remaining pages
+		while 'link' in r.headers and (max == 0 or page_count < max):
 			logger.debug(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl}')
 			r = session.get(nexturl, headers=headers)
+
 			if r.status_code == 200:
 				jsonbuffer.extend(r.json())
 				for s in r.json():
 					stars_dict[s['id']] = s
 				page_count += 1
+
 				if 'link' in r.headers:
 					links = r.headers['link'].split(',')
 					try:
@@ -72,9 +106,21 @@ def get_git_stars(max=10):
 			else:
 				logger.warning(f'[r] {r.status_code} {nexturl}')
 				break
-	else:
-		logger.warning(f'[r] {r.status_code} link not in headers: {r.headers} ')
-	# logger.info(f"[r] {r.status_code}  apiurl: {apiurl} jsonbuffer: {len(jsonbuffer)} stars_dict: {len(stars_dict)}")
+
+	# Write to cache if we got data
+	if jsonbuffer:
+		try:
+			import json
+			# Create directory if it doesn't exist
+			if not os.path.exists(CACHE_DIR):
+				os.makedirs(CACHE_DIR)
+
+			with open(stars_cache_file, 'w') as f:
+				json.dump({'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}, f)
+				logger.info(f"Cached {len(jsonbuffer)} starred repos")
+		except Exception as e:
+			logger.error(f"Failed to write cache: {e}")
+
 	return jsonbuffer, stars_dict
 
 def get_git_lists() -> dict:

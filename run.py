@@ -32,7 +32,8 @@ class MainApp(QMainWindow):
 		# self.ui.gitlog_button.clicked.connect(self.gitlog_button_clicked)
 		# self.ui.gitstatus_button.clicked.connect(self.gitstatus_button_clicked)
 		self.dupefilter = False
-		self.repotree_populate()
+		self.populate_gitrepos()
+		# self.repotree_populate()
 
 	def gitshow_button_clicked(self, widget):
 		pass
@@ -75,20 +76,31 @@ class MainApp(QMainWindow):
 			logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
 			self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
 			self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
-			self.ui.dupe_paths_widget.clear()
-			self.ui.dupe_paths_widget.setColumnCount(1)
-			self.ui.dupe_paths_widget.headerItem().setText(0, "path")
-			for dp in dupe_locations:
-				item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
-				item0.setText(0, f"{dp[0]}")
+			# self.ui.dupe_paths_widget.clear()
+			# self.ui.dupe_paths_widget.setColumnCount(1)
+			# self.ui.dupe_paths_widget.headerItem().setText(0, "path")
+			# for dp in dupe_locations:
+			# 	item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
+			# 	try:
+			# 		item0.setText(0, f"{dp[0]}")
+			# 	except TypeError as e:
+			# 		logger.error(f'Error setting text for dupe path: {e} dp={dp}')
+			# 		item0.setText(0, f"{dp}")
 
 	def populate_gitrepos(self):
 		self.ui.repotree.clear()
+		self.ui.repotree.headerItem().setText(0, "id")
+		self.ui.repotree.headerItem().setText(1, "folder")
+		self.ui.repotree.headerItem().setText(2, "repos")
+		self.ui.repotree.headerItem().setText(3, "folder_size")
+
 		gitrepos = session.query(GitRepo).all()
 		for k in gitrepos:
 			item_1 = QTreeWidgetItem(self.ui.repotree)
 			item_1.setText(0, f"{k.id}")
 			item_1.setText(1, f"{k.git_url}")
+		self.ui.repotree.resizeColumnToContents(0)
+		self.ui.repotree.resizeColumnToContents(1)
 		self.ui.retranslateUi(self)
 
 	def folderButton_clicked(self, widget):  # change to folder tree view
