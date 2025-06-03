@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from ui_mainwindow import Ui_MainWindow
-from dbstuff import GitRepo, GitFolder, get_engine, get_dupes, db_get_dupes
+from dbstuff import GitRepo, GitFolder, get_engine
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt)
@@ -57,7 +57,7 @@ class MainApp(QMainWindow):
 		self.ui.repotree.headerItem().setText(0, "id")
 		self.ui.repotree.headerItem().setText(1, "count")
 		self.ui.repotree.headerItem().setText(2, "git_url")
-		dupes = get_dupes(self.session)
+		dupes = []  # get_dupes(self.session)
 		for d in dupes:
 			item0 = QTreeWidgetItem(self.ui.repotree)
 			item0.setText(0, f"{d.id}")

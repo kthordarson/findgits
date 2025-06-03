@@ -1,25 +1,10 @@
 #!/usr/bin/python3
-import argparse
 import os
-from pathlib import Path
-import glob
-from configparser import ConfigParser
-from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor, as_completed)
-from concurrent.futures.process import BrokenProcessPool
-from datetime import datetime, timedelta
+from datetime import datetime
 from multiprocessing import cpu_count
-from threading import Thread
 from loguru import logger
-from sqlalchemy import text
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm.exc import DetachedInstanceError
-from sqlalchemy.exc import UnboundExecutionError
-from sqlalchemy.exc import (ArgumentError, CompileError, DataError, IntegrityError, OperationalError, ProgrammingError, InvalidRequestError,)
 from subprocess import Popen, PIPE
-from dbstuff import (GitFolder, GitRepo)
-from dbstuff import get_engine
-from dbstuff import get_remote
-from dbstuff import MissingGitFolderException, MissingConfigException
+from dbstuff import (GitRepo)
 
 CPU_COUNT = cpu_count()
 

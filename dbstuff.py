@@ -1,25 +1,18 @@
 from __future__ import annotations
-import glob
 import os
 from configparser import ConfigParser
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import List
-from subprocess import Popen, PIPE
 from loguru import logger
 import sqlalchemy
-# from sqlalchemy import orm
-from sqlalchemy import func
 from sqlalchemy import (Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import relationship
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import Session
-
-from utils import (get_directory_size, get_subdircount, get_subfilecount, format_bytes, valid_git_folder)
+from utils import valid_git_folder, get_remote
 # from git_tasks import get_git_show
 
 # Base = declarative_base()
@@ -105,8 +98,6 @@ class GitFolder(Base):
 		self.subdir_count = get_subdircount(git_path)
 		scan_time = (datetime.now() - t0).total_seconds()
 		self.scanned = True
-		return {'id': id, 'folder_size': self.folder_size, 'file_count': self.file_count, 'subdir_count': self.subdir_count, 'scan_time': scan_time}
-
 
 # todo: make this better, should only be linked to one git_path
 class GitRepo(Base):
@@ -114,7 +105,9 @@ class GitRepo(Base):
 	__tablename__ = 'gitrepo'
 	id: Mapped[int] = mapped_column(primary_key=True)
 	git_url = Column('git_url', String(255))
-	# git_path = Column('git_path', String(255))
+	github_owner = Column('github_owner', String(255))
+	github_repo_name = Column('github_repo_name', String(255))
+	local_path = Column('local_path', String(255))
 	remote = Column('remote', String(255))
 	branch = Column('branch', String(255))
 	dupe_flag = Column('dupe_flag', Boolean)
@@ -122,29 +115,34 @@ class GitRepo(Base):
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_count = Column('scan_count', Integer)
-
 	config_ctime = Column('config_ctime', DateTime)
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
 	valid = Column(Boolean, default=True)
 	scanned = Column[bool]
-
-	# git_path: Mapped[List["GitFolder"]] = relationship()
-	# git_path = relationship("GitFolder", backref="git_path")
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
 
-	def __init__(self, remoteurl):  # , git_path: GitFolder
+	def __init__(self, git_url, local_path):
 		# self.git_path = git_path.git_path
-		self.git_url = remoteurl
+		self.git_url = git_url
+		self.local_path = local_path
+		self.github_repo_name = git_url.split('/')[-1].replace('.git', '')
+		if 'http' in git_url:
+			self.github_owner = git_url.split('/')[-2]
+		elif 'git@github.com' in git_url:
+			self.github_owner = git_url.split(':')[1].split('/')[0]
+		else:
+			self.github_owner = '[unknown]'
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_count = 0
 		self.dupe_flag = False
 		self.scanned = False
-		self.get_repo_stats()
+		if local_path != '[notcloned]':
+			self.get_repo_stats()
 
 	def __repr__(self):
-		return f'<GitRepo id={self.id} url: {self.git_url} >'
+		return f'<GitRepo id={self.id} url: {self.git_url} localpath: {self.local_path} >'
 
 	def get_repo_stats(self):
 		""" Collect stats and read config for this git repo """
@@ -163,31 +161,32 @@ class GitRepo(Base):
 				remote_section = [k for k in conf.sections() if 'remote' in k][0]
 			except IndexError as e:
 				logger.error(f'[err] {self} {e} git_config_file={git_config_file} conf={conf.sections()}')
-				self.valid = False
+				# self.valid = False
 			if remote_section:
 				self.remote = remote_section.split(' ')[1].replace('"', '')
 				branch_section = None
 				try:
 					branch_section = [k for k in conf.sections() if 'branch' in k][0]
 				except IndexError as e:
-					logger.warning(f'{e} {self} {conf.sections()}')
+					pass  # logger.warning(f'{e} {self} {conf.sections()}')
 				if branch_section:
 					self.branch = branch_section.split(' ')[1].replace('"', '')
 				try:
 					# git_url = [k for k in conf['remote "origin"'].items()][0][1]
 					self.git_url = conf[remote_section]['url']
 					if not self.git_url:
-						logger.warning(f'missing git_url {self.git_path} git_config_file={git_config_file}')
-						self.valid = False
+						logger.warning(f'missing git_url {self.local_path} git_config_file={git_config_file}')
+						self.git_url = '[no remote]'
 				except TypeError as e:
 					logger.warning(f'[!] {self} typeerror {e} git_config_file={git_config_file} ')
-					self.valid = False
+					# self.valid = False
 				except KeyError as e:
 					logger.warning(f'[!] {self} KeyError {e} git_config_file={git_config_file}')
-					self.valid = False
+					# self.valid = False
 		else:
-			logger.warning(f'missing config remote origin {self} git_config_file={git_config_file}')
-			self.valid = False
+			self.git_url = get_remote(self.local_path)
+			logger.warning(f'missing config remote origin {self} path: {self.local_path} url: {self.git_url} git_config_file={git_config_file}')
+			# self.valid = False
 
 
 def db_init(engine: sqlalchemy.Engine) -> None:
@@ -230,6 +229,52 @@ def get_engine(args) -> sqlalchemy.Engine:
 	else:
 		raise TypeError(f'[db] unknown dbtype {args} ')
 
+def get_directory_size(directory: str) -> int:
+	# directory = Path(directory)
+	total = 0
+	try:
+		for entry in os.scandir(directory):
+			if entry.is_symlink():
+				break
+			if entry.is_file():
+				try:
+					total += entry.stat().st_size
+				except FileNotFoundError as e:
+					logger.warning(f'[err] {e} dir:{directory} ')
+					continue
+			elif entry.is_dir():
+				try:
+					total += get_directory_size(entry.path)
+				except FileNotFoundError as e:
+					logger.warning(f'[err] {e} dir:{directory} ')
+	except NotADirectoryError as e:
+		logger.warning(f'[err] {e} dir:{directory} ')
+		return os.path.getsize(directory)
+	# except (PermissionError, FileNotFoundError) as e:
+	# 	logger.warning(f'[err] {e} {type(e)} dir:{directory} ')
+	# 	return 0
+	# logger.debug(f'[*] get_directory_size {directory} {total} bytes')
+	return total
+
+
+def get_subfilecount(directory: str) -> int:
+	directory = Path(directory)
+	try:
+		filecount = len([k for k in directory.glob('**/*') if k.is_file()])
+	except PermissionError as e:
+		logger.warning(f'[err] {e} d:{directory}')
+		return 0
+	return filecount
+
+
+def get_subdircount(directory: str) -> int:
+	directory = Path(directory)
+	dc = 0
+	try:
+		dc = len([k for k in directory.glob('**/*') if k.is_dir()])
+	except (PermissionError, FileNotFoundError) as e:
+		logger.warning(f'[err] {e} d:{directory}')
+	return dc
 
 def get_dupes(session: Session) -> list:
 	"""
@@ -242,28 +287,6 @@ def get_dupes(session: Session) -> list:
 	# sql = text('select * from dupeview;')
 	dupes = session.execute(sql).all()
 	return dupes
-
-def db_get_dupes(session, repo_url):
-	dupes = session.query(GitRepo.id.label('id'), GitRepo.git_url.label('git_url'), func.count(GitRepo.git_url).label("count")).group_by(GitRepo.git_url).having(func.count(GitRepo.git_url) > 1).order_by(func.count(GitRepo.git_url).desc()).filter(GitRepo.git_url == repo_url).all()
-	return dupes
-
-
-def get_remote(git_path: str) -> str:
-	"""
-	Get the remote url of a git folder
-	Parameters: git_path: str - path to git folder
-	Returns: str - remote url
-	"""
-	os.chdir(git_path)
-	cmdstr = ['git', 'remote', '-v']
-	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
-	remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
-	remote_url = '[no remote]'
-	try:
-		remote_url = remote_out[0].split()[1]
-	except IndexError as e:
-		pass  # logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out}')
-	return remote_url
 
 def insert_update_git_folder(git_folder_path, session):
 	"""
@@ -296,7 +319,7 @@ def insert_update_git_folder(git_folder_path, session):
 	# Get or create GitRepo object
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 	if not git_repo:
-		git_repo = GitRepo(remote_url)
+		git_repo = GitRepo(remote_url, git_folder_path)
 		git_repo.scan_count = 1
 		session.add(git_repo)
 		session.commit()
@@ -321,6 +344,156 @@ def insert_update_git_folder(git_folder_path, session):
 	session.commit()
 	return git_folder
 
+def xcheck_update_dupes(session) -> dict:
+	"""
+	Check for duplicate GitRepo entries (same git_url) and update their dupe_flag and dupe_count.
+	A duplicate repository is one with the same git_url in multiple locations.
+
+	Parameters:
+		session: SQLAlchemy session
+
+	Returns:
+		dict: Summary of results containing:
+			- total_repos: Total number of repositories
+			- unique_repos: Number of unique repositories
+			- dupe_repos: Number of repositories that are duplicates
+			- dupes_updated: Number of repositories updated
+	"""
+
+	# Get all repositories
+	all_repos = session.query(GitRepo).all()
+	total_repos = len(all_repos)
+
+	# Reset duplicate flags on all repos
+	for repo in all_repos:
+		repo.dupe_flag = False
+		repo.dupe_count = 0
+
+	# Get list of duplicates (repos with same git_url)
+	dupes = get_dupes(session)
+	dupe_urls = set()
+	dupes_updated = 0
+
+	# Process each duplicate group
+	for dupe in dupes:
+		dupe_id = dupe.id
+		dupe_url = dupe.git_url
+		dupe_count = dupe.count
+		dupe_urls.add(dupe_url)
+
+		# Find all repos with this URL
+		same_url_repos = session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all()
+
+		# Update their dupe flags
+		for repo in same_url_repos:
+			repo.dupe_flag = True
+			repo.dupe_count = dupe_count
+			dupes_updated += 1
+
+	# Commit the changes
+	session.commit()
+
+	# Prepare result summary
+	result = {
+		'total_repos': total_repos,
+		'unique_repos': total_repos - len(dupes),
+		'dupe_repos': len(dupe_urls),
+		'dupes_updated': dupes_updated
+	}
+
+	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
+	return result
+
+def insert_update_starred_repo(github_repo, session):
+	"""
+	Insert a new GitRepo or update an existing one in the database
+
+	Parameters:
+		github_repo : repository object from GitHub API
+		session: SQLAlchemy session
+
+	"""
+
+	git_folder_path = '[notcloned]'
+
+	# Get remote URL for this repository
+	remote_url = f'https://github.com/{github_repo}'
+	if not remote_url:
+		logger.warning(f'Could not determine remote URL for {git_folder_path}')
+		return None
+
+	# Get or create GitRepo object
+	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
+	logger.debug(f'GitRepo: {git_repo} remote_url: {remote_url}')
+	if not git_repo:
+		git_repo = GitRepo(remote_url, git_folder_path)
+		git_repo.scan_count = 1
+		session.add(git_repo)
+		session.commit()
+		logger.debug(f'Created new GitRepo: {git_repo} remote_url: {remote_url} github_repo: {github_repo}')
+
+	# Save changes
+	session.commit()
+
+def check_update_dupes(session) -> dict:
+	"""
+	Check for duplicate GitRepo entries (same git_url) and update their dupe_flag and dupe_count.
+	A duplicate repository is one with the same git_url in multiple locations.
+
+	Parameters:
+		session: SQLAlchemy session
+
+	Returns:
+		dict: Summary of results containing:
+			- total_repos: Total number of repositories
+			- unique_repos: Number of unique repositories
+			- dupe_repos: Number of repositories that are duplicates
+			- dupes_updated: Number of repositories updated
+	"""
+
+	# Get all repositories
+	all_repos = session.query(GitRepo).all()
+	total_repos = len(all_repos)
+
+	# Reset duplicate flags on all repos
+	for repo in all_repos:
+		repo.dupe_flag = False
+		repo.dupe_count = 0
+
+	# Get list of duplicates (repos with same git_url)
+	dupes = get_dupes(session)
+	dupe_urls = set()
+	dupes_updated = 0
+
+	# Process each duplicate group
+	for dupe in dupes:
+		dupe_id = dupe.id
+		dupe_url = dupe.git_url
+		dupe_count = dupe.count
+		dupe_urls.add(dupe_url)
+
+		# Find all repos with this URL
+		same_url_repos = session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all()
+
+		# Update their dupe flags
+		for repo in same_url_repos:
+			repo.dupe_flag = True
+			repo.dupe_count = dupe_count
+			dupes_updated += 1
+
+	# Commit the changes
+	session.commit()
+
+	# Prepare result summary
+	result = {
+		'total_repos': total_repos,
+		'unique_repos': total_repos - len(dupes),
+		'dupe_repos': len(dupe_urls),
+		'dupes_updated': dupes_updated
+	}
+
+	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
+	return result
 
 if __name__ == '__main__':
 	pass
