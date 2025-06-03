@@ -662,7 +662,7 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 	try:
 		db_repos = session.query(GitRepo).all()
 		stats["total_db_repos"] = len(db_repos)
-		logger.info(f"Processing {stats['total_db_repos']} database repositories")
+		logger.info(f"Processing {stats['total_db_repos']} database repositories github_repos_by_url:{len(github_repos_by_url)}")
 
 		for db_repo in db_repos:
 			try:
@@ -673,30 +673,42 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 				if db_repo.git_url and db_repo.git_url in github_repos_by_url:
 					repo_data = github_repos_by_url[db_repo.git_url]
 					stats["matched"] += 1
+					logger.debug(f'Matched: {db_repo.git_url} {stats["matched"]}')
+				if db_repo.git_url and db_repo.git_url.replace('.git','') in github_repos_by_url:
+					repo_data = github_repos_by_url[db_repo.git_url.replace('.git','')]
+					stats["matched"] += 1
+					logger.debug(f'Matched: {db_repo.git_url.replace('.git','')} {stats["matched"]}')
 				elif db_repo.clone_url and db_repo.clone_url in github_repos_by_url:
 					repo_data = github_repos_by_url[db_repo.clone_url]
 					stats["matched"] += 1
+					logger.debug(f'Matched: {db_repo.clone_url} {stats["matched"]}')
 				elif db_repo.html_url and db_repo.html_url in github_repos_by_url:
 					repo_data = github_repos_by_url[db_repo.html_url]
 					stats["matched"] += 1
+					logger.debug(f'Matched: {db_repo.html_url} {stats["matched"]}')
 				elif db_repo.ssh_url and db_repo.ssh_url in github_repos_by_url:
 					repo_data = github_repos_by_url[db_repo.ssh_url]
 					stats["matched"] += 1
+					logger.debug(f'Matched: {db_repo.ssh_url} {stats["matched"]}')
 
 				# Then try by name
 				elif db_repo.full_name and db_repo.full_name.lower() in github_repos_by_name:
 					repo_data = github_repos_by_name[db_repo.full_name.lower()]
 					stats["matched"] += 1
+					logger.debug(f'Matched: {db_repo.full_name.lower()} {stats["matched"]}')
 				elif db_repo.github_repo_name:
+					logger.debug(f"Trying to match by name: {db_repo.github_repo_name} {stats['matched']}")
 					# Try owner/name format
 					full_name = f"{db_repo.github_owner}/{db_repo.github_repo_name}".lower()
 					if full_name in github_repos_by_name:
 						repo_data = github_repos_by_name[full_name]
 						stats["matched"] += 1
+						logger.debug(f"match by name: {db_repo.github_repo_name} {len(repo_data)} {stats['matched']}")
 					# Try just the name
 					elif db_repo.github_repo_name.lower() in github_repos_by_name:
 						repo_data = github_repos_by_name[db_repo.github_repo_name.lower()]
 						stats["matched"] += 1
+						logger.debug(f"match by name: {db_repo.github_repo_name} {len(repo_data)} {stats['matched']}")
 
 				# If we found matching data, update the database entry
 				if repo_data:
@@ -772,7 +784,7 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 				else:
 					# No matching GitHub data found
 					stats["not_found"] += 1
-					logger.debug(f"No GitHub data for: {db_repo.id} - {db_repo.github_repo_name}")
+					logger.debug(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
 
 				# Commit periodically to avoid large transactions
 				if (stats["updated"] + stats["not_found"]) % 100 == 0:

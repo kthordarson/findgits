@@ -5,6 +5,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
+import json
 
 CACHE_DIR = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
 
@@ -28,7 +29,6 @@ def get_git_stars(max=70, use_cache=True):
 	# Try to load from cache first if use_cache is enabled
 	if use_cache:
 		try:
-			import json
 			with open(stars_cache_file, 'r') as f:
 				cache_data = json.load(f)
 				jsonbuffer = cache_data['repos']
@@ -110,7 +110,6 @@ def get_git_stars(max=70, use_cache=True):
 	# Write to cache if we got data
 	if jsonbuffer:
 		try:
-			import json
 			# Create directory if it doesn't exist
 			if not os.path.exists(CACHE_DIR):
 				os.makedirs(CACHE_DIR)
