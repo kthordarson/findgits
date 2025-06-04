@@ -1,5 +1,9 @@
 from __future__ import annotations
+import aiohttp
+import asyncio
+import aiofiles
 import os
+import json
 from configparser import ConfigParser
 from datetime import datetime
 from pathlib import Path
@@ -488,7 +492,7 @@ def xcheck_update_dupes(session) -> dict:
 	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
 	return result
 
-def insert_update_starred_repo(github_repo, session):
+async def insert_update_starred_repo(github_repo, session):
 	"""
 	Insert a new GitRepo or update an existing one in the database
 
@@ -518,13 +522,12 @@ def insert_update_starred_repo(github_repo, session):
 			# It's just an owner/repo path
 			remote_url = f'https://github.com/{clean_path}'
 
-		# Get full repository data from GitHub API
-		repo_data = update_repo_cache(clean_path)
-
 	# Get or create GitRepo object
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 
 	if not git_repo:
+		# Get full repository data from GitHub API
+		repo_data = await update_repo_cache(clean_path)
 		# Create new repository with all available data
 		git_repo = GitRepo(remote_url, git_folder_path, repo_data)
 		git_repo.scan_count = 1
@@ -646,7 +649,7 @@ def xinsert_update_starred_repo(github_repo_data, session):
 	session.commit()
 	return git_repo
 
-def populate_starred_repos(session, max_pages=90, use_cache=True):
+async def populate_starred_repos(session, max_pages=90, use_cache=True):
 	"""
 	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
 
@@ -663,7 +666,7 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 
 	# Fetch starred repositories from GitHub API
 	logger.info(f"Fetching starred repositories (max_pages={max_pages}, use_cache={use_cache})")
-	starred_repos, stars_dict = get_git_stars(max=max_pages, use_cache=use_cache)
+	starred_repos, stars_dict = await get_git_stars(max=max_pages, use_cache=use_cache)
 
 	stats = {
 		"total_db_repos": 0,
@@ -843,19 +846,10 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 
 	return stats
 
-def fetch_missing_repo_data(session, update_all=False):
+async def fetch_missing_repo_data(session, update_all=False):
 	"""
 	Fetch GitHub API data for repositories that weren't found in starred repos
-
-	Parameters:
-		session: SQLAlchemy session
-		update_all: If True, update all repos, not just those missing data
-
-	Returns:
-		dict: Summary statistics about the operation
 	"""
-	import os
-	import json
 
 	stats = {
 		"total_repos": 0,
@@ -872,8 +866,9 @@ def fetch_missing_repo_data(session, update_all=False):
 
 	if os.path.exists(stars_cache_file):
 		try:
-			with open(stars_cache_file, 'r') as f:
-				cache_data = json.load(f)
+			async with aiofiles.open(stars_cache_file, 'r') as f:
+				cache_content = await f.read()
+				cache_data = json.loads(cache_content)
 				logger.info(f"Loaded {len(cache_data['repos'])} repositories from cache")
 		except Exception as e:
 			logger.error(f"Failed to load cache: {e}")
@@ -893,8 +888,7 @@ def fetch_missing_repo_data(session, update_all=False):
 		logger.error('fetch_missing_repo_data: no auth provided')
 		return stats
 
-	# Setup GitHub API session
-	api_session = requests.session()
+	# Setup GitHub API headers
 	headers = {
 		'Accept': 'application/vnd.github+json',
 		'Authorization': f'Bearer {auth.password}',
@@ -911,154 +905,30 @@ def fetch_missing_repo_data(session, update_all=False):
 	stats["total_repos"] = len(db_repos)
 	logger.info(f"Found {stats['total_repos']} repositories that need GitHub data")
 
-	for repo in db_repos:
-		stats["processed"] += 1
+	# Process repositories in batches for efficiency
+	batch_size = 10
+	for i in range(0, len(db_repos), batch_size):
+		batch = db_repos[i:i+batch_size]
+		tasks = []
 
-		# Skip if no owner/name information is available
-		if not repo.github_owner or not repo.github_repo_name:
-			# stats["skipped"] += 1
-			logger.warning(f"repo with missing owner/name: {repo}")
-			# continue
+		async with aiohttp.ClientSession() as api_session:
+			for repo in batch:
+				tasks.append(process_repo(repo, api_session, headers, cache_repos_by_name, cache_data, stats, session))
 
-		# Construct the repository path
-		repo_path = f"{repo.github_owner}/{repo.github_repo_name}"
-		api_url = f"https://api.github.com/repos/{repo_path}"
+			await asyncio.gather(*tasks)
 
-		# First check if repo exists in cache
-		repo_data = None
-		repo_key = repo_path.lower()
-
-		if repo_key in cache_repos_by_name:
-			repo_data = cache_repos_by_name[repo_key]
-			# logger.info(f"Using cached data for {repo_path} ({stats['processed']}/{stats['total_repos']})")
-			stats["from_cache"] += 1
-		else:
-			# Not in cache, make API request
-			logger.info(f"Fetching GitHub data for {repo_path} ({stats['processed']}/{stats['total_repos']})")
-
-			try:
-				# Make the API request
-				response = api_session.get(api_url, headers=headers)
-
-				if response.status_code == 200:
-					repo_data = response.json()
-
-					# Add to cache
-					cache_data['repos'].append(repo_data)
-					cache_repos_by_name[repo_path.lower()] = repo_data
-
-					# Periodically update cache file
-					if stats["processed"] % 10 == 0:
-						try:
-							if not os.path.exists(CACHE_DIR):
-								os.makedirs(CACHE_DIR)
-
-							with open(stars_cache_file, 'w') as f:
-								cache_data['timestamp'] = str(datetime.now())
-								json.dump(cache_data, f)
-								logger.debug("Updated cache file with new data")
-						except Exception as e:
-							logger.error(f"Failed to update cache: {e}")
-
-				elif response.status_code == 404:
-					logger.warning(f"Repository not found on GitHub: {repo_path} (possibly private, renamed or deleted) api_url: {api_url}")
-					stats["failed"] += 1
-					continue
-				else:
-					logger.error(f"GitHub API error ({response.status_code}): {response.text}")
-					stats["failed"] += 1
-					continue
-
-			except Exception as e:
-				logger.error(f"Error processing {repo_path}: {e}")
-				stats["failed"] += 1
-				continue
-
-		# If we have data (either from cache or API), update the repository
-		if repo_data:
-			try:
-				# Update repository with data
-				repo.last_scan = datetime.now()
-				repo.scan_count += 1
-
-				# Update all fields with API data
-				repo.node_id = repo_data.get('node_id')
-				repo.full_name = repo_data.get('full_name')
-				repo.private = repo_data.get('private')
-				repo.html_url = repo_data.get('html_url')
-				repo.description = repo_data.get('description')
-				repo.fork = repo_data.get('fork')
-				repo.clone_url = repo_data.get('clone_url')
-				repo.ssh_url = repo_data.get('ssh_url')
-				repo.git_url_api = repo_data.get('git_url')
-				repo.svn_url = repo_data.get('svn_url')
-				repo.homepage = repo_data.get('homepage')
-
-				# Statistics
-				repo.size = repo_data.get('size')
-				repo.stargazers_count = repo_data.get('stargazers_count')
-				repo.watchers_count = repo_data.get('watchers_count')
-				repo.forks_count = repo_data.get('forks_count')
-				repo.open_issues_count = repo_data.get('open_issues_count')
-				repo.language = repo_data.get('language')
-
-				# Repository features
-				repo.has_issues = repo_data.get('has_issues')
-				repo.has_projects = repo_data.get('has_projects')
-				repo.has_downloads = repo_data.get('has_downloads')
-				repo.has_wiki = repo_data.get('has_wiki')
-				repo.has_pages = repo_data.get('has_pages')
-				repo.has_discussions = repo_data.get('has_discussions')
-				repo.archived = repo_data.get('archived')
-				repo.disabled = repo_data.get('disabled')
-				repo.allow_forking = repo_data.get('allow_forking')
-				repo.is_template = repo_data.get('is_template')
-				repo.web_commit_signoff_required = repo_data.get('web_commit_signoff_required')
-
-				# Topics
-				if repo_data.get('topics'):
-					repo.topics = ','.join(repo_data.get('topics'))
-
-				repo.visibility = repo_data.get('visibility')
-				repo.default_branch = repo_data.get('default_branch')
-
-				# License information
-				if repo_data.get('license'):
-					repo.license_key = repo_data.get('license', {}).get('key')
-					repo.license_name = repo_data.get('license', {}).get('name')
-					repo.license_url = repo_data.get('license', {}).get('url')
-
-				# Parse timestamps
-				try:
-					if repo_data.get('created_at'):
-						repo.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
-					if repo_data.get('updated_at'):
-						repo.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
-					if repo_data.get('pushed_at'):
-						repo.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
-				except ValueError as e:
-					logger.warning(f"Error parsing timestamps: {e}")
-
-				stats["updated"] += 1
-				# logger.info(f"Updated repository: {repo.github_owner}/{repo.github_repo_name}")
-
-			except Exception as e:
-				logger.error(f"Error updating repository {repo_path}: {e}")
-				stats["failed"] += 1
-
-		# Commit every 10 repos to avoid large transactions
-		if stats["processed"] % 10 == 0:
+			# Commit after each batch
 			session.commit()
-			logger.info(f"Progress: {stats['processed']}/{stats['total_repos']} repositories processed")
+			logger.info(f"Progress: {i+len(batch)}/{stats['total_repos']} repositories processed")
 
 	# Final cache update
 	try:
 		if not os.path.exists(CACHE_DIR):
 			os.makedirs(CACHE_DIR)
 
-		with open(stars_cache_file, 'w') as f:
+		async with aiofiles.open(stars_cache_file, 'w') as f:
 			cache_data['timestamp'] = str(datetime.now())
-			json.dump(cache_data, f)
+			await f.write(json.dumps(cache_data, indent=4))
 			logger.info("Final update to cache file with new data")
 	except Exception as e:
 		logger.error(f"Failed to update cache: {e}")
@@ -1068,6 +938,130 @@ def fetch_missing_repo_data(session, update_all=False):
 	logger.info(f"Finished fetching repository data: {stats}")
 
 	return stats
+
+async def process_repo(repo, api_session, headers, cache_repos_by_name, cache_data, stats, session):
+	"""Helper function to process a single repository"""
+	stats["processed"] += 1
+
+	# Skip if no owner/name information is available
+	if not repo.github_owner or not repo.github_repo_name:
+		stats["skipped"] += 1
+		logger.warning(f"Skipping repo with missing owner/name: {repo}")
+		return
+
+	# Construct the repository path
+	repo_path = f"{repo.github_owner}/{repo.github_repo_name}"
+	api_url = f"https://api.github.com/repos/{repo_path}"
+
+	# First check if repo exists in cache
+	repo_data = None
+	repo_key = repo_path.lower()
+
+	if repo_key in cache_repos_by_name:
+		repo_data = cache_repos_by_name[repo_key]
+		stats["from_cache"] += 1
+	else:
+		# Not in cache, make API request
+		logger.info(f"Fetching GitHub data for {repo_path} ({stats['processed']}/{stats['total_repos']})")
+
+		try:
+			# Make the API request
+			async with api_session.get(api_url, headers=headers) as response:
+				if response.status == 200:
+					repo_data = await response.json()
+
+					# Add to cache
+					cache_data['repos'].append(repo_data)
+					cache_repos_by_name[repo_path.lower()] = repo_data
+
+				elif response.status == 404:
+					logger.warning(f"Repository not found on GitHub: {repo_path} (possibly private, renamed or deleted)")
+					stats["failed"] += 1
+					return
+				else:
+					error_text = await response.text()
+					logger.error(f"GitHub API error ({response.status}): {error_text}")
+					stats["failed"] += 1
+					return
+
+		except Exception as e:
+			logger.error(f"Error processing {repo_path}: {e}")
+			stats["failed"] += 1
+			return
+
+	# If we have data (either from cache or API), update the repository
+	if repo_data:
+		try:
+			# Update repository with data
+			update_repo_from_data(repo, repo_data)
+			stats["updated"] += 1
+
+		except Exception as e:
+			logger.error(f"Error updating repository {repo_path}: {e}")
+			stats["failed"] += 1
+
+def update_repo_from_data(repo, repo_data):
+	"""Update a repository with data from GitHub API"""
+	repo.last_scan = datetime.now()
+	repo.scan_count += 1
+
+	# Update all fields with API data
+	repo.node_id = repo_data.get('node_id')
+	repo.full_name = repo_data.get('full_name')
+	repo.private = repo_data.get('private')
+	repo.html_url = repo_data.get('html_url')
+	repo.description = repo_data.get('description')
+	repo.fork = repo_data.get('fork')
+	repo.clone_url = repo_data.get('clone_url')
+	repo.ssh_url = repo_data.get('ssh_url')
+	repo.git_url_api = repo_data.get('git_url')
+	repo.svn_url = repo_data.get('svn_url')
+	repo.homepage = repo_data.get('homepage')
+
+	# Statistics
+	repo.size = repo_data.get('size')
+	repo.stargazers_count = repo_data.get('stargazers_count')
+	repo.watchers_count = repo_data.get('watchers_count')
+	repo.forks_count = repo_data.get('forks_count')
+	repo.open_issues_count = repo_data.get('open_issues_count')
+	repo.language = repo_data.get('language')
+
+	# Repository features
+	repo.has_issues = repo_data.get('has_issues')
+	repo.has_projects = repo_data.get('has_projects')
+	repo.has_downloads = repo_data.get('has_downloads')
+	repo.has_wiki = repo_data.get('has_wiki')
+	repo.has_pages = repo_data.get('has_pages')
+	repo.has_discussions = repo_data.get('has_discussions')
+	repo.archived = repo_data.get('archived')
+	repo.disabled = repo_data.get('disabled')
+	repo.allow_forking = repo_data.get('allow_forking')
+	repo.is_template = repo_data.get('is_template')
+	repo.web_commit_signoff_required = repo_data.get('web_commit_signoff_required')
+
+	# Topics
+	if repo_data.get('topics'):
+		repo.topics = ','.join(repo_data.get('topics'))
+
+	repo.visibility = repo_data.get('visibility')
+	repo.default_branch = repo_data.get('default_branch')
+
+	# License information
+	if repo_data.get('license'):
+		repo.license_key = repo_data.get('license', {}).get('key')
+		repo.license_name = repo_data.get('license', {}).get('name')
+		repo.license_url = repo_data.get('license', {}).get('url')
+
+	# Parse timestamps
+	try:
+		if repo_data.get('created_at'):
+			repo.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
+		if repo_data.get('updated_at'):
+			repo.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
+		if repo_data.get('pushed_at'):
+			repo.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
+	except ValueError as e:
+		logger.warning(f"Error parsing timestamps: {e}")
 
 if __name__ == '__main__':
 	pass

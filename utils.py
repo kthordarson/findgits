@@ -2,6 +2,9 @@ import os
 from pathlib import Path
 from loguru import logger
 from subprocess import Popen, PIPE
+import aiohttp
+import asyncio
+import aiofiles
 
 def flatten(nested_list):
 	flattened = []

@@ -1,4 +1,7 @@
 #!/usr/bin/python3
+import aiohttp
+import asyncio
+import aiofiles
 import sys
 from pathlib import Path
 import argparse
@@ -46,77 +49,105 @@ def get_args():
 	args = myparse.parse_args()
 	return args
 
-def main():
+async def main():
 	args = get_args()
 	engine = get_engine(args)
 	s = sessionmaker(bind=engine)
 	session = s()
 	db_init(engine)
+
 	if args.dbcheck:
 		res = dbcheck(session)
 		print(f'dbcheck res: {res}')
+
 	if args.dbinfo:
 		git_folders = session.query(GitFolder).count()
 		git_repos = session.query(GitRepo).count()
 		dupes = check_update_dupes(session)
 		print(f'DB Engine: {engine} DB Type: {engine.name} DB URL: {engine.url}')
 		print(f'Git Folders: {git_folders} Git Repos: {git_repos} Dupes: {dupes['dupe_repos']} ')
+
 		if args.gitstars:
-			git_lists = get_git_lists()
+			git_lists = await get_git_lists()
 			git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 			urls = []
 			_ = [urls.extend(git_lists[k]['hrefs']) for k in git_lists]
 			unique_urls = list(set(urls))
-			starred_repos, stars_dict = get_git_stars()
+			starred_repos, stars_dict = await get_git_stars()
 			print(f'Git Lists: {len(git_lists)} git_list_count: {git_list_count} Starred Repos: {len(starred_repos)} Stars Dict: {len(stars_dict)} urls: {len(urls)} Unique URLs: {len(unique_urls)}')
+
 	if args.dropdatabase:
 		drop_database(engine)
+
 	if args.scanpath:
 		scanpath = Path(args.scanpath[0])
 		if scanpath.is_dir():
 			# Find git folders
 			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir()]
 			logger.info(f'Scan path: {scanpath} found {len(git_folders)} git folders')
-			# Process each git folder
-			for idx,git_folder in enumerate(git_folders):
-				# The git folder is the parent directory of .git
-				git_path = git_folder.parent
-				logger.info(f'Processing {idx+1}/{len(git_folders)}: {git_path}')
-				try:
-					insert_update_git_folder(git_path, session)
-				except Exception as e:
-					logger.error(f'Error processing {git_path}: {e} {type(e)}')
-					continue
-			session.commit()
+
+			# Process git folders in batches
+			batch_size = 10
+			for i in range(0, len(git_folders), batch_size):
+				batch = git_folders[i:i+batch_size]
+				tasks = []
+
+				for git_folder in batch:
+					git_path = git_folder.parent
+					tasks.append(process_git_folder(git_path, session, i + batch.index(git_folder) + 1, len(git_folders)))
+
+				await asyncio.gather(*tasks)
+				session.commit()
+
 			print(f'Processed {len(git_folders)} git folders')
 		else:
 			logger.error(f'Scan path: {scanpath} is not a valid directory')
-			# return
+
 	if args.populate:
-		stats = populate_starred_repos(session)
+		stats = await populate_starred_repos(session)
 		print(f"GitHub Stars Processing Stats:{stats}")
 		try:
-			missing_stats = fetch_missing_repo_data(session, update_all=True)
+			missing_stats = await fetch_missing_repo_data(session, update_all=True)
 			print(f"Fetched missing data: Updated {missing_stats['updated']}, Failed {missing_stats['failed']}")
 		except Exception as e:
 			logger.error(f'Error {e} {type(e)}')
+
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = get_git_lists()
+		git_lists = await get_git_lists()
 		git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
 		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
-		# stats = populate_starred_repos(session)
-		# print(f"GitHub Stars Processing Stats:{stats}")
-		for repo in notfoundrepos:
-			try:
-				insert_update_starred_repo(repo, session)
-			except Exception as e:
-				logger.error(f'Error processing {repo}: {e} {type(e)}')
-				continue
+
+		# Process repos in parallel
+		batch_size = 20
+		for i in range(0, len(notfoundrepos), batch_size):
+			batch = notfoundrepos[i:i+batch_size]
+			tasks = []
+
+			for repo in batch:
+				tasks.append(process_starred_repo(repo, session))
+
+			await asyncio.gather(*tasks)
+			session.commit()
+
+async def process_git_folder(git_path, session, current, total):
+	"""Process a single git folder asynchronously"""
+	logger.info(f'Processing {current}/{total}: {git_path}')
+	try:
+		insert_update_git_folder(git_path, session)
+	except Exception as e:
+		logger.error(f'Error processing {git_path}: {e} {type(e)}')
+
+async def process_starred_repo(repo, session):
+	"""Process a single starred repo asynchronously"""
+	try:
+		await insert_update_starred_repo(repo, session)
+	except Exception as e:
+		logger.error(f'Error processing {repo}: {e} {type(e)}')
 
 if __name__ == '__main__':
-	main()
+	asyncio.run(main())
