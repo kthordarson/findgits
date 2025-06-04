@@ -9,6 +9,106 @@ import json
 
 CACHE_DIR = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
 
+
+def update_repo_cache(repo_name_or_url, use_existing_cache=True):
+	"""
+	Fetch repository data from GitHub API and update the cache
+
+	Parameters:
+		repo_name_or_url (str): Repository name (e.g., 'owner/repo') or full URL
+		use_existing_cache (bool): Whether to use existing cache entries
+
+	Returns:
+		dict: Repository data or None if not found/error
+	"""
+	# Extract repo name if URL is provided, with improved path handling
+	if '/' in repo_name_or_url:
+		# Handle URLs with leading slash
+		clean_path = repo_name_or_url.lstrip('/')
+
+		if 'github.com' in clean_path:
+			parts = clean_path.split('github.com/')
+			if len(parts) > 1:
+				repo_name = parts[1].rstrip('.git')
+			else:
+				logger.error(f"Invalid GitHub URL format: {repo_name_or_url}")
+				return None
+		else:
+			# Assume format is already owner/repo
+			repo_name = clean_path
+	else:
+		logger.error(f"Invalid repository name or URL: {repo_name_or_url}")
+		return None
+
+	# Ensure repo_name doesn't have leading/trailing slashes
+	repo_name = repo_name.strip('/')
+
+	# logger.debug(f"Normalized repository path: {repo_name}")
+
+	# Load existing cache if available and requested
+	cache_data = {'repos': []}
+	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+
+	if use_existing_cache and os.path.exists(stars_cache_file):
+		try:
+			with open(stars_cache_file, 'r') as f:
+				cache_data = json.load(f)
+		except Exception as e:
+			logger.error(f"Failed to load cache: {e}")
+
+	# Fetch repository data from GitHub API
+	auth = get_auth_param()
+	if not auth:
+		logger.error('update_repo_cache: no auth provided')
+		return None
+
+	session = requests.session()
+	api_url = f'https://api.github.com/repos/{repo_name}'
+	headers = {
+		'Accept': 'application/vnd.github+json',
+		'Authorization': f'Bearer {auth.password}',
+		'X-GitHub-Api-Version': '2022-11-28'
+	}
+
+	try:
+		# logger.info(f"Fetching repository data for {repo_name}")
+		r = session.get(api_url, headers=headers)
+
+		if r.status_code == 200:
+			repo_data = r.json()
+
+			# Check if repo already exists in cache
+			existing_index = None
+			for i, repo in enumerate(cache_data['repos']):
+				if repo.get('id') == repo_data.get('id'):
+					existing_index = i
+					break
+
+			# Update or add to cache
+			if existing_index is not None:
+				cache_data['repos'][existing_index] = repo_data
+				logger.info(f"Updated existing repository in cache: {repo_name}")
+			else:
+				cache_data['repos'].append(repo_data)
+				logger.info(f"Added new repository to cache: {repo_name}")
+
+			# Write updated cache
+			if not os.path.exists(CACHE_DIR):
+				os.makedirs(CACHE_DIR)
+
+			with open(stars_cache_file, 'w') as f:
+				cache_data['timestamp'] = str(datetime.datetime.now())
+				json.dump(cache_data, f)
+
+			return repo_data
+		else:
+			logger.error(f"Failed to fetch repository data: {r.status_code} {r.text}")
+			return None
+
+	except Exception as e:
+		logger.error(f"Error fetching repository data: {e}")
+		return None
+
 def get_git_stars(max=70, use_cache=True):
 	"""
 	Get all starred repos with caching support

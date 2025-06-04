@@ -13,7 +13,8 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import Session
 from utils import valid_git_folder, get_remote, flatten
-from gitstars import get_git_stars, get_git_lists
+from gitstars import get_git_stars, get_git_lists, update_repo_cache, get_auth_param
+import requests
 # from git_tasks import get_git_show
 
 # Base = declarative_base()
@@ -201,6 +202,7 @@ class GitRepo(Base):
 
 		# If repo_data is provided (from GitHub API), populate additional fields
 		if repo_data and isinstance(repo_data, dict):
+			logger.debug(f'got repo_data for {self} from GitHub API')
 			self.node_id = repo_data.get('node_id')
 			self.full_name = repo_data.get('full_name')
 			self.private = repo_data.get('private')
@@ -263,7 +265,7 @@ class GitRepo(Base):
 			self.get_repo_stats()
 
 	def __repr__(self):
-		return f'<GitRepo id={self.id} url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
+		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
 
 	def get_repo_stats(self):
 		"""Collect stats and read config for this git repo"""
@@ -489,31 +491,64 @@ def insert_update_starred_repo(github_repo, session):
 	Insert a new GitRepo or update an existing one in the database
 
 	Parameters:
-		github_repo : repository object from GitHub API
+		github_repo: repository object from GitHub API or owner/repo string
 		session: SQLAlchemy session
-
 	"""
-
 	git_folder_path = '[notcloned]'
 
-	# Get remote URL for this repository
-	remote_url = f'https://github.com/{github_repo}'
-	if not remote_url:
-		logger.warning(f'Could not determine remote URL for {git_folder_path}')
-		return None
+	# Check if github_repo is a string (URL or owner/repo) or a dict
+	if isinstance(github_repo, dict):
+		# Already have full repo data
+		repo_data = github_repo
+		remote_url = repo_data.get('html_url') or f"https://github.com/{repo_data.get('full_name')}"
+	else:
+		# Normalize the path by removing leading/trailing slashes
+		clean_path = github_repo.strip('/')
+
+		# It's a string, construct proper GitHub URL
+		if 'github.com' in clean_path:
+			# It's already a URL
+			if clean_path.startswith('http'):
+				remote_url = clean_path
+			else:
+				remote_url = f'https://{clean_path}'
+		else:
+			# It's just an owner/repo path
+			remote_url = f'https://github.com/{clean_path}'
+
+		# Get full repository data from GitHub API
+		repo_data = update_repo_cache(clean_path)
 
 	# Get or create GitRepo object
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
-	logger.debug(f'GitRepo: {git_repo} remote_url: {remote_url}')
+
 	if not git_repo:
-		git_repo = GitRepo(remote_url, git_folder_path)
+		# Create new repository with all available data
+		git_repo = GitRepo(remote_url, git_folder_path, repo_data)
 		git_repo.scan_count = 1
 		session.add(git_repo)
-		session.commit()
-		logger.debug(f'Created new GitRepo: {git_repo} remote_url: {remote_url} github_repo: {github_repo}')
+		logger.debug(f'Created new GitRepo with full data: {git_repo} remote_url: {remote_url}')
+	else:
+		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}')
+		# Update existing repository if we have repo_data
+		if repo_data:
+			git_repo.last_scan = datetime.now()
+			git_repo.scan_count += 1
+
+			# Update with API data
+			if repo_data.get('description'):
+				git_repo.description = repo_data.get('description')
+			if repo_data.get('stargazers_count'):
+				git_repo.stargazers_count = repo_data.get('stargazers_count')
+			if repo_data.get('language'):
+				git_repo.language = repo_data.get('language')
+
+			# Add other fields you want to update
+			logger.debug(f'Updated existing GitRepo with API data: {git_repo.github_repo_name}')
 
 	# Save changes
 	session.commit()
+	return git_repo
 
 def check_update_dupes(session) -> dict:
 	"""
@@ -697,7 +732,7 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 					stats["matched"] += 1
 					logger.debug(f'Matched: {db_repo.full_name.lower()} {stats["matched"]}')
 				elif db_repo.github_repo_name:
-					logger.debug(f"Trying to match by name: {db_repo.github_repo_name} {stats['matched']}")
+					# logger.debug(f"Trying to match by name: {db_repo.github_repo_name} {stats['matched']}")
 					# Try owner/name format
 					full_name = f"{db_repo.github_owner}/{db_repo.github_repo_name}".lower()
 					if full_name in github_repos_by_name:
@@ -784,12 +819,12 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 				else:
 					# No matching GitHub data found
 					stats["not_found"] += 1
-					logger.debug(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
+					logger.warning(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
 
 				# Commit periodically to avoid large transactions
 				if (stats["updated"] + stats["not_found"]) % 100 == 0:
 					session.commit()
-					logger.info(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
+					logger.warning(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
 
 			except Exception as e:
 				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
@@ -803,6 +838,158 @@ def populate_starred_repos(session, max_pages=90, use_cache=True):
 		logger.error(f"Error fetching database repositories: {e}")
 		stats["errors"] += 1
 		return {"errors": stats["errors"], "message": str(e)}
+
+	return stats
+
+def fetch_missing_repo_data(session, update_all=False):
+	"""
+	Fetch GitHub API data for repositories that weren't found in starred repos
+
+	Parameters:
+		session: SQLAlchemy session
+		update_all: If True, update all repos, not just those missing data
+
+	Returns:
+		dict: Summary statistics about the operation
+	"""
+	stats = {
+		"total_repos": 0,
+		"processed": 0,
+		"updated": 0,
+		"failed": 0,
+		"skipped": 0
+	}
+
+	# Get GitHub auth token
+	auth = get_auth_param()
+	if not auth:
+		logger.error('fetch_missing_repo_data: no auth provided')
+		return stats
+
+	# Setup GitHub API session
+	api_session = requests.session()
+	headers = {
+		'Accept': 'application/vnd.github+json',
+		'Authorization': f'Bearer {auth.password}',
+		'X-GitHub-Api-Version': '2022-11-28'
+	}
+
+	# Query repos from database that need updating
+	if update_all:
+		db_repos = session.query(GitRepo).all()
+	else:
+		# Only get repos that are missing key GitHub data
+		db_repos = session.query(GitRepo).filter((GitRepo.node_id.is_(None)) | (GitRepo.full_name.is_(None)) | (GitRepo.description.is_(None))).all()
+
+	stats["total_repos"] = len(db_repos)
+	logger.info(f"Found {stats['total_repos']} repositories that need GitHub data")
+
+	for repo in db_repos:
+		stats["processed"] += 1
+
+		# Skip if no owner/name information is available
+		if not repo.github_owner or not repo.github_repo_name:
+			stats["skipped"] += 1
+			logger.warning(f"Skipping repo with missing owner/name: {repo}")
+			continue
+
+		# Construct the repository path
+		repo_path = f"{repo.github_owner}/{repo.github_repo_name}"
+		api_url = f"https://api.github.com/repos/{repo_path}"
+
+		logger.info(f"Fetching GitHub data for {repo_path} ({stats['processed']}/{stats['total_repos']})")
+
+		try:
+			# Make the API request
+			response = api_session.get(api_url, headers=headers)
+
+			if response.status_code == 200:
+				repo_data = response.json()
+
+				# Update repository with API data
+				repo.last_scan = datetime.now()
+				repo.scan_count += 1
+
+				# Update all fields with API data
+				repo.node_id = repo_data.get('node_id')
+				repo.full_name = repo_data.get('full_name')
+				repo.private = repo_data.get('private')
+				repo.html_url = repo_data.get('html_url')
+				repo.description = repo_data.get('description')
+				repo.fork = repo_data.get('fork')
+				repo.clone_url = repo_data.get('clone_url')
+				repo.ssh_url = repo_data.get('ssh_url')
+				repo.git_url_api = repo_data.get('git_url')
+				repo.svn_url = repo_data.get('svn_url')
+				repo.homepage = repo_data.get('homepage')
+
+				# Statistics
+				repo.size = repo_data.get('size')
+				repo.stargazers_count = repo_data.get('stargazers_count')
+				repo.watchers_count = repo_data.get('watchers_count')
+				repo.forks_count = repo_data.get('forks_count')
+				repo.open_issues_count = repo_data.get('open_issues_count')
+				repo.language = repo_data.get('language')
+
+				# Repository features
+				repo.has_issues = repo_data.get('has_issues')
+				repo.has_projects = repo_data.get('has_projects')
+				repo.has_downloads = repo_data.get('has_downloads')
+				repo.has_wiki = repo_data.get('has_wiki')
+				repo.has_pages = repo_data.get('has_pages')
+				repo.has_discussions = repo_data.get('has_discussions')
+				repo.archived = repo_data.get('archived')
+				repo.disabled = repo_data.get('disabled')
+				repo.allow_forking = repo_data.get('allow_forking')
+				repo.is_template = repo_data.get('is_template')
+				repo.web_commit_signoff_required = repo_data.get('web_commit_signoff_required')
+
+				# Topics
+				if repo_data.get('topics'):
+					repo.topics = ','.join(repo_data.get('topics'))
+
+				repo.visibility = repo_data.get('visibility')
+				repo.default_branch = repo_data.get('default_branch')
+
+				# License information
+				if repo_data.get('license'):
+					repo.license_key = repo_data.get('license', {}).get('key')
+					repo.license_name = repo_data.get('license', {}).get('name')
+					repo.license_url = repo_data.get('license', {}).get('url')
+
+				# Parse timestamps
+				try:
+					if repo_data.get('created_at'):
+						repo.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
+					if repo_data.get('updated_at'):
+						repo.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
+					if repo_data.get('pushed_at'):
+						repo.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
+				except ValueError as e:
+					logger.warning(f"Error parsing timestamps: {e}")
+
+				stats["updated"] += 1
+				logger.info(f"Updated repository: {repo.github_owner}/{repo.github_repo_name}")
+
+			elif response.status_code == 404:
+				logger.warning(f"Repository not found on GitHub: {repo_path} (possibly private, renamed or deleted)")
+				stats["failed"] += 1
+			else:
+				logger.error(f"GitHub API error ({response.status_code}): {response.text}")
+				stats["failed"] += 1
+
+			# Commit every 10 repos to avoid large transactions
+			if stats["processed"] % 10 == 0:
+				session.commit()
+				logger.info(f"Progress: {stats['processed']}/{stats['total_repos']} repositories processed")
+
+		except Exception as e:
+			logger.error(f"Error processing {repo_path}: {e}")
+			stats["failed"] += 1
+
+	# Final commit
+	session.commit()
+	logger.info(f"Finished fetching missing repository data: {stats}")
 
 	return stats
 

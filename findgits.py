@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
 from dbstuff import get_engine, db_init, drop_database
-from dbstuff import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_starred_repos
+from dbstuff import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_starred_repos, fetch_missing_repo_data
 from gitstars import get_git_lists, get_git_stars
 from utils import flatten
 
@@ -95,6 +95,11 @@ def main():
 	if args.populate:
 		stats = populate_starred_repos(session)
 		print(f"GitHub Stars Processing Stats:{stats}")
+		try:
+			missing_stats = fetch_missing_repo_data(session, update_all=True)
+			print(f"Fetched missing data: Updated {missing_stats['updated']}, Failed {missing_stats['failed']}")
+		except Exception as e:
+			logger.error(f'Error {e} {type(e)}')
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
 		git_lists = get_git_lists()
@@ -104,11 +109,14 @@ def main():
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
 		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+		# stats = populate_starred_repos(session)
+		# print(f"GitHub Stars Processing Stats:{stats}")
 		for repo in notfoundrepos:
 			try:
 				insert_update_starred_repo(repo, session)
 			except Exception as e:
 				logger.error(f'Error processing {repo}: {e} {type(e)}')
 				continue
+
 if __name__ == '__main__':
 	main()
