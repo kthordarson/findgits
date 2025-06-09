@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 from loguru import logger
 from ui_main import Ui_FindGitsApp
 from ui_mainwindow import Ui_MainWindow
-from dbstuff import GitRepo, GitFolder, SearchPath, get_engine, get_dupes, db_get_dupes
+from dbstuff import GitRepo, GitFolder, get_engine
 from sqlalchemy import and_, text
 from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt)
@@ -32,7 +32,8 @@ class MainApp(QMainWindow):
 		# self.ui.gitlog_button.clicked.connect(self.gitlog_button_clicked)
 		# self.ui.gitstatus_button.clicked.connect(self.gitstatus_button_clicked)
 		self.dupefilter = False
-		self.repotree_populate()
+		self.populate_gitrepos()
+		# self.repotree_populate()
 
 	def gitshow_button_clicked(self, widget):
 		pass
@@ -57,42 +58,49 @@ class MainApp(QMainWindow):
 		self.ui.repotree.headerItem().setText(0, "id")
 		self.ui.repotree.headerItem().setText(1, "count")
 		self.ui.repotree.headerItem().setText(2, "git_url")
-		dupes = get_dupes(self.session)
+		dupes = []  # get_dupes(self.session)
 		for d in dupes:
 			item0 = QTreeWidgetItem(self.ui.repotree)
 			item0.setText(0, f"{d.id}")
 			item0.setText(1, f"{d.count}")
 			item0.setText(2, f"{d.git_url}")
-			# try:
-			#     for f in d.get('folders'):
-			#         item1 = QTreeWidgetItem(item0)
-			#         item1.setText(0, f"{f.get('gitfolder_id')}")
-			#         item1.setText(2, f"{f.get('git_path')}")
-			# except TypeError as e:
-			#     logger.error(e)
-		# self.retranslateUi(self)
 
 	def repo_item_clicked(self, widget):  # show info about selected repo
 		repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
-		duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
-		dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.gitfolder_id).first() for k in duperepos]
-		logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
-		self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
-		self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
-		self.ui.dupe_paths_widget.clear()
-		self.ui.dupe_paths_widget.setColumnCount(1)
-		self.ui.dupe_paths_widget.headerItem().setText(0, "path")
-		for dp in dupe_locations:
-			item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
-			item0.setText(0, f"{dp[0]}")
+		if not repo:
+			logger.error(f'repo_item_clicked: no repo found for id {widget.text(0)}')
+			return
+		else:
+			duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
+			dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.id).first() for k in duperepos]
+			logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
+			self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
+			self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
+			# self.ui.dupe_paths_widget.clear()
+			# self.ui.dupe_paths_widget.setColumnCount(1)
+			# self.ui.dupe_paths_widget.headerItem().setText(0, "path")
+			# for dp in dupe_locations:
+			# 	item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
+			# 	try:
+			# 		item0.setText(0, f"{dp[0]}")
+			# 	except TypeError as e:
+			# 		logger.error(f'Error setting text for dupe path: {e} dp={dp}')
+			# 		item0.setText(0, f"{dp}")
 
 	def populate_gitrepos(self):
 		self.ui.repotree.clear()
+		self.ui.repotree.headerItem().setText(0, "id")
+		self.ui.repotree.headerItem().setText(1, "folder")
+		self.ui.repotree.headerItem().setText(2, "repos")
+		self.ui.repotree.headerItem().setText(3, "folder_size")
+
 		gitrepos = session.query(GitRepo).all()
 		for k in gitrepos:
 			item_1 = QTreeWidgetItem(self.ui.repotree)
 			item_1.setText(0, f"{k.id}")
 			item_1.setText(1, f"{k.git_url}")
+		self.ui.repotree.resizeColumnToContents(0)
+		self.ui.repotree.resizeColumnToContents(1)
 		self.ui.retranslateUi(self)
 
 	def folderButton_clicked(self, widget):  # change to folder tree view
@@ -102,7 +110,7 @@ class MainApp(QMainWindow):
 		# self.checkBox_filterdupes.setEnabled(True)
 
 	def repotree_populate(self):
-		gpf = session.query(SearchPath).all()
+		gpf = []
 		self.ui.repotree.headerItem().setText(0, "id")
 		self.ui.repotree.headerItem().setText(1, "folder")
 		self.ui.repotree.headerItem().setText(2, "repos")
@@ -115,8 +123,8 @@ class MainApp(QMainWindow):
 			item.setText(1, f"{k.folder}")
 			item.setText(2, f"{k.repo_count}")
 			item.setText(3, f"{k.folder_size:,}")
-			gitpaths = session.query(GitFolder).filter(GitFolder.searchpath_id == k.id).all()
-			for g in gitpaths:
+			git_paths = session.query(GitFolder).filter(GitFolder.searchpath_id == k.id).all()
+			for g in git_paths:
 				item1 = QTreeWidgetItem(item)
 				item1.setText(0, f"{g.id}")
 				item1.setText(1, f"{g.git_path}")
