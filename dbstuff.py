@@ -17,7 +17,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import Session
 from utils import valid_git_folder, get_remote, flatten
-from gitstars import get_git_stars, get_git_lists, update_repo_cache, get_auth_param, CACHE_DIR
+from gitstars import get_git_stars, get_git_list_stars, update_repo_cache, get_auth_param, CACHE_DIR
 import requests
 # from git_tasks import get_git_show
 
@@ -81,6 +81,7 @@ class GitFolder(Base):
 		self.subdir_count = 0
 		self.scanned = False
 		self.get_folder_time()
+		self.get_folder_stats()
 
 	def __repr__(self):
 		return f'<GitFolder {self.id} git_path={self.git_path}>'
@@ -90,20 +91,22 @@ class GitFolder(Base):
 		if not os.path.exists(self.git_path):  # redundant check, but just in case?
 			self.valid = False
 			raise MissingGitFolderException(f'{self} does not exist')
-		t0 = datetime.now()
+		# t0 = datetime.now()
 		self.last_scan = datetime.now()
 		stat = os.stat(self.git_path)
-		self.git_path_ctime = datetime.fromtimestamp(stat.st_ctime)
-		self.git_path_atime = datetime.fromtimestamp(stat.st_atime)
-		self.git_path_mtime = datetime.fromtimestamp(stat.st_mtime)
+		self.git_path_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
+		self.git_path_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
+		self.git_path_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
-	def get_folder_stats(self, id, git_path):
+	def get_folder_stats(self):
 		t0 = datetime.now()
-		self.folder_size = get_directory_size(git_path)
-		self.file_count = get_subfilecount(git_path)
-		self.subdir_count = get_subdircount(git_path)
-		scan_time = (datetime.now() - t0).total_seconds()
+		self.folder_size = get_directory_size(self.git_path)
+		self.file_count = get_subfilecount(self.git_path)
+		self.subdir_count = get_subdircount(self.git_path)
+		self.scan_time = (datetime.now() - t0).total_seconds()
+		self.last_scan = datetime.now()
 		self.scanned = True
+		self.scan_count += 1
 
 # todo: make this better, should only be linked to one git_path
 class GitRepo(Base):
@@ -266,26 +269,16 @@ class GitRepo(Base):
 			except ValueError as e:
 				logger.warning(f"Error parsing timestamps: {e}")
 
-		# If path is a real location, get local stats
-		if local_path != '[notcloned]':
-			self.get_repo_stats()
-
 	def __repr__(self):
 		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
 
-	def get_repo_stats(self):
-		"""Collect stats and read config for this git repo"""
-		# Existing implementation...
-
 def db_init(engine: sqlalchemy.Engine) -> None:
 	Base.metadata.create_all(bind=engine)
-
 
 def drop_database(engine: sqlalchemy.Engine) -> None:
 	logger.warning(f'[drop] all engine={engine}')
 	Base.metadata.drop_all(bind=engine)
 	Base.metadata.create_all(bind=engine)
-
 
 def get_engine(args) -> sqlalchemy.Engine:
 	"""
@@ -376,7 +369,7 @@ def get_dupes(session: Session) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
-def insert_update_git_folder(git_folder_path, session):
+async def insert_update_git_folder(git_folder_path, session):
 	"""
 	Insert a new GitFolder or update an existing one in the database
 
@@ -400,17 +393,24 @@ def insert_update_git_folder(git_folder_path, session):
 
 	# Get remote URL for this repository
 	remote_url = get_remote(git_folder_path)
-	if not remote_url:
+	if remote_url:
+		# Get or create GitRepo object
+		git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
+	else:
 		logger.warning(f'Could not determine remote URL for {git_folder_path}')
-		return None
 
-	# Get or create GitRepo object
-	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 	if not git_repo:
 		git_repo = GitRepo(remote_url, git_folder_path)
+		metadata = await fetch_metadata(git_repo)
+		git_repo = populate_from_metadata(git_repo, metadata)
 		git_repo.scan_count = 1
 		session.add(git_repo)
-		session.commit()
+		try:
+			session.commit()
+		except Exception as e:
+			logger.error(f'Error committing GitRepo: {e} - rolling back session')
+			session.rollback()
+			return None
 		logger.debug(f'Created new GitRepo: {git_repo}')
 
 	if git_folder:
@@ -419,7 +419,7 @@ def insert_update_git_folder(git_folder_path, session):
 		git_folder.last_scan = datetime.now()
 		git_folder.gitrepo_id = git_repo.id
 		git_folder.get_folder_time()
-		git_folder.get_folder_stats(git_folder.id, git_folder.git_path)
+		git_folder.get_folder_stats()
 		logger.debug(f'Updated GitFolder: {git_folder}')
 	else:
 		# Create new GitFolder
@@ -429,7 +429,20 @@ def insert_update_git_folder(git_folder_path, session):
 		logger.debug(f'Created new GitFolder: {git_folder}')
 
 	# Save changes
-	session.commit()
+	try:
+		session.commit()
+	except sqlalchemy.exc.StatementError as e:
+		logger.error(f'Error committing GitFolder: {e} - rolling back session')
+		session.rollback()
+		return None
+	except sqlalchemy.exc.IntegrityError as e:
+		logger.error(f'Error committing GitFolder: {e} - rolling back session')
+		session.rollback()
+		return None
+	except Exception as e:
+		logger.error(f'Error committing GitFolder: {e} - rolling back session')
+		session.rollback()
+		return None
 	return git_folder
 
 def xcheck_update_dupes(session) -> dict:
@@ -492,13 +505,14 @@ def xcheck_update_dupes(session) -> dict:
 	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
 	return result
 
-async def insert_update_starred_repo(github_repo, session):
+async def insert_update_starred_repo(github_repo, session, create_new=False):
 	"""
 	Insert a new GitRepo or update an existing one in the database
 
 	Parameters:
 		github_repo: repository object from GitHub API or owner/repo string
 		session: SQLAlchemy session
+		create_new: bool - whether to create a new repo if it doesn't exist
 	"""
 	git_folder_path = '[notcloned]'
 
@@ -525,14 +539,16 @@ async def insert_update_starred_repo(github_repo, session):
 	# Get or create GitRepo object
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 
+	# Get full repository data from GitHub API
+	repo_data = await update_repo_cache(clean_path)
+
 	if not git_repo:
-		# Get full repository data from GitHub API
-		repo_data = await update_repo_cache(clean_path)
 		# Create new repository with all available data
-		git_repo = GitRepo(remote_url, git_folder_path, repo_data)
-		git_repo.scan_count = 1
-		session.add(git_repo)
-		logger.debug(f'Created new GitRepo with full data: {git_repo} remote_url: {remote_url}')
+		if create_new:
+			git_repo = GitRepo(remote_url, git_folder_path, repo_data)
+			git_repo.scan_count = 1
+			session.add(git_repo)
+			logger.debug(f'Created new GitRepo with full data: {git_repo} remote_url: {remote_url}')
 	else:
 		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}')
 		# Update existing repository if we have repo_data
@@ -550,9 +566,9 @@ async def insert_update_starred_repo(github_repo, session):
 
 			# Add other fields you want to update
 			logger.debug(f'Updated existing GitRepo with API data: {git_repo.github_repo_name}')
-
-	# Save changes
-	session.commit()
+	if create_new:
+		# Save changes
+		session.commit()
 	return git_repo
 
 def check_update_dupes(session) -> dict:
@@ -615,40 +631,6 @@ def check_update_dupes(session) -> dict:
 	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
 	return result
 
-def xinsert_update_starred_repo(github_repo_data, session):
-	"""
-	Insert a new GitRepo or update an existing one in the database from GitHub API data
-
-	Parameters:
-		github_repo_data: Repository object from GitHub API
-		session: SQLAlchemy session
-	"""
-	remote_url = github_repo_data.get('clone_url') or github_repo_data.get('html_url')
-	if not remote_url:
-		logger.warning(f"Could not determine URL for repo: {github_repo_data.get('full_name')}")
-		return None
-
-	# Get or create GitRepo object
-	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
-
-	if not git_repo:
-		git_repo = GitRepo(remote_url, '[notcloned]', github_repo_data)
-		git_repo.scan_count = 1
-		session.add(git_repo)
-		logger.debug(f'Created new GitRepo from API data: {git_repo.github_repo_name}')
-	else:
-		# Update with latest data
-		git_repo.last_scan = datetime.now()
-		git_repo.scan_count += 1
-
-		# Update fields from API data
-		if github_repo_data.get('description'):
-			git_repo.description = github_repo_data.get('description')
-		# Update more fields as needed...
-
-	session.commit()
-	return git_repo
-
 async def populate_starred_repos(session, max_pages=90, use_cache=True):
 	"""
 	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
@@ -666,7 +648,7 @@ async def populate_starred_repos(session, max_pages=90, use_cache=True):
 
 	# Fetch starred repositories from GitHub API
 	logger.info(f"Fetching starred repositories (max_pages={max_pages}, use_cache={use_cache})")
-	starred_repos, stars_dict = await get_git_stars(max=max_pages, use_cache=use_cache)
+	starred_repos = await get_git_stars(max_pages=max_pages, use_cache=use_cache)
 
 	stats = {
 		"total_db_repos": 0,
@@ -824,7 +806,7 @@ async def populate_starred_repos(session, max_pages=90, use_cache=True):
 				else:
 					# No matching GitHub data found
 					stats["not_found"] += 1
-					logger.warning(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
+					# logger.warning(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
 
 				# Commit periodically to avoid large transactions
 				if (stats["updated"] + stats["not_found"]) % 100 == 0:
@@ -841,6 +823,128 @@ async def populate_starred_repos(session, max_pages=90, use_cache=True):
 
 	except Exception as e:
 		logger.error(f"Error fetching database repositories: {e}")
+		stats["errors"] += 1
+		return {"errors": stats["errors"], "message": str(e)}
+
+	return stats
+
+async def populate_repo_data(session, args):
+	"""
+	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
+	Uses the provided git_repos list rather than querying again.
+
+	Parameters:
+		session: SQLAlchemy session
+
+	Returns:
+		dict: Summary statistics about the operation
+	"""
+	from datetime import datetime
+	import os
+
+	# Use the existing git_repos variable
+	git_repos = session.query(GitRepo).all()
+
+	# Fetch starred repositories from GitHub API
+	starred_repos = await get_git_stars()
+
+	stats = {
+		"total_db_repos": len(git_repos),
+		"total_starred_repos": len(starred_repos['repos']),
+		"matched": 0,
+		"updated": 0,
+		"not_found": 0,
+		"errors": 0
+	}
+
+	# Create lookup dictionaries for faster matching
+	github_repos_by_url = {}
+	github_repos_by_name = {}
+
+	# Build lookup dictionaries
+	for repo_data in starred_repos['repos']:
+		# Index by various URLs
+		if repo_data.get('clone_url'):
+			github_repos_by_url[repo_data['clone_url']] = repo_data
+		if repo_data.get('html_url'):
+			github_repos_by_url[repo_data['html_url']] = repo_data
+		if repo_data.get('ssh_url'):
+			github_repos_by_url[repo_data['ssh_url']] = repo_data
+		if repo_data.get('git_url'):
+			github_repos_by_url[repo_data['git_url']] = repo_data
+
+		# Index by name
+		if repo_data.get('full_name'):
+			github_repos_by_name[repo_data['full_name'].lower()] = repo_data
+		if repo_data.get('name'):
+			github_repos_by_name[repo_data['name'].lower()] = repo_data
+
+	logger.info(f"Processing {stats['total_db_repos']} database repositories against {stats['total_starred_repos']} starred repos")
+
+	# Process each repository from the git_repos list
+	try:
+		for db_repo in git_repos:
+			try:
+				# Try to find matching GitHub data
+				repo_data = None
+				# Try matching by URL first
+				if db_repo.git_url and db_repo.git_url in github_repos_by_url:
+					repo_data = github_repos_by_url[db_repo.git_url]
+					stats["matched"] += 1
+				elif db_repo.git_url and db_repo.git_url.replace('.git', '') in github_repos_by_url:
+					repo_data = github_repos_by_url[db_repo.git_url.replace('.git', '')]
+					stats["matched"] += 1
+				elif db_repo.clone_url and db_repo.clone_url in github_repos_by_url:
+					repo_data = github_repos_by_url[db_repo.clone_url]
+					stats["matched"] += 1
+				elif db_repo.html_url and db_repo.html_url in github_repos_by_url:
+					repo_data = github_repos_by_url[db_repo.html_url]
+					stats["matched"] += 1
+				elif db_repo.ssh_url and db_repo.ssh_url in github_repos_by_url:
+					repo_data = github_repos_by_url[db_repo.ssh_url]
+					stats["matched"] += 1
+
+				# Then try by name
+				elif db_repo.full_name and db_repo.full_name.lower() in github_repos_by_name:
+					repo_data = github_repos_by_name[db_repo.full_name.lower()]
+					stats["matched"] += 1
+				elif db_repo.github_repo_name:
+					# Try owner/name format
+					full_name = f"{db_repo.github_owner}/{db_repo.github_repo_name}".lower()
+					if full_name in github_repos_by_name:
+						repo_data = github_repos_by_name[full_name]
+						stats["matched"] += 1
+					# Try just the name
+					elif db_repo.github_repo_name.lower() in github_repos_by_name:
+						repo_data = github_repos_by_name[db_repo.github_repo_name.lower()]
+						stats["matched"] += 1
+
+				# If we found matching data, update the database entry
+				if repo_data:
+					# Update the entry with all GitHub data
+					update_repo_from_data(db_repo, repo_data)
+					stats["updated"] += 1
+					if args.debug:
+						logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name} scan_count: {db_repo.scan_count} ")
+				else:
+					# No matching GitHub data found
+					stats["not_found"] += 1
+
+				# Commit periodically to avoid large transactions
+				if (stats["updated"] + stats["not_found"]) % 100 == 0:
+					session.commit()
+					logger.info(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
+
+			except Exception as e:
+				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
+				stats["errors"] += 1
+
+		# Final commit
+		session.commit()
+		logger.info(f"Finished processing repositories: {stats}")
+
+	except Exception as e:
+		logger.error(f"Error processing repositories: {e}")
 		stats["errors"] += 1
 		return {"errors": stats["errors"], "message": str(e)}
 
@@ -1063,5 +1167,153 @@ def update_repo_from_data(repo, repo_data):
 	except ValueError as e:
 		logger.warning(f"Error parsing timestamps: {e}")
 
+def ensure_datetime(dt_value):
+	"""Convert a value to datetime if it's not already, or return None if conversion fails"""
+	if dt_value is None:
+		return None
+	if isinstance(dt_value, datetime):
+		return dt_value
+
+	# Try to convert string to datetime if it's a string
+	if isinstance(dt_value, str):
+		try:
+			return datetime.fromisoformat(dt_value.replace('Z', '+00:00'))
+		except (ValueError, TypeError):
+			try:
+				return datetime.strptime(dt_value, '%Y-%m-%dT%H:%M:%SZ')
+			except (ValueError, TypeError):
+				pass
+
+	# If we can't convert it, return None
+	logger.warning(f"Could not convert to datetime: {dt_value} (type: {type(dt_value)})")
+	return None
+
+def populate_from_metadata(repo, metadata):
+	"""
+	Populate a GitRepo object with metadata from GitHub API
+
+	Parameters:
+		repo: GitRepo object to populate
+		metadata: Dictionary containing GitHub repository metadata
+
+	Returns:
+		GitRepo: The updated repo object
+	"""
+	if not metadata:
+		logger.warning("No metadata provided to populate_from_metadata")
+		return repo
+
+	# Record the update time
+	repo.last_scan = datetime.now()
+	repo.scan_count = repo.scan_count + 1 if repo.scan_count else 1
+
+	# Basic repository information
+	repo.github_repo_name = metadata.get('name')
+	repo.full_name = metadata.get('full_name')
+	repo.node_id = metadata.get('node_id')
+	repo.private = metadata.get('private')
+
+	# URLs
+	repo.html_url = metadata.get('html_url')
+	repo.git_url = metadata.get('git_url')
+	repo.ssh_url = metadata.get('ssh_url')
+	repo.clone_url = metadata.get('clone_url')
+	repo.svn_url = metadata.get('svn_url')
+	repo.git_url_api = metadata.get('url')
+	repo.homepage = metadata.get('homepage')
+
+	# Description
+	repo.description = metadata.get('description')
+
+	# Repository type information
+	repo.fork = metadata.get('fork')
+	repo.visibility = metadata.get('visibility')
+	repo.default_branch = metadata.get('default_branch')
+
+	# Statistics
+	repo.size = metadata.get('size')
+	repo.stargazers_count = metadata.get('stargazers_count')
+	repo.watchers_count = metadata.get('watchers_count')
+	repo.forks_count = metadata.get('forks_count')
+	repo.open_issues_count = metadata.get('open_issues_count')
+	repo.language = metadata.get('language')
+
+	# Repository features
+	repo.has_issues = metadata.get('has_issues')
+	repo.has_projects = metadata.get('has_projects')
+	repo.has_downloads = metadata.get('has_downloads')
+	repo.has_wiki = metadata.get('has_wiki')
+	repo.has_pages = metadata.get('has_pages')
+	repo.has_discussions = metadata.get('has_discussions')
+	repo.archived = metadata.get('archived')
+	repo.disabled = metadata.get('disabled')
+	repo.allow_forking = metadata.get('allow_forking')
+	repo.is_template = metadata.get('is_template')
+	repo.web_commit_signoff_required = metadata.get('web_commit_signoff_required')
+
+	# Topics - stored as comma-separated string
+	if metadata.get('topics'):
+		repo.topics = ','.join(metadata.get('topics'))
+
+	# License information
+	if metadata.get('license') and isinstance(metadata['license'], dict):
+		repo.license_key = metadata['license'].get('key')
+		repo.license_name = metadata['license'].get('name')
+		repo.license_url = metadata['license'].get('url')
+
+	# Owner information
+	if metadata.get('owner') and isinstance(metadata['owner'], dict):
+		repo.github_owner = metadata['owner'].get('login')
+		# Store additional owner data if needed
+
+	# Parse timestamps
+	try:
+		if metadata.get('created_at'):
+			repo.created_at = ensure_datetime(metadata.get('created_at'))
+		if metadata.get('updated_at'):
+			repo.updated_at = ensure_datetime(metadata.get('updated_at'))
+		if metadata.get('pushed_at'):
+			repo.pushed_at = ensure_datetime(metadata.get('pushed_at'))
+	except ValueError as e:
+		logger.warning(f"Error parsing timestamps: {e}")
+
+	# Store complete metadata if needed for reference
+	# repo.raw_metadata = json.dumps(metadata)  # If you want to store the raw JSON
+
+	logger.debug(f"Populated metadata for {repo.full_name} ({repo.id})")
+	return repo
+
+async def fetch_metadata(repo):
+	"""Fetch metadata from GitHub API for this repository"""
+	auth = get_auth_param()
+	if not auth:
+		logger.error('fetch_metadata: no auth provided')
+		return None
+
+	api_url = f'https://api.github.com/repos/{repo.github_owner}/{repo.github_repo_name}'
+	headers = {
+		'Accept': 'application/vnd.github+json',
+		'Authorization': f'Bearer {auth.password}',
+		'X-GitHub-Api-Version': '2022-11-28'
+	}
+	repo_metadata = None
+	try:
+		async with aiohttp.ClientSession() as session:
+			async with session.get(api_url, headers=headers) as r:
+				if r.status == 200:
+					repo_metadata = await r.json()
+					# for key, value in repo_data.items():
+					# 	setattr(self, key, value)
+					logger.debug(f'Fetched metadata for {repo.github_repo_name}')
+				else:
+					logger.error(f"Failed to fetch metadata: {r.status} {await r.text()}")
+	except Exception as e:
+		logger.error(f"Error fetching metadata: {e}")
+	finally:
+		await session.close()
+		logger.debug(f"Session closed after fetching metadata for {repo}")
+		return repo_metadata
+
 if __name__ == '__main__':
 	pass
+

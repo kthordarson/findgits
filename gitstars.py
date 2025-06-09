@@ -102,7 +102,9 @@ async def update_repo_cache(repo_name_or_url, use_existing_cache=True):
 		logger.error(f"Error fetching repository data: {e}")
 		return None
 
-async def get_git_stars(max=70, use_cache=True):
+# curl -L -H "Accept: application/vnd.github+json" -H "Authorization: Bearer <YOUR-TOKEN>" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/user/starred
+
+async def get_git_stars(max_pages=70, use_cache=True):
 	"""
 	Get all starred repos with caching support
 	"""
@@ -110,39 +112,44 @@ async def get_git_stars(max=70, use_cache=True):
 	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
 
 	jsonbuffer = []
-	stars_dict = {}
 
 	# Try to load from cache first if use_cache is enabled
 	if use_cache:
 		try:
 			async with aiofiles.open(stars_cache_file, 'r') as f:
 				cache_content = await f.read()
-				cache_data = json.loads(cache_content)
-				jsonbuffer = cache_data['repos']
-				# Rebuild the dictionary
-				for s in jsonbuffer:
-					stars_dict[s['id']] = s
+				jsonbuffer = json.loads(cache_content)
+				# jsonbuffer = cache_data['repos']
 				logger.info(f"Loaded {len(jsonbuffer)} starred repos from cache")
-				return jsonbuffer, stars_dict
-		except FileNotFoundError:
-			logger.debug(f"Cache file not found: {stars_cache_file}")
+				return jsonbuffer
+		except FileNotFoundError as e:
+			logger.error(f"{e} Cache file not found: {stars_cache_file}")
+			return []
 		except json.JSONDecodeError as e:
 			logger.error(f"Invalid JSON in cache file: {e}")
+			return None
 		except Exception as e:
 			logger.error(f"Error loading from cache: {e}")
+			return None
+	else:
+		git_starred_repos = await download_git_stars(max_pages)
+		logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={max_pages}")
+		return git_starred_repos
 
+async def download_git_stars(max_pages=70):
 	# If we get here, we need to fetch from the API
 	auth = get_auth_param()
 	if not auth:
 		logger.error('get_git_stars: no auth provided')
-		return [], {}
+		return None
 
 	apiurl = 'https://api.github.com/user/starred'
 	headers = {
 		'Accept': 'application/vnd.github+json',
 		'Authorization': f'Bearer {auth.password}',
 		'X-GitHub-Api-Version': '2022-11-28'}
-
+	jsonbuffer = []
+	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
 	async with aiohttp.ClientSession() as session:
 		try:
 			async with session.get(apiurl, headers=headers) as r:
@@ -155,9 +162,6 @@ async def get_git_stars(max=70, use_cache=True):
 				elif r.status == 200:
 					data = await r.json()
 					jsonbuffer.extend(data)
-					for s in data:
-						stars_dict[s['id']] = s
-
 					# Handle pagination
 					if 'link' in r.headers:
 						page_count = 1  # We've already got page 1
@@ -165,18 +169,14 @@ async def get_git_stars(max=70, use_cache=True):
 						nexturl = [k for k in links if 'next' in k][0].split('>')[0].replace('<','')
 						lasturl = [k for k in links if 'last' in k][0].split('>')[0].replace('<','')
 						last_page_no = int(lasturl.split('=')[1])
-
 						# Fetch remaining pages
-						while 'link' in r.headers and (max == 0 or page_count < max):
+						while 'link' in r.headers and (max_pages == 0 or page_count < max_pages):
 							logger.debug(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl}')
 							async with session.get(nexturl, headers=headers) as r:
 								if r.status == 200:
 									data = await r.json()
 									jsonbuffer.extend(data)
-									for s in data:
-										stars_dict[s['id']] = s
 									page_count += 1
-
 									if 'link' in r.headers:
 										links = r.headers['link'].split(',')
 										try:
@@ -192,7 +192,7 @@ async def get_git_stars(max=70, use_cache=True):
 									break
 		except Exception as e:
 			logger.error(f"[r] {e}")
-			return [], {}
+			return jsonbuffer
 
 	# Write to cache if we got data
 	if jsonbuffer:
@@ -200,29 +200,27 @@ async def get_git_stars(max=70, use_cache=True):
 			# Create directory if it doesn't exist
 			if not os.path.exists(CACHE_DIR):
 				os.makedirs(CACHE_DIR)
-
 			async with aiofiles.open(stars_cache_file, 'w') as f:
-				await f.write(json.dumps({'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}, indent=4))
+				jsonbuffer['timestamp'] = str(datetime.datetime.now())
+				await f.write(json.dumps(jsonbuffer, indent=4))
+				# await f.write(json.dumps({'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}, indent=4))
 				logger.info(f"Cached {len(jsonbuffer)} starred repos")
 		except Exception as e:
 			logger.error(f"Failed to write cache: {e}")
+	return jsonbuffer
 
-	return jsonbuffer, stars_dict
-
-async def get_git_lists() -> dict:
+async def get_git_list_stars(use_cache=True) -> dict:
 	"""
 	get lists of starred repos
 	"""
 	auth = get_auth_param()
 	if not auth:
-		logger.error('get_git_lists: no auth provided')
+		logger.error('get_git_list_stars: no auth provided')
 		return {}
 
 	listurl = f'https://github.com/{auth.username}?tab=stars'
 	headers = {'Authorization': f'Bearer {auth.password}','X-GitHub-Api-Version': '2022-11-28'}
-
 	soup = None
-	use_cache = True
 	cache_file = f'{CACHE_DIR}/starlist.tmp'
 
 	if use_cache:
@@ -238,7 +236,6 @@ async def get_git_lists() -> dict:
 			async with session.get(listurl, headers=headers) as r:
 				content = await r.text()
 				soup = BeautifulSoup(content, 'html.parser')
-
 				async with aiofiles.open(cache_file, 'w') as f:
 					await f.write(str(soup))
 
@@ -316,6 +313,113 @@ def get_auth_param():
 		logger.error(f'failed to get auth param {e} {type(e)}')
 		return None
 	return auth
+
+async def fetch_starred_repos(max_pages=0, use_cache=True):
+	"""
+	Fetch user's starred repositories from GitHub API
+
+	Parameters:
+		max_pages: Maximum number of pages to fetch (0 = all pages)
+		use_cache: Whether to use cached results if available
+
+	Returns:
+		list: List of starred repository data dictionaries
+	"""
+	# Define cache file path
+	cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
+	stars_cache_file = f'{cache_dir}/starred_repos.json'
+
+	# Check cache first if enabled
+	if use_cache and os.path.exists(stars_cache_file):
+		try:
+			cache_age = datetime.datetime.now() - datetime.datetime.fromtimestamp(os.path.getmtime(stars_cache_file))
+			# Use cache if it's less than 1 day old
+			if cache_age.days < 1:
+				async with aiofiles.open(stars_cache_file, 'r') as f:
+					cache_data = json.loads(await f.read())
+					logger.info(f"Using cached starred repos ({len(cache_data)} items)")
+					return cache_data
+		except Exception as e:
+			logger.warning(f"Failed to load cache: {e}")
+
+	# Get authentication
+	auth = get_auth_param()
+	if not auth:
+		logger.error("No GitHub authentication available")
+		return []
+
+	# API request setup
+	api_url = 'https://api.github.com/user/starred'
+	headers = {
+		'Accept': 'application/vnd.github+json',
+		'Authorization': f'Bearer {auth.password}',
+		'X-GitHub-Api-Version': '2022-11-28'
+	}
+
+	repos = []
+	page = 1
+	per_page = 100  # Max allowed by GitHub API
+
+	# Make API requests with pagination
+	async with aiohttp.ClientSession() as session:
+		while True:
+			if max_pages > 0 and page > max_pages:
+				break
+
+			url = f"{api_url}?page={page}&per_page={per_page}"
+			logger.debug(f"Fetching starred repos page {page}")
+
+			try:
+				async with session.get(url, headers=headers) as response:
+					if response.status == 200:
+						page_data = await response.json()
+
+						# No more data to fetch
+						if not page_data:
+							break
+
+						repos.extend(page_data)
+						logger.debug(f"Fetched {len(page_data)} repos from page {page}")
+
+						# Check if we've reached the last page
+						if len(page_data) < per_page:
+							break
+
+						page += 1
+					elif response.status == 401:
+						logger.error("Authentication failed - check your token")
+						break
+					elif response.status == 403:
+						# Check rate limit headers
+						reset_time = response.headers.get('X-RateLimit-Reset')
+						if reset_time:
+							reset_datetime = datetime.datetime.fromtimestamp(int(reset_time))
+							wait_time = (reset_datetime - datetime.datetime.now()).total_seconds()
+							logger.warning(f"Rate limit exceeded. Resets in {wait_time:.1f} seconds")
+						else:
+							logger.warning("Rate limit exceeded")
+						break
+					else:
+						logger.error(f"API request failed with status {response.status}")
+						error_data = await response.text()
+						logger.debug(f"Error response: {error_data}")
+						break
+			except Exception as e:
+				logger.error(f"Request error: {e}")
+				break
+
+	# Cache the results if we got data
+	if repos:
+		try:
+			os.makedirs(cache_dir, exist_ok=True)
+			async with aiofiles.open(stars_cache_file, 'w') as f:
+				await f.write(json.dumps(repos, indent=2))
+				logger.info(f"Cached {len(repos)} starred repositories")
+		except Exception as e:
+			logger.error(f"Failed to write cache: {e}")
+
+	logger.info(f"Fetched {len(repos)} starred repositories from GitHub API")
+	return repos
 
 if __name__ == '__main__':
 	pass
