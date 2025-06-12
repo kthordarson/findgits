@@ -1,4 +1,6 @@
 from __future__ import annotations
+import time
+import shutil
 import aiohttp
 import asyncio
 import aiofiles
@@ -392,7 +394,9 @@ async def insert_update_git_folder(git_folder_path, session):
 	git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
 
 	# Get remote URL for this repository
-	remote_url = get_remote(git_folder_path)
+	if git_folder_path.endswith('/'):
+		git_folder_path = git_folder_path[:-1]
+	remote_url = get_remote(git_folder_path).lower().strip()
 	if remote_url:
 		# Get or create GitRepo object
 		git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
@@ -796,11 +800,6 @@ async def populate_starred_repos(session, max_pages=90, use_cache=True):
 					except ValueError as e:
 						logger.warning(f"Error parsing timestamps: {e}")
 
-					# Owner information if available
-					if repo_data.get('owner') and isinstance(repo_data['owner'], dict):
-						if not db_repo.github_owner:
-							db_repo.github_owner = repo_data['owner'].get('login')
-
 					stats["updated"] += 1
 					# logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name}")
 				else:
@@ -965,7 +964,7 @@ async def fetch_missing_repo_data(session, update_all=False):
 	}
 
 	# Load cache first
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+	stars_cache_file = f'{CACHE_DIR}/missing_repo_data.json'
 	cache_data = {'repos': []}
 
 	if os.path.exists(stars_cache_file):
@@ -1259,7 +1258,7 @@ def populate_from_metadata(repo, metadata):
 	if metadata.get('license') and isinstance(metadata['license'], dict):
 		repo.license_key = metadata['license'].get('key')
 		repo.license_name = metadata['license'].get('name')
-		repo.license_url = metadata['license'].get('url')
+		repo.license_url = metadata.get('license').get('url')
 
 	# Owner information
 	if metadata.get('owner') and isinstance(metadata['owner'], dict):
@@ -1284,35 +1283,138 @@ def populate_from_metadata(repo, metadata):
 	return repo
 
 async def fetch_metadata(repo):
-	"""Fetch metadata from GitHub API for this repository"""
+	"""
+	Fetch metadata from GitHub API for this repository with caching
+
+	Parameters:
+		repo: GitRepo object to fetch metadata for
+
+	Returns:
+		dict: Repository metadata or None if fetch failed
+	"""
+	# Generate a cache key based on repository owner and name
+	repo_path = f"{repo.github_owner}/{repo.github_repo_name}" if repo.github_owner and repo.github_repo_name else None
+
+	if not repo_path:
+		logger.warning(f"Can't fetch metadata for repo without owner/name: {repo}")
+		return None
+
+	# Setup cache file
+	metadata_cache_file = f'{CACHE_DIR}/repo_metadata_cache.json'
+	cache_data = {'repos': {}, 'last_updated': {}}
+
+	# Create cache directory if it doesn't exist
+	try:
+		os.makedirs(CACHE_DIR, exist_ok=True)
+	except Exception as e:
+		logger.warning(f"Failed to create cache directory: {e}")
+
+	# Try to load existing cache
+	try:
+		if os.path.exists(metadata_cache_file):
+			with open(metadata_cache_file, 'r') as f:
+				try:
+					cache_data = json.load(f)
+					# logger.debug(f"Loaded metadata cache with {len(cache_data['repos'])} entries")
+				except json.JSONDecodeError as e:
+					logger.warning(f"Corrupted JSON cache file: {e}. Creating backup and using empty cache.")
+					# Create a backup of the corrupted file
+					try:
+						backup_file = f"{metadata_cache_file}.bak.{int(time.time())}"
+						shutil.copy2(metadata_cache_file, backup_file)
+						logger.warning(f"Created backup of corrupted cache file: {backup_file}")
+					except Exception as backup_err:
+						logger.error(f"Failed to create backup of corrupted cache: {backup_err}")
+
+					# Use empty cache data
+					cache_data = {'repos': {}, 'last_updated': {}}
+	except Exception as e:
+		logger.error(f"Failed to load metadata cache: {e} {type(e)}")
+
+	# Check if we have cached data for this repo and it's less than 1 day old
+	current_time = datetime.now().timestamp()
+	one_day_seconds = 86400  # 24 hours in seconds
+
+	cached_repo = cache_data.get('repos', {}).get(repo_path)
+	cache_time = cache_data.get('last_updated', {}).get(repo_path, 0)
+	cache_age = current_time - cache_time
+
+	# Use cached data if it exists and is less than 1 day old
+	if cached_repo and cache_age < one_day_seconds:
+		logger.info(f"Using cached metadata for {repo_path} (age: {cache_age:.1f} seconds)")
+		return cached_repo
+
 	auth = get_auth_param()
 	if not auth:
 		logger.error('fetch_metadata: no auth provided')
 		return None
 
-	api_url = f'https://api.github.com/repos/{repo.github_owner}/{repo.github_repo_name}'
+	api_url = f'https://api.github.com/repos/{repo_path}'
 	headers = {
 		'Accept': 'application/vnd.github+json',
 		'Authorization': f'Bearer {auth.password}',
 		'X-GitHub-Api-Version': '2022-11-28'
 	}
+
 	repo_metadata = None
 	try:
+		# Otherwise, we need to fetch from the API
+		logger.info(f"Fetching metadata from GitHub API for {repo_path} from {api_url}")
 		async with aiohttp.ClientSession() as session:
 			async with session.get(api_url, headers=headers) as r:
 				if r.status == 200:
 					repo_metadata = await r.json()
-					# for key, value in repo_data.items():
-					# 	setattr(self, key, value)
-					logger.debug(f'Fetched metadata for {repo.github_repo_name}')
+
+					# Update cache
+					if 'repos' not in cache_data:
+						cache_data['repos'] = {}
+					if 'last_updated' not in cache_data:
+						cache_data['last_updated'] = {}
+
+					cache_data['repos'][repo_path] = repo_metadata
+					cache_data['last_updated'][repo_path] = current_time
+
+					# Save updated cache safely
+					try:
+						# Ensure cache directory exists before writing
+						os.makedirs(os.path.dirname(metadata_cache_file), exist_ok=True)
+
+						# Write directly to the file - safer for simple operations
+						with open(metadata_cache_file, 'w') as f:
+							json.dump(cache_data, f, indent=2)
+						logger.debug(f"Updated cache with new data for {repo_path}")
+					except Exception as e:
+						logger.warning(f"Failed to write to cache file: {e} {type(e)}")
+
+					return repo_metadata
+				elif r.status == 403:
+					# Check rate limit headers
+					reset_time = r.headers.get('X-RateLimit-Reset')
+					if reset_time:
+						reset_datetime = datetime.fromtimestamp(int(reset_time))
+						wait_time = (reset_datetime - datetime.now()).total_seconds()
+						logger.warning(f"Rate limit exceeded. Resets in {wait_time:.1f} seconds")
+					else:
+						logger.warning(f"Rate limit exceeded. reset_time not in headers {r.headers}")
+
+					# Return cached data even if stale when rate limited
+					if cached_repo:
+						logger.warning(f"Using stale cache due to rate limiting for {repo_path}")
+						return cached_repo
 				else:
-					logger.error(f"Failed to fetch metadata: {r.status} {await r.text()}")
+					logger.error(f"Failed to fetch metadata from {api_url} : {r.status} {await r.text()}")
+
+					# Return cached data even if stale when API fails
+					if cached_repo:
+						logger.warning(f"Using stale cache due to API error for {repo_path}")
+						return cached_repo
 	except Exception as e:
-		logger.error(f"Error fetching metadata: {e}")
-	finally:
-		await session.close()
-		logger.debug(f"Session closed after fetching metadata for {repo}")
-		return repo_metadata
+		logger.error(f"Error fetching metadata: {e} {type(e)} from {api_url}")
+		# Return cached data even if stale when exception occurs
+		if cached_repo:
+			logger.warning(f"Using stale cache due to exception for {repo_path}")
+			return cached_repo
+	return repo_metadata
 
 if __name__ == '__main__':
 	pass

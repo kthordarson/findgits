@@ -41,7 +41,7 @@ async def update_repo_cache(repo_name_or_url, use_existing_cache=True):
 
 	# Load existing cache if available and requested
 	cache_data = {'repos': []}
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+	stars_cache_file = f'{CACHE_DIR}/update_repo_cache.json'
 
 	if use_existing_cache and os.path.exists(stars_cache_file):
 		try:
@@ -149,7 +149,7 @@ async def download_git_stars(max_pages=70):
 		'Authorization': f'Bearer {auth.password}',
 		'X-GitHub-Api-Version': '2022-11-28'}
 	jsonbuffer = []
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+	stars_cache_file = f'{CACHE_DIR}/download_git_stars.json'
 	async with aiohttp.ClientSession() as session:
 		try:
 			async with session.get(apiurl, headers=headers) as r:
@@ -221,7 +221,7 @@ async def get_git_list_stars(use_cache=True) -> dict:
 	listurl = f'https://github.com/{auth.username}?tab=stars'
 	headers = {'Authorization': f'Bearer {auth.password}','X-GitHub-Api-Version': '2022-11-28'}
 	soup = None
-	cache_file = f'{CACHE_DIR}/starlist.tmp'
+	cache_file = f'{CACHE_DIR}/starlist.cache'
 
 	if use_cache:
 		try:
@@ -272,7 +272,7 @@ async def get_info_for_list(link, headers, use_cache):
 	"""
 	get info for a list
 	"""
-	link_fn = CACHE_DIR + '/' + link.split('/')[-1] + '.tmp'
+	link_fn = CACHE_DIR + '/' + link.split('/')[-1] + '.cache'
 	soup = None
 
 	if use_cache:
