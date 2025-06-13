@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import os
 import asyncio
 from pathlib import Path
 import argparse
@@ -8,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
 from dbstuff import get_engine, db_init, drop_database
 from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos
+from gitstars import CACHE_DIR, get_git_list_stars, get_git_stars, fetch_starred_repos
 from utils import flatten
 CPU_COUNT = cpu_count()
 
@@ -106,6 +107,7 @@ async def main():
 		return
 
 	if args.gitstars:
+		starred_repos = []
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_git_list_stars(use_cache=args.use_cache)
 		starred_repos = await get_git_stars()
@@ -198,4 +200,6 @@ async def main():
 	return
 
 if __name__ == '__main__':
+	if not os.path.exists(CACHE_DIR):
+		os.makedirs(CACHE_DIR)
 	asyncio.run(main())

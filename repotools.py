@@ -622,7 +622,7 @@ async def populate_repo_data(session, args):
 
 	stats = {
 		"total_db_repos": len(git_repos),
-		"total_starred_repos": len(starred_repos['repos']),
+		"total_starred_repos": len(starred_repos),
 		"matched": 0,
 		"updated": 0,
 		"not_found": 0,
@@ -634,7 +634,7 @@ async def populate_repo_data(session, args):
 	github_repos_by_name = {}
 
 	# Build lookup dictionaries
-	for repo_data in starred_repos['repos']:
+	for repo_data in starred_repos:
 		# Index by various URLs
 		if repo_data.get('clone_url'):
 			github_repos_by_url[repo_data['clone_url']] = repo_data
@@ -745,7 +745,7 @@ async def fetch_missing_repo_data(session, update_all=False):
 			async with aiofiles.open(stars_cache_file, 'r') as f:
 				cache_content = await f.read()
 				cache_data = json.loads(cache_content)
-				logger.info(f"Loaded {len(cache_data['repos'])} repositories from cache")
+				logger.info(f"Loaded {len(cache_data)} repositories from cache")
 		except Exception as e:
 			logger.error(f"Failed to load cache: {e}")
 
@@ -1120,11 +1120,11 @@ async def fetch_metadata(repo):
 
 					# Update cache
 					if 'repos' not in cache_data:
-						cache_data['repos'] = {}
+						cache_data = {}
 					if 'last_updated' not in cache_data:
 						cache_data['last_updated'] = {}
 
-					cache_data['repos'][repo_path] = repo_metadata
+					cache_data[repo_path] = repo_metadata
 					cache_data['last_updated'][repo_path] = current_time
 
 					# Save updated cache safely

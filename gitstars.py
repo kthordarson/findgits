@@ -70,17 +70,17 @@ async def update_repo_cache(repo_name_or_url, use_existing_cache=True):
 
 					# Check if repo already exists in cache
 					existing_index = None
-					for i, repo in enumerate(cache_data['repos']):
+					for i, repo in enumerate(cache_data):
 						if repo.get('id') == repo_data.get('id'):
 							existing_index = i
 							break
 
 					# Update or add to cache
 					if existing_index is not None:
-						cache_data['repos'][existing_index] = repo_data
+						cache_data[existing_index] = repo_data
 						logger.info(f"Updated existing repository in cache: {repo_name}")
 					else:
-						cache_data['repos'].append(repo_data)
+						cache_data.append(repo_data)
 						logger.info(f"Added new repository to cache: {repo_name}")
 
 					# Write updated cache
@@ -110,8 +110,10 @@ async def get_git_stars(max_pages=70, use_cache=True):
 	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
 
 	jsonbuffer = []
-
+	do_download = False
 	# Try to load from cache first if use_cache is enabled
+	if not use_cache:
+		do_download = True
 	if use_cache:
 		try:
 			async with aiofiles.open(stars_cache_file, 'r') as f:
@@ -122,14 +124,14 @@ async def get_git_stars(max_pages=70, use_cache=True):
 				return jsonbuffer
 		except FileNotFoundError as e:
 			logger.error(f"{e} Cache file not found: {stars_cache_file}")
-			return []
+			do_download = True
 		except json.JSONDecodeError as e:
 			logger.error(f"Invalid JSON in cache file: {e}")
-			return None
+			do_download = True
 		except Exception as e:
 			logger.error(f"Error loading from cache: {e}")
-			return None
-	else:
+			do_download = True
+	if do_download or not jsonbuffer or not use_cache:
 		git_starred_repos = await download_git_stars(max_pages)
 		logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={max_pages}")
 		return git_starred_repos
@@ -238,7 +240,11 @@ async def get_git_list_stars(use_cache=True) -> dict:
 					await f.write(str(soup))
 
 	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
-	list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
+	try:
+		list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
+	except IndexError as e:
+		logger.error(f'failed to find list items in soup {e} {type(e)}')
+		return {}
 
 	lists = {}
 	for item in list_items:
