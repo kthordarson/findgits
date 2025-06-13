@@ -107,7 +107,7 @@ async def get_git_stars(max_pages=70, use_cache=True):
 	Get all starred repos with caching support
 	"""
 	# Cache file for starred repos
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+	stars_cache_file = f'{CACHE_DIR}/download_git_stars.json'
 
 	jsonbuffer = []
 	do_download = False
@@ -351,7 +351,7 @@ async def fetch_starred_repos(max_pages=0, use_cache=True):
 	"""
 	# Define cache file path
 	cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
-	stars_cache_file = f'{cache_dir}/starred_repos.json'
+	stars_cache_file = f'{cache_dir}/download_git_stars.json'
 
 	# Check cache first if enabled
 	if use_cache and os.path.exists(stars_cache_file):

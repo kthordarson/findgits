@@ -630,7 +630,7 @@ async def populate_repo_data(session, args):
 	github_repos_by_name = {}
 
 	# Build lookup dictionaries
-	for repo_data in starred_repos:
+	for repo_data in starred_repos['repos']:
 		# Index by various URLs
 		if repo_data.get('clone_url'):
 			github_repos_by_url[repo_data['clone_url']] = repo_data
