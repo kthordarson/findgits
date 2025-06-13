@@ -162,27 +162,49 @@ async def download_git_stars(max_pages=70):
 				elif r.status == 200:
 					data = await r.json()
 					jsonbuffer.extend(data)
+					# Save after first page
+					if jsonbuffer:
+						if not os.path.exists(CACHE_DIR):
+							os.makedirs(CACHE_DIR)
+						cache_obj = {'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}
+						async with aiofiles.open(stars_cache_file, 'w') as f:
+							await f.write(json.dumps(cache_obj, indent=4))
 					# Handle pagination
 					if 'link' in r.headers:
 						page_count = 1  # We've already got page 1
 						links = r.headers['link'].split(',')
-						nexturl = [k for k in links if 'next' in k][0].split('>')[0].replace('<','')
-						lasturl = [k for k in links if 'last' in k][0].split('>')[0].replace('<','')
+						nexturl = None
+						lasturl = None
+						for k in links:
+							if 'next' in k:
+								nexturl = k.split('>')[0].replace('<','')
+							if 'last' in k:
+								lasturl = k.split('>')[0].replace('<','')
+						if not nexturl or not lasturl:
+							return jsonbuffer
 						last_page_no = int(lasturl.split('=')[1])
 						# Fetch remaining pages
-						while 'link' in r.headers and (max_pages == 0 or page_count < max_pages):
+						while nexturl and (max_pages == 0 or page_count < max_pages):
 							logger.debug(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl}')
 							async with session.get(nexturl, headers=headers) as r:
 								if r.status == 200:
 									data = await r.json()
 									jsonbuffer.extend(data)
 									page_count += 1
+									# Save after each page
+									if jsonbuffer:
+										if not os.path.exists(CACHE_DIR):
+											os.makedirs(CACHE_DIR)
+										cache_obj = {'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}
+										async with aiofiles.open(stars_cache_file, 'w') as f:
+											await f.write(json.dumps(cache_obj, indent=4))
 									if 'link' in r.headers:
 										links = r.headers['link'].split(',')
-										try:
-											nexturl = [k for k in links if 'next' in k][0].split('>')[0].replace('<','')
-										except IndexError as e:
-											logger.error(f"[r] {e} {r.headers}")
+										nexturl = None
+										for k in links:
+											if 'next' in k:
+												nexturl = k.split('>')[0].replace('<','')
+										if not nexturl:
 											break
 									else:
 										logger.warning(f'[r] {r.status} link not in headers: {r.headers} nexturl: {nexturl}')
@@ -194,16 +216,14 @@ async def download_git_stars(max_pages=70):
 			logger.error(f"[r] {e}")
 			return jsonbuffer
 
-	# Write to cache if we got data
+	# Write to cache if we got data (final write)
 	if jsonbuffer:
 		try:
-			# Create directory if it doesn't exist
 			if not os.path.exists(CACHE_DIR):
 				os.makedirs(CACHE_DIR)
+			cache_obj = {'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}
 			async with aiofiles.open(stars_cache_file, 'w') as f:
-				jsonbuffer['timestamp'] = str(datetime.datetime.now())
-				await f.write(json.dumps(jsonbuffer, indent=4))
-				# await f.write(json.dumps({'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}, indent=4))
+				await f.write(json.dumps(cache_obj, indent=4))
 				logger.info(f"Cached {len(jsonbuffer)} starred repos")
 		except Exception as e:
 			logger.error(f"Failed to write cache: {e}")
