@@ -71,12 +71,9 @@ async def update_repo_cache(repo_name_or_url, use_existing_cache=True):
 					# Check if repo already exists in cache
 					existing_index = None
 					for i, repo in enumerate(cache_data):
-						try:
-							if repo.get('id') == repo_data.get('id'):
-								existing_index = i
-								break
-						except Exception as e:
-							logger.error(f"Error checking cache entry: {e} {type(e)} repo={repo}")
+						if repo.get('id') == repo_data.get('id'):
+							existing_index = i
+							break
 
 					# Update or add to cache
 					if existing_index is not None:
@@ -104,13 +101,14 @@ async def get_git_stars(args):
 	Get all starred repos with caching support
 	"""
 	# Cache file for starred repos
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+	stars_cache_file = f'{CACHE_DIR}/download_git_stars.json'
 
 	jsonbuffer = []
-	git_starred_repos = []
 	do_download = False
 	# Try to load from cache first if use_cache is enabled
-	if args.use_cache:
+	if not use_cache:
+		do_download = True
+	if use_cache:
 		try:
 			async with aiofiles.open(stars_cache_file, 'r') as f:
 				cache_content = await f.read()
@@ -121,23 +119,16 @@ async def get_git_stars(args):
 		except FileNotFoundError as e:
 			logger.error(f"{e} Cache file not found: {stars_cache_file}")
 			do_download = True
-			# return []
 		except json.JSONDecodeError as e:
 			logger.error(f"Invalid JSON in cache file: {e}")
 			do_download = True
-			# return None
 		except Exception as e:
 			logger.error(f"Error loading from cache: {e}")
 			do_download = True
-			# return None
-	if do_download or not args.use_cache:
-		logger.info(f"Starting download_git_stars with max_pages={args.max_pages}")
-		try:
-			git_starred_repos = await download_git_stars(args)
-		except Exception as e:
-			logger.error(f"Error downloading starred repos: {e} {type(e)}")
-		logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={args.max_pages}")
-	return git_starred_repos
+	if do_download or not jsonbuffer or not use_cache:
+		git_starred_repos = await download_git_stars(max_pages)
+		logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={max_pages}")
+		return git_starred_repos
 
 async def download_git_stars(args):
 	# If we get here, we need to fetch from the API
@@ -165,65 +156,72 @@ async def download_git_stars(args):
 				elif r.status == 200:
 					data = await r.json()
 					jsonbuffer.extend(data)
+					# Save after first page
+					if jsonbuffer:
+						if not os.path.exists(CACHE_DIR):
+							os.makedirs(CACHE_DIR)
+						cache_obj = {'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}
+						async with aiofiles.open(stars_cache_file, 'w') as f:
+							await f.write(json.dumps(cache_obj, indent=4))
 					# Handle pagination
 					if 'link' in r.headers:
 						page_count = 1  # We've already got page 1
 						links = r.headers['link'].split(',')
-						try:
-							nexturl = [k for k in links if 'next' in k][0].split('>')[0].replace('<','')
-						except Exception as e:
-							logger.error(f"[r] {e} {r.headers}")
-							nexturl = None
-
-						try:
-							lasturl = [k for k in links if 'last' in k][0].split('>')[0].replace('<','')
-						except Exception as e:
-							logger.error(f"[r] {e} {r.headers}")
-							lasturl = None
-						try:
-							last_page_no = int(lasturl.split('=')[1])
-						except Exception as e:
-							logger.error(f"[r] {e} {r.headers}")
-							last_page_no = 0
+						nexturl = None
+						lasturl = None
+						for k in links:
+							if 'next' in k:
+								nexturl = k.split('>')[0].replace('<','')
+							if 'last' in k:
+								lasturl = k.split('>')[0].replace('<','')
+						if not nexturl or not lasturl:
+							return jsonbuffer
+						last_page_no = int(lasturl.split('=')[1])
 						# Fetch remaining pages
-						try:
-							while 'link' in r.headers and (args.max_pages == 0 or page_count < args.max_pages):
-								logger.debug(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl}')
-								async with session.get(nexturl, headers=headers) as r:
-									if r.status == 200:
-										data = await r.json()
-										jsonbuffer.extend(data)
-										page_count += 1
-										if 'link' in r.headers:
-											links = r.headers['link'].split(',')
-											try:
-												nexturl = [k for k in links if 'next' in k][0].split('>')[0].replace('<','')
-											except Exception as e:
-												logger.error(f"[r] {e} {type(e)} {r.headers} ")
-												break
-										else:
-											logger.warning(f'[r] {r.status} link not in headers: {r.headers} nexturl: {nexturl}')
+						while nexturl and (max_pages == 0 or page_count < max_pages):
+							logger.debug(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl}')
+							async with session.get(nexturl, headers=headers) as r:
+								if r.status == 200:
+									data = await r.json()
+									jsonbuffer.extend(data)
+									page_count += 1
+									# Save after each page
+									if jsonbuffer:
+										if not os.path.exists(CACHE_DIR):
+											os.makedirs(CACHE_DIR)
+										cache_obj = {'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}
+										async with aiofiles.open(stars_cache_file, 'w') as f:
+											await f.write(json.dumps(cache_obj, indent=4))
+									if 'link' in r.headers:
+										links = r.headers['link'].split(',')
+										nexturl = None
+										for k in links:
+											if 'next' in k:
+												nexturl = k.split('>')[0].replace('<','')
+										if not nexturl:
 											break
 									else:
-										logger.warning(f'[r] {r.status} {nexturl}')
+										logger.warning(f'[r] {r.status} link not in headers: {r.headers} nexturl: {nexturl}')
 										break
-						except Exception as e:
-							logger.error(f"[r] {e} {type(e)} {nexturl} {apiurl} ")
+								else:
+									logger.warning(f'[r] {r.status} {nexturl}')
+									break
 		except Exception as e:
-			logger.error(f"[r] {e} {type(e)} {apiurl}")
-		await write_jsonbuffer_to_cache(jsonbuffer, stars_cache_file, args)
-		return jsonbuffer
+			logger.error(f"[r] {e}")
+			return jsonbuffer
 
-async def write_jsonbuffer_to_cache(jsonbuffer, stars_cache_file, args):
-	if args.debug:
-		logger.debug(f"Writing {len(jsonbuffer)} starred repos to cache file: {stars_cache_file}")
-	# Write to cache if we got data
-	try:
-		async with aiofiles.open(stars_cache_file, 'w') as f:
-			await f.write(json.dumps(jsonbuffer, indent=4))
-			logger.info(f"Cached {len(jsonbuffer)} starred repos")
-	except Exception as e:
-		logger.error(f"Failed to write cache: {e} {type(e)}")
+	# Write to cache if we got data (final write)
+	if jsonbuffer:
+		try:
+			if not os.path.exists(CACHE_DIR):
+				os.makedirs(CACHE_DIR)
+			cache_obj = {'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}
+			async with aiofiles.open(stars_cache_file, 'w') as f:
+				await f.write(json.dumps(cache_obj, indent=4))
+				logger.info(f"Cached {len(jsonbuffer)} starred repos")
+		except Exception as e:
+			logger.error(f"Failed to write cache: {e}")
+	return jsonbuffer
 
 async def get_git_list_stars(use_cache=True) -> dict:
 	"""
@@ -256,7 +254,11 @@ async def get_git_list_stars(use_cache=True) -> dict:
 					await f.write(str(soup))
 
 	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
-	list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
+	try:
+		list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
+	except IndexError as e:
+		logger.error(f'failed to find list items in soup {e} {type(e)}')
+		return {}
 
 	lists = {}
 	for item in list_items:
@@ -342,9 +344,8 @@ async def fetch_starred_repos(args):
 		list: List of starred repository data dictionaries
 	"""
 	# Define cache file path
-	# cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
-	# stars_cache_file = f'{cache_dir}/starred_repos.json'
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
+	cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'gitstars')
+	stars_cache_file = f'{cache_dir}/download_git_stars.json'
 
 	# Check cache first if enabled
 	if args.use_cache and os.path.exists(stars_cache_file):

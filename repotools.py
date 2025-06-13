@@ -252,7 +252,7 @@ def check_update_dupes(session) -> dict:
 
 	# Process each duplicate group
 	for dupe in dupes:
-		dupe_id = dupe.id
+		# dupe_id = dupe.id
 		dupe_url = dupe.git_url
 		dupe_count = dupe.count
 		dupe_urls.add(dupe_url)
@@ -292,8 +292,6 @@ async def populate_starred_repos(session, args):
 	Returns:
 		dict: Summary statistics about the operation
 	"""
-	from datetime import datetime
-	import os
 
 	# Fetch starred repositories from GitHub API
 	logger.info(f"Fetching starred repositories (max_pages={args.max_pages}, use_cache={args.use_cache})")
@@ -483,8 +481,6 @@ async def populate_repo_data(session, args):
 	Returns:
 		dict: Summary statistics about the operation
 	"""
-	from datetime import datetime
-	import os
 
 	# Use the existing git_repos variable
 	git_repos = session.query(GitRepo).all()
@@ -991,6 +987,8 @@ async def fetch_metadata(repo):
 					repo_metadata = await r.json()
 
 					# Update cache
+					if 'repos' not in cache_data:
+						cache_data = {}
 					if 'last_updated' not in cache_data:
 						cache_data['last_updated'] = {}
 
