@@ -1,17 +1,58 @@
-import glob
 import os
-import random
 from pathlib import Path
-
 from loguru import logger
+from subprocess import Popen, PIPE
+from datetime import datetime
 
+def flatten(nested_list):
+	flattened = []
+	for item in nested_list:
+		if isinstance(item, list):
+			flattened.extend(flatten(item))
+		else:
+			flattened.append(item)
+	return flattened
 
-# from sqlalchemy.ext.declarative import declarative_base
+def valid_git_folder(k: str) -> bool:
+	k = Path(k)
+	if Path(k).is_dir():
+		if os.path.exists(os.path.join(k, 'config')):
+			return True
+		else:
+			logger.warning(f'{k} not valid missing config')
+	else:
+		logger.warning(f'{k} {type(k)} not valid ')
+	return False
 
+def format_bytes(num_bytes):
+	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
+	Args: num_bytes (int): The byte value to format.
+	Returns: str: A string with a formatted byte value and unit prefix.
+	"""
+	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+		if abs(num_bytes) < 1024.0:
+			return f"{num_bytes:.2f} {unit}"
+		num_bytes /= 1024.0
+	return f"{num_bytes:.2f} TB"
 
-def generate_id() -> str:
-	return ''.join(random.choices('0123456789abcdef', k=16))
-
+def get_remote(git_path: str) -> str:
+	"""
+	Get the remote url of a git folder
+	Parameters: git_path: str - path to git folder
+	Returns: str - remote url
+	"""
+	os.chdir(git_path)
+	cmdstr = ['git', 'remote', '-v']
+	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+	remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+	remote_url = '[no remote]'
+	try:
+		remote_url = remote_out[0].split()[1]
+	except IndexError as e:
+		pass  # logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out}')
+	except Exception as e:
+		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out}')
+	return remote_url
 
 def get_directory_size(directory: str) -> int:
 	# directory = Path(directory)
@@ -37,8 +78,8 @@ def get_directory_size(directory: str) -> int:
 	# except (PermissionError, FileNotFoundError) as e:
 	# 	logger.warning(f'[err] {e} {type(e)} dir:{directory} ')
 	# 	return 0
+	# logger.debug(f'[*] get_directory_size {directory} {total} bytes')
 	return total
-
 
 def get_subfilecount(directory: str) -> int:
 	directory = Path(directory)
@@ -59,50 +100,26 @@ def get_subdircount(directory: str) -> int:
 		logger.warning(f'[err] {e} d:{directory}')
 	return dc
 
+def ensure_datetime(dt_value):
+	"""Convert a value to datetime if it's not already, or return None if conversion fails"""
+	if dt_value is None:
+		return None
+	if isinstance(dt_value, datetime):
+		return dt_value
 
-def valid_git_folder(k: str) -> bool:
-	k = Path(k)
-	if Path(k).is_dir():
-		if os.path.exists(os.path.join(k, 'config')):
-			return True
-		else:
-			logger.warning(f'{k} not valid missing config')
-	else:
-		logger.warning(f'{k} {type(k)} not valid ')
-	return False
+	# Try to convert string to datetime if it's a string
+	if isinstance(dt_value, str):
+		try:
+			return datetime.fromisoformat(dt_value.replace('Z', '+00:00'))
+		except (ValueError, TypeError):
+			try:
+				return datetime.strptime(dt_value, '%Y-%m-%dT%H:%M:%SZ')
+			except (ValueError, TypeError):
+				pass
 
-
-def xxget_folder_list(startpath: str) -> list:
-	return [Path(path).parent for path, subdirs, files in os.walk(startpath) if path.endswith('.git') and os.path.exists(path + '/config')]
-
-
-# return [Path(path).parent for path,subdirs,files in os.walk(startpath) if path.endswith('.git') and valid_git_folder(path)]
-
-def zget_folder_list(startpath):
-	# [path for path,subdirs,files in os.walk(startpath) if path.endswith('.git')]
-	for k in glob.glob(str(Path(startpath)) + '/**/.git/', recursive=True, include_hidden=True):
-		if valid_git_folder(k):
-			yield Path(k).parent
-
-
-def xget_folder_list(startpath):
-	for k in glob.glob(str(Path(startpath)) + '/**/.git', recursive=True, include_hidden=True):
-		if Path(k).is_dir() and Path(k).name == '.git':
-			if os.path.exists(os.path.join(Path(k), 'config')):
-				yield Path(k).parent
-
-
-def format_bytes(num_bytes):
-	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
-	Args: num_bytes (int): The byte value to format.
-	Returns: str: A string with a formatted byte value and unit prefix.
-    """
-	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-		if abs(num_bytes) < 1024.0:
-			return f"{num_bytes:.2f} {unit}"
-		num_bytes /= 1024.0
-	return f"{num_bytes:.2f} TB"
-
+	# If we can't convert it, return None
+	logger.warning(f"Could not convert to datetime: {dt_value} (type: {type(dt_value)})")
+	return None
 
 if __name__ == '__main__':
 	pass

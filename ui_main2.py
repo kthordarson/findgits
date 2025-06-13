@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
-## Form generated from reading UI file 'mainBoLVnR.ui'
+## Form generated from reading UI file 'mainMmTBIu.ui'
 ##
 ## Created by: Qt User Interface Compiler version 6.5.2
 ##
@@ -16,9 +16,9 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QPushButton,
-    QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QHBoxLayout, QHeaderView,
+    QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
+    QTreeWidget, QTreeWidgetItem, QWidget)
 
 class Ui_FindGitsApp(object):
     def setupUi(self, FindGitsApp):
@@ -84,29 +84,10 @@ class Ui_FindGitsApp(object):
         self.gitlog_button.setGeometry(QRect(960, 420, 94, 27))
         self.infowidget = QWidget(FindGitsApp)
         self.infowidget.setObjectName(u"infowidget")
-        self.infowidget.setGeometry(QRect(620, 20, 411, 381))
-        self.formLayoutWidget = QWidget(self.infowidget)
-        self.formLayoutWidget.setObjectName(u"formLayoutWidget")
-        self.formLayoutWidget.setGeometry(QRect(10, 10, 151, 51))
-        self.formLayout = QFormLayout(self.formLayoutWidget)
-        self.formLayout.setObjectName(u"formLayout")
-        self.formLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.formLayout.setLabelAlignment(Qt.AlignCenter)
-        self.formLayout.setFormAlignment(Qt.AlignJustify|Qt.AlignTop)
-        self.formLayout.setContentsMargins(0, 3, 3, 3)
-        self.idLabel = QLabel(self.formLayoutWidget)
-        self.idLabel.setObjectName(u"idLabel")
-
-        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.idLabel)
-
-        self.idLineEdit = QLineEdit(self.formLayoutWidget)
-        self.idLineEdit.setObjectName(u"idLineEdit")
-
-        self.formLayout.setWidget(0, QFormLayout.FieldRole, self.idLineEdit)
-
-        self.dupe_paths_widget = QTreeWidget(self.infowidget)
-        self.dupe_paths_widget.setObjectName(u"dupe_paths_widget")
-        self.dupe_paths_widget.setGeometry(QRect(10, 251, 391, 121))
+        self.infowidget.setGeometry(QRect(629, 29, 401, 371))
+        self.infotablewidget = QTableWidget(self.infowidget)
+        self.infotablewidget.setObjectName(u"infotablewidget")
+        self.infotablewidget.setGeometry(QRect(15, 11, 371, 351))
 
         self.retranslateUi(FindGitsApp)
 
@@ -127,6 +108,5 @@ class Ui_FindGitsApp(object):
         self.gitshow_button.setText(QCoreApplication.translate("FindGitsApp", u"Git show", None))
         self.gitstatus_button.setText(QCoreApplication.translate("FindGitsApp", u"Git status", None))
         self.gitlog_button.setText(QCoreApplication.translate("FindGitsApp", u"Git log", None))
-        self.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
     # retranslateUi
 

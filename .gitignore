@@ -1,3 +1,4 @@
+*.gz
 *.json
 *.png
 *.out
@@ -15,5 +16,5 @@ runtest.sh
 gitrepo.db-journal
 *.tmp
 *.txt
-*.db
+*.db*
 .idea/**
