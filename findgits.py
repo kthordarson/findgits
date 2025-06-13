@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
 from dbstuff import get_engine, db_init, drop_database
-from dbstuff import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
+from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos
 from utils import flatten
 CPU_COUNT = cpu_count()
@@ -28,10 +28,16 @@ async def process_git_folder(git_path, session):
 	"""Process a single git folder asynchronously"""
 	logger.info(f'Processing {git_path}')
 	try:
-		await insert_update_git_folder(git_path, session)
+		# Always ensure the session is in a valid state
+		if not session.is_active:
+			session.rollback()
+		result = await insert_update_git_folder(git_path, session)
+		return result
 	except Exception as e:
 		logger.error(f'Error processing {git_path}: {e} {type(e)}')
-		session.rollback()
+		if session.is_active:
+			session.rollback()
+		return None
 
 async def process_starred_repo(repo, session):
 	"""Process a single starred repo asynchronously"""

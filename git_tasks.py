@@ -3,11 +3,8 @@ import os
 from datetime import datetime
 from multiprocessing import cpu_count
 from loguru import logger
-from subprocess import Popen, PIPE
 from dbstuff import (GitRepo)
-import aiohttp
 import asyncio
-import aiofiles
 
 CPU_COUNT = cpu_count()
 

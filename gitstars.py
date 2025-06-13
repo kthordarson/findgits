@@ -1,10 +1,8 @@
 #!/usr/bin/python3
 import aiohttp
-import asyncio
 import aiofiles
 import os
 from loguru import logger
-import requests
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
