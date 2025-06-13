@@ -9,9 +9,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 from loguru import logger
-from dbstuff import GitRepo, GitFolder, get_dupes
+from dbstuff import GitRepo, GitFolder, get_dupes, get_cache_entry, set_cache_entry
 from utils import valid_git_folder, get_remote, ensure_datetime
-from gitstars import get_git_stars, update_repo_cache, get_auth_param, CACHE_DIR
+from gitstars import get_git_stars, update_repo_cache, get_auth_param
 
 async def insert_update_git_folder(git_folder_path, session, args):
 	"""
@@ -56,6 +56,25 @@ async def insert_update_git_folder(git_folder_path, session, args):
 					owner = parts[0]
 					repo_name = parts[1]
 
+		# Construct the repo path for API lookup
+		repo_path = None
+		repo_metadata = None
+		if owner and repo_name:
+			repo_path = f"{owner}/{repo_name}"
+			logger.info(f'Fetching metadata for {repo_path}')
+			try:
+				# Create a simple object with the required attributes
+				class RepoInfo:
+					def __init__(self, owner, name):
+						self.github_owner = owner
+						self.github_repo_name = name
+
+				repo_info = RepoInfo(owner, repo_name)
+				repo_metadata = await fetch_metadata(repo_info, session)
+			except Exception as e:
+				logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
+				repo_metadata = None
+
 		# TRANSACTION START
 		try:
 			# First check if the repo already exists by URL
@@ -80,6 +99,17 @@ async def insert_update_git_folder(git_folder_path, session, args):
 						if repo_name.endswith('.git'):
 							repo_name = repo_name[:-4]
 
+			# Try to fetch metadata one more time if needed
+			if not repo_metadata and owner and repo_name:
+				repo_path = f"{owner}/{repo_name}"
+				logger.info(f'Fetching metadata for {repo_path}')
+				try:
+					# Important: Pass the session parameter
+					repo_metadata = await update_repo_cache(repo_path, session)
+				except Exception as e:
+					logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
+					repo_metadata = None
+
 			# Try lookup by name if URL lookup failed
 			if not git_repo:
 				git_repo = session.query(GitRepo).filter(GitRepo.github_repo_name == repo_name).first()
@@ -87,20 +117,11 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			# Check if folder already exists in database
 			git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
 
-			# Fetch repository metadata if we have owner and repo name
-			repo_metadata = None
-			if owner and repo_name:
-				try:
-					repo_path = f"{owner}/{repo_name}"
-					logger.info(f"Fetching metadata for {repo_path}")
-					repo_metadata = await update_repo_cache(repo_path, use_existing_cache=True)
-				except Exception as e:
-					logger.warning(f"Failed to fetch metadata for {owner}/{repo_name}: {e}")
-
 			# If no repo exists, create a new one with safeguards
 			if not git_repo:
 				# Double check once more with a broader query
 				git_repo = session.query(GitRepo).filter((GitRepo.git_url.ilike(f"%{repo_name}%")) | (GitRepo.github_repo_name == repo_name)).first()
+
 				if not git_repo:
 					logger.info(f'Creating new GitRepo for {remote_url}')
 					git_repo = GitRepo(remote_url, git_folder_path)
@@ -154,6 +175,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			session.rollback()
 		return None
 
+
 async def insert_update_starred_repo(github_repo, session, create_new=False):
 	"""
 	Insert a new GitRepo or update an existing one in the database
@@ -176,45 +198,28 @@ async def insert_update_starred_repo(github_repo, session, create_new=False):
 
 		# It's a string, construct proper GitHub URL
 		if 'github.com' in clean_path:
-			# It's already a URL
-			if clean_path.startswith('http'):
-				remote_url = clean_path
-			else:
-				remote_url = f'https://{clean_path}'
+			remote_url = f"https://{clean_path}"
 		else:
-			# It's just an owner/repo path
-			remote_url = f'https://github.com/{clean_path}'
+			remote_url = f"https://github.com/{clean_path}"
 
 	# Get or create GitRepo object
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 
 	# Get full repository data from GitHub API
-	repo_data = await update_repo_cache(clean_path)
+	repo_data = await update_repo_cache(clean_path, session)  # Pass session to update_repo_cache
 
 	if not git_repo:
 		# Create new repository with all available data
 		if create_new:
 			git_repo = GitRepo(remote_url, git_folder_path, repo_data)
-			git_repo.scan_count = 1
 			session.add(git_repo)
-			logger.debug(f'Created new GitRepo with full data: {git_repo} remote_url: {remote_url}')
+			logger.info(f'Created new GitRepo: {git_repo}')
 	else:
 		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}')
 		# Update existing repository if we have repo_data
 		if repo_data:
-			git_repo.last_scan = datetime.now()
-			git_repo.scan_count += 1
+			update_repo_from_data(git_repo, repo_data)
 
-			# Update with API data
-			if repo_data.get('description'):
-				git_repo.description = repo_data.get('description')
-			if repo_data.get('stargazers_count'):
-				git_repo.stargazers_count = repo_data.get('stargazers_count')
-			if repo_data.get('language'):
-				git_repo.language = repo_data.get('language')
-
-			# Add other fields you want to update
-			logger.debug(f'Updated existing GitRepo with API data: {git_repo.github_repo_name}')
 	if create_new:
 		# Save changes
 		session.commit()
@@ -605,7 +610,7 @@ async def fetch_missing_repo_data(session, update_all=False):
 	}
 
 	# Load cache first
-	stars_cache_file = f'{CACHE_DIR}/missing_repo_data.json'
+	stars_cache_file = 'missing_repo_data.json'
 	cache_data = {'repos': []}
 
 	if os.path.exists(stars_cache_file):
@@ -667,9 +672,6 @@ async def fetch_missing_repo_data(session, update_all=False):
 
 	# Final cache update
 	try:
-		if not os.path.exists(CACHE_DIR):
-			os.makedirs(CACHE_DIR)
-
 		async with aiofiles.open(stars_cache_file, 'w') as f:
 			cache_data['timestamp'] = str(datetime.now())
 			await f.write(json.dumps(cache_data, indent=4))
@@ -903,136 +905,55 @@ def populate_from_metadata(repo, metadata):
 	logger.debug(f"Populated metadata for {repo.full_name} ({repo.id})")
 	return repo
 
-async def fetch_metadata(repo):
+async def fetch_metadata(repo, session):
 	"""
-	Fetch metadata from GitHub API for this repository with caching
+	Fetch metadata from GitHub API for this repository with database caching
 
 	Parameters:
 		repo: GitRepo object to fetch metadata for
+		session: SQLAlchemy session
 
 	Returns:
 		dict: Repository metadata or None if fetch failed
 	"""
 	# Generate a cache key based on repository owner and name
-	repo_path = f"{repo.github_owner}/{repo.github_repo_name}" if repo.github_owner and repo.github_repo_name else None
+	# Handle both dictionary and object access
+	owner = repo.github_owner if hasattr(repo, 'github_owner') else repo.get('github_owner')
+	repo_name = repo.github_repo_name if hasattr(repo, 'github_repo_name') else repo.get('github_repo_name')
+	repo_path = f"{owner}/{repo_name}" if owner and repo_name else None
 
 	if not repo_path:
 		logger.warning(f"Can't fetch metadata for repo without owner/name: {repo}")
 		return None
 
-	# Setup cache file
-	metadata_cache_file = f'{CACHE_DIR}/repo_metadata_cache.json'
-	cache_data = {}
-
-	# Create cache directory if it doesn't exist
-	try:
-		os.makedirs(CACHE_DIR, exist_ok=True)
-	except Exception as e:
-		logger.warning(f"Failed to create cache directory: {e}")
+	cache_key = f"metadata:{repo_path}"
+	cache_type = "repo_metadata"
 
 	# Try to load existing cache
-	try:
-		if os.path.exists(metadata_cache_file):
-			with open(metadata_cache_file, 'r') as f:
-				try:
-					cache_data = json.load(f)
-					# logger.debug(f"Loaded metadata cache with {len(cache_data)} entries")
-				except json.JSONDecodeError as e:
-					logger.warning(f"Corrupted JSON cache file: {e}. Creating backup and using empty cache.")
-					# Create a backup of the corrupted file
-					try:
-						backup_file = f"{metadata_cache_file}.bak.{int(time.time())}"
-						shutil.copy2(metadata_cache_file, backup_file)
-						logger.warning(f"Created backup of corrupted cache file: {backup_file}")
-					except Exception as backup_err:
-						logger.error(f"Failed to create backup of corrupted cache: {backup_err}")
-
-					# Use empty cache data
-					cache_data = {}
-	except Exception as e:
-		logger.error(f"Failed to load metadata cache: {e} {type(e)}")
+	cached_repo = None
+	cache_entry = get_cache_entry(session, cache_key, cache_type)
 
 	# Check if we have cached data for this repo and it's less than 1 day old
 	current_time = datetime.now().timestamp()
 	one_day_seconds = 86400  # 24 hours in seconds
 
-	cached_repo = cache_data.get(repo_path)
-	cache_time = cache_data.get('last_updated', {}).get(repo_path, 0)
-	cache_age = current_time - cache_time
+	if cache_entry:
+		try:
+			cached_repo = json.loads(cache_entry.data)
+			cache_time = cache_entry.timestamp.timestamp()
+			cache_age = current_time - cache_time
 
-	# Use cached data if it exists and is less than 1 day old
-	if cached_repo and cache_age < one_day_seconds:
-		logger.info(f"Using cached metadata for {repo_path} (age: {cache_age:.1f} seconds)")
-		return cached_repo
+			# Use cached data if it exists and is less than 1 day old
+			if cached_repo and cache_age < one_day_seconds:
+				logger.info(f"Using cached metadata for {repo_path} (age: {cache_age:.1f} seconds)")
+				return cached_repo
+		except Exception as e:
+			logger.error(f"Error parsing cached metadata: {e}")
 
-	auth = get_auth_param()
-	if not auth:
-		logger.error('fetch_metadata: no auth provided')
-		return None
-
-	api_url = f'https://api.github.com/repos/{repo_path}'
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
-
-	repo_metadata = None
+	# Use update_repo_cache to get metadata
 	try:
-		# Otherwise, we need to fetch from the API
-		logger.info(f"Fetching metadata from GitHub API for {repo_path} from {api_url}")
-		async with aiohttp.ClientSession() as session:
-			async with session.get(api_url, headers=headers) as r:
-				if r.status == 200:
-					repo_metadata = await r.json()
-
-					# Update cache
-					if 'repos' not in cache_data:
-						cache_data = {}
-					if 'last_updated' not in cache_data:
-						cache_data['last_updated'] = {}
-
-					cache_data[repo_path] = repo_metadata
-					cache_data['last_updated'][repo_path] = current_time
-
-					# Save updated cache safely
-					try:
-						# Ensure cache directory exists before writing
-						os.makedirs(os.path.dirname(metadata_cache_file), exist_ok=True)
-
-						# Write directly to the file - safer for simple operations
-						with open(metadata_cache_file, 'w') as f:
-							json.dump(cache_data, f, indent=2)
-						logger.debug(f"Updated cache with new data for {repo_path}")
-					except Exception as e:
-						logger.warning(f"Failed to write to cache file: {e} {type(e)}")
-
-					return repo_metadata
-				elif r.status == 403:
-					# Check rate limit headers
-					reset_time = r.headers.get('X-RateLimit-Reset')
-					if reset_time:
-						reset_datetime = datetime.fromtimestamp(int(reset_time))
-						wait_time = (reset_datetime - datetime.now()).total_seconds()
-						logger.warning(f"Rate limit exceeded. Resets in {wait_time:.1f} seconds")
-					else:
-						logger.warning(f"Rate limit exceeded. reset_time not in headers {r.headers}")
-
-					# Return cached data even if stale when rate limited
-					if cached_repo:
-						logger.warning(f"Using stale cache due to rate limiting for {repo_path}")
-						return cached_repo
-				else:
-					logger.error(f"Failed to fetch metadata from {api_url} : {r.status} {await r.text()}")
-
-					# Return cached data even if stale when API fails
-					if cached_repo:
-						logger.warning(f"Using stale cache due to API error for {repo_path}")
-						return cached_repo
+		repo_metadata = await update_repo_cache(repo_path, session, use_existing_cache=True)
+		return repo_metadata
 	except Exception as e:
-		logger.error(f"Error fetching metadata: {e} {type(e)} from {api_url}")
-		# Return cached data even if stale when exception occurs
-		if cached_repo:
-			logger.warning(f"Using stale cache due to exception for {repo_path}")
-			return cached_repo
-	return repo_metadata
+		logger.error(f"Error fetching repository metadata: {e}")
+		return None

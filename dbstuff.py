@@ -269,6 +269,25 @@ class GitRepo(Base):
 	def __repr__(self):
 		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
 
+class CacheEntry(Base):
+	""" A table for storing cache data from GitHub API responses """
+	__tablename__ = 'cache_entries'
+
+	id: Mapped[int] = mapped_column(primary_key=True)
+	cache_key = Column('cache_key', String(255), unique=True)  # Unique identifier for this cache entry
+	cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
+	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)
+	timestamp = Column('timestamp', DateTime)  # When this entry was created/updated
+
+	def __init__(self, cache_key, cache_type, data):
+		self.cache_key = cache_key
+		self.cache_type = cache_type
+		self.data = data
+		self.timestamp = datetime.now()
+
+	def __repr__(self):
+		return f'<CacheEntry {self.id} key={self.cache_key} type={self.cache_type}>'
+
 def db_init(engine: sqlalchemy.Engine) -> None:
 	Base.metadata.create_all(bind=engine)
 
@@ -319,6 +338,24 @@ def get_dupes(session: Session) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
+def get_cache_entry(session, cache_key, cache_type):
+	"""Get a cache entry from the database"""
+	return session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
+
+def set_cache_entry(session, cache_key, cache_type, data):
+	"""Set or update a cache entry in the database"""
+	entry = get_cache_entry(session, cache_key, cache_type)
+	if entry:
+		# Update existing entry
+		entry.data = data
+		entry.timestamp = datetime.now()
+	else:
+		# Create new entry
+		entry = CacheEntry(cache_key, cache_type, data)
+		session.add(entry)
+
+	# The caller is responsible for committing the session
+	return entry
 
 if __name__ == '__main__':
 	pass

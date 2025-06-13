@@ -1,17 +1,14 @@
 #!/usr/bin/python3
-import os
 import asyncio
 from pathlib import Path
 import argparse
-from multiprocessing import cpu_count
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
 from dbstuff import get_engine, db_init, drop_database
 from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from gitstars import CACHE_DIR, get_git_list_stars, get_git_stars, fetch_starred_repos
+from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos
 from utils import flatten
-CPU_COUNT = cpu_count()
 
 
 def dbcheck(session) -> dict:
@@ -67,8 +64,6 @@ def get_args():
 	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
-	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
-	myparse.add_argument('--no_cache', help='no_cache', action='store_true', default=False, dest='no_cache')
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
@@ -88,10 +83,6 @@ async def main():
 		session.close()
 		return
 
-	if args.no_cache:
-		logger.info('No cache will be used')
-		args.use_cache = False
-
 	if args.dbcheck:
 		res = dbcheck(session)
 		print(f'dbcheck res: {res}')
@@ -109,8 +100,8 @@ async def main():
 	if args.gitstars:
 		starred_repos = []
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(use_cache=args.use_cache)
-		starred_repos = await get_git_stars(args)
+		git_lists = await get_git_list_stars(session)  # Updated call
+		starred_repos = await get_git_stars(args, session)  # Updated call
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
@@ -119,7 +110,7 @@ async def main():
 		return
 
 	if args.fetch_stars:
-		fetched_repos = await fetch_starred_repos(args)
+		fetched_repos = await fetch_starred_repos(args, session)  # Updated call
 		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API')
 		return
 
@@ -147,8 +138,6 @@ async def main():
 	if args.populate:
 		stats = await populate_repo_data(session, args)
 		print(f"GitHub Stars Processing Stats:{stats}")
-		git_folders = session.query(GitFolder).all()
-		print(f'Git Folders: {len(git_folders)}')
 		# For larger datasets, consider processing in batches
 		batch_size = 50
 		for i, folder in enumerate(git_folders):
@@ -168,7 +157,7 @@ async def main():
 
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(use_cache=args.use_cache)
+		git_lists = await get_git_list_stars(session)  # Updated call
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -179,7 +168,7 @@ async def main():
 
 	if args.create_stars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(use_cache=args.use_cache)
+		git_lists = await get_git_list_stars(session)  # Updated call
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -200,6 +189,4 @@ async def main():
 	return
 
 if __name__ == '__main__':
-	if not os.path.exists(CACHE_DIR):
-		os.makedirs(CACHE_DIR)
 	asyncio.run(main())
