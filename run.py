@@ -46,9 +46,9 @@ class MainApp(QWidget, Ui_FindGitsApp):
 	def searchpaths_button_clicked(self, widget):
 		pass
 
-	def checkBox_filterdupes_toggle(self, *args):
+	def checkBox_filterdupes_toggle(self, widget, *args):
 		self.dupefilter = self.checkBox_filterdupes.isChecked()
-		self.folderButton_clicked(self)
+		self.folderButton_clicked(widget)
 
 	def getdupes_button_clicked(self, widget):
 		self.checkBox_filterdupes.setEnabled(False)
@@ -98,8 +98,6 @@ class MainApp(QWidget, Ui_FindGitsApp):
 		self.retranslateUi(self)
 
 	def folderButton_clicked(self, widget):
-		if widget:
-			repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
 		self.checkBox_filterdupes.setEnabled(True)
 		self.repotree.clear()
 		self.repotree.setColumnCount(3)
