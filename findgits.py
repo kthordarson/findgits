@@ -169,7 +169,7 @@ async def main():
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_git_list_stars(use_cache=args.use_cache)
-		git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
+		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
@@ -180,7 +180,7 @@ async def main():
 	if args.create_stars:
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_git_list_stars(use_cache=args.use_cache)
-		git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
+		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
