@@ -24,14 +24,14 @@ def dbcheck(session) -> dict:
 	result = {'repo_count': len(repos), 'folder_count': len(folders),}
 	return result
 
-async def process_git_folder(git_path, session):
+async def process_git_folder(git_path, session, args):
 	"""Process a single git folder asynchronously"""
 	logger.info(f'Processing {git_path}')
 	try:
 		# Always ensure the session is in a valid state
 		if not session.is_active:
 			session.rollback()
-		result = await insert_update_git_folder(git_path, session)
+		result = await insert_update_git_folder(git_path, session, args)
 		return result
 	except Exception as e:
 		logger.error(f'Error processing {git_path}: {e} {type(e)}')
@@ -134,7 +134,7 @@ async def main():
 				tasks = []
 				for git_folder in batch:
 					git_path = git_folder.parent
-					tasks.append(process_git_folder(git_path, session))
+					tasks.append(process_git_folder(git_path, session, args))
 				await asyncio.gather(*tasks)
 				session.commit()
 			print(f'Processed {len(git_folders)} git folders')

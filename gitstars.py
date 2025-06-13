@@ -38,8 +38,8 @@ async def update_repo_cache(repo_name_or_url, use_existing_cache=True):
 	repo_name = repo_name.strip('/')
 
 	# Load existing cache if available and requested
-	cache_data = {'repos': []}
-	stars_cache_file = f'{CACHE_DIR}/update_repo_cache.json'
+	cache_data = []
+	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
 
 	if use_existing_cache and os.path.exists(stars_cache_file):
 		try:
@@ -70,34 +70,31 @@ async def update_repo_cache(repo_name_or_url, use_existing_cache=True):
 
 					# Check if repo already exists in cache
 					existing_index = None
-					for i, repo in enumerate(cache_data['repos']):
-						if repo.get('id') == repo_data.get('id'):
-							existing_index = i
-							break
+					for i, repo in enumerate(cache_data):
+						try:
+							if repo.get('id') == repo_data.get('id'):
+								existing_index = i
+								break
+						except Exception as e:
+							logger.error(f"Error checking cache entry: {e} {type(e)} repo={repo}")
 
 					# Update or add to cache
 					if existing_index is not None:
-						cache_data['repos'][existing_index] = repo_data
+						cache_data[existing_index] = repo_data
 						logger.info(f"Updated existing repository in cache: {repo_name}")
 					else:
-						cache_data['repos'].append(repo_data)
+						cache_data.append(repo_data)
 						logger.info(f"Added new repository to cache: {repo_name}")
 
-					# Write updated cache
-					if not os.path.exists(CACHE_DIR):
-						os.makedirs(CACHE_DIR)
-
 					async with aiofiles.open(stars_cache_file, 'w') as f:
-						cache_data['timestamp'] = str(datetime.datetime.now())
 						await f.write(json.dumps(cache_data, indent=4))
 
 					return repo_data
 				else:
 					logger.error(f"Failed to fetch repository data: {r.status} {await r.text()}")
 					return None
-
 	except Exception as e:
-		logger.error(f"Error fetching repository data: {e}")
+		logger.error(f"Error fetching repository data: {e} {type(e)}")
 		return None
 
 # curl -L -H "Accept: application/vnd.github+json" -H "Authorization: Bearer <YOUR-TOKEN>" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/user/starred
@@ -118,7 +115,7 @@ async def get_git_stars(args):
 			async with aiofiles.open(stars_cache_file, 'r') as f:
 				cache_content = await f.read()
 				jsonbuffer = json.loads(cache_content)
-				# jsonbuffer = cache_data['repos']
+				# jsonbuffer = cache_data
 				logger.info(f"Loaded {len(jsonbuffer)} starred repos from cache")
 				return jsonbuffer
 		except FileNotFoundError as e:
@@ -223,9 +220,7 @@ async def write_jsonbuffer_to_cache(jsonbuffer, stars_cache_file, args):
 	# Write to cache if we got data
 	try:
 		async with aiofiles.open(stars_cache_file, 'w') as f:
-			# jsonbuffer['timestamp'] = str(datetime.datetime.now())
 			await f.write(json.dumps(jsonbuffer, indent=4))
-			# await f.write(json.dumps({'repos': jsonbuffer, 'timestamp': str(datetime.datetime.now())}, indent=4))
 			logger.info(f"Cached {len(jsonbuffer)} starred repos")
 	except Exception as e:
 		logger.error(f"Failed to write cache: {e} {type(e)}")

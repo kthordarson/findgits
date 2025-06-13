@@ -13,7 +13,7 @@ from dbstuff import GitRepo, GitFolder, get_dupes
 from utils import valid_git_folder, get_remote, ensure_datetime
 from gitstars import get_git_stars, update_repo_cache, get_auth_param, CACHE_DIR
 
-async def insert_update_git_folder(git_folder_path, session):
+async def insert_update_git_folder(git_folder_path, session, args):
 	"""
 	Insert a new GitFolder or update an existing one in the database
 	"""
@@ -35,57 +35,85 @@ async def insert_update_git_folder(git_folder_path, session):
 			logger.warning(f'Could not determine remote URL for {git_folder_path}')
 			remote_url = f"file://{git_folder_path}"  # Use local path as fallback URL
 
+		# Extract repo name and owner from URL for GitHub API lookup
+		repo_name = None
+		owner = None
+
+		# Parse GitHub URL to extract owner and repo name
+		if 'github.com' in remote_url:
+			if remote_url.startswith('git@github.com:'):
+				# git@github.com:owner/repo.git
+				path = remote_url.split("git@github.com:")[1].split(".git")[0]
+				parts = path.split("/")
+				if len(parts) >= 2:
+					owner = parts[0]
+					repo_name = parts[1]
+			elif "github.com/" in remote_url:
+				# https://github.com/owner/repo.git
+				path = remote_url.split("github.com/")[1].split(".git")[0]
+				parts = path.split("/")
+				if len(parts) >= 2:
+					owner = parts[0]
+					repo_name = parts[1]
+
 		# TRANSACTION START
 		try:
 			# First check if the repo already exists by URL
-			git_repo = session.query(GitRepo).filter(
-				GitRepo.git_url.ilike(remote_url)
-			).first()
+			git_repo = session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url)).first()
 
 			# If not found by exact URL, try alternative lookups
 			if not git_repo:
 				# Try without .git suffix
 				if remote_url.endswith('.git'):
-					git_repo = session.query(GitRepo).filter(
-						GitRepo.git_url.ilike(remote_url[:-4])
-					).first()
+					git_repo = session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url[:-4])).first()
 				# Try with .git suffix
 				else:
-					git_repo = session.query(GitRepo).filter(
-						GitRepo.git_url.ilike(remote_url + '.git')
-					).first()
+					git_repo = session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url + '.git')).first()
 
 			# Extract repo name from URL for name-based lookup if needed
-			repo_name = os.path.basename(git_folder_path)
-			if '/' in remote_url:
-				parts = remote_url.split('/')
-				if len(parts) > 1:
-					repo_name = parts[-1]
-					if repo_name.endswith('.git'):
-						repo_name = repo_name[:-4]
+			if not repo_name:
+				repo_name = os.path.basename(git_folder_path)
+				if '/' in remote_url:
+					parts = remote_url.split('/')
+					if len(parts) > 1:
+						repo_name = parts[-1]
+						if repo_name.endswith('.git'):
+							repo_name = repo_name[:-4]
 
 			# Try lookup by name if URL lookup failed
 			if not git_repo:
-				git_repo = session.query(GitRepo).filter(
-					GitRepo.github_repo_name == repo_name
-				).first()
+				git_repo = session.query(GitRepo).filter(GitRepo.github_repo_name == repo_name).first()
 
 			# Check if folder already exists in database
-			git_folder = session.query(GitFolder).filter(
-				GitFolder.git_path == git_folder_path
-			).first()
+			git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
+
+			# Fetch repository metadata if we have owner and repo name
+			repo_metadata = None
+			if owner and repo_name:
+				try:
+					repo_path = f"{owner}/{repo_name}"
+					logger.info(f"Fetching metadata for {repo_path}")
+					repo_metadata = await update_repo_cache(repo_path, use_existing_cache=True)
+				except Exception as e:
+					logger.warning(f"Failed to fetch metadata for {owner}/{repo_name}: {e}")
 
 			# If no repo exists, create a new one with safeguards
 			if not git_repo:
-				logger.debug(f'Creating new GitRepo for {remote_url}')
 				# Double check once more with a broader query
 				git_repo = session.query(GitRepo).filter((GitRepo.git_url.ilike(f"%{repo_name}%")) | (GitRepo.github_repo_name == repo_name)).first()
-
 				if not git_repo:
+					logger.info(f'Creating new GitRepo for {remote_url}')
 					git_repo = GitRepo(remote_url, git_folder_path)
+					git_repo.github_repo_name = repo_name
+					git_repo.github_owner = owner
 					git_repo.first_scan = datetime.now()
 					git_repo.last_scan = datetime.now()
 					git_repo.scan_count = 1
+
+					# Populate with metadata if available
+					if repo_metadata:
+						git_repo = populate_from_metadata(git_repo, repo_metadata)
+
 					session.add(git_repo)
 					session.flush()  # Get the ID without committing
 					logger.debug(f'Created new GitRepo: {git_repo}')
@@ -94,6 +122,10 @@ async def insert_update_git_folder(git_folder_path, session):
 				logger.debug(f'Found existing GitRepo: {git_repo}')
 				git_repo.last_scan = datetime.now()
 				git_repo.scan_count += 1
+
+				# Update with metadata if available
+				if repo_metadata:
+					git_repo = populate_from_metadata(git_repo, repo_metadata)
 
 			# Now handle the GitFolder entry
 			if git_folder:
@@ -117,166 +149,6 @@ async def insert_update_git_folder(git_folder_path, session):
 			return None
 
 	except Exception as e:
-		logger.error(f'Error processing git folder {git_folder_path}: {e}')
-		if session.is_active:
-			session.rollback()
-		return None
-
-async def insert_update_git_folder_v1(git_folder_path, session):
-	"""
-	Insert a new GitFolder or update an existing one in the database
-
-	Parameters:
-		git_folder_path (str): Path to the git folder (containing .git directory)
-		session: SQLAlchemy session
-
-	Returns:
-		GitFolder: The inserted or updated GitFolder object
-	"""
-	try:
-		git_folder_path = str(Path(git_folder_path))
-
-		# Ensure this is a valid git folder before proceeding
-		if not valid_git_folder(os.path.join(git_folder_path, '.git')):
-			logger.warning(f'{git_folder_path} is not a valid git folder')
-			return None
-
-		# Get remote URL for this repository
-		if git_folder_path.endswith('/'):
-			git_folder_path = git_folder_path[:-1]
-
-		# Get remote URL and normalize it
-		remote_url = get_remote(git_folder_path).lower().strip()
-		if not remote_url or remote_url == '[no remote]':
-			logger.warning(f'Could not determine remote URL for {git_folder_path}')
-			remote_url = f"file://{git_folder_path}"  # Use local path as fallback URL
-
-		# Normalize the URL for consistent comparison
-		normalized_url = remote_url.rstrip('/')
-		if normalized_url.endswith('.git'):
-			normalized_url_no_git = normalized_url[:-4]
-		else:
-			normalized_url_no_git = normalized_url
-
-		# TRANSACTION START - use a nested transaction scope
-		try:
-			# First check if folder already exists in database
-			git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
-
-			# Check if a repo with this remote URL exists, using multiple variations for matching
-			git_repo = None
-
-			# Try direct match first
-			git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
-
-			# Try without .git suffix if it exists
-			if not git_repo and normalized_url != normalized_url_no_git:
-				git_repo = session.query(GitRepo).filter(GitRepo.git_url == normalized_url_no_git).first()
-
-			# Try with .git suffix if it doesn't exist
-			if not git_repo and not normalized_url.endswith('.git'):
-				git_repo = session.query(GitRepo).filter(GitRepo.git_url == normalized_url + '.git').first()
-
-			# Try looking up by the repository name as a fallback
-			if not git_repo:
-				# Extract repo name from URL
-				repo_name = os.path.basename(git_folder_path)
-				# Try to match by repo name as a fallback
-				if '/' in remote_url:
-					parts = remote_url.split('/')
-					if len(parts) > 1:
-						repo_name = parts[-1]
-						if repo_name.endswith('.git'):
-							repo_name = repo_name[:-4]
-
-				# Try to find by github_repo_name
-				git_repo = session.query(GitRepo).filter(
-					GitRepo.github_repo_name == repo_name
-				).first()
-
-			# If no repo exists, create a new one
-			if not git_repo:
-				logger.debug(f'Creating new GitRepo for {remote_url}')
-				git_repo = GitRepo(remote_url, git_folder_path)
-
-				# Extract repository name from URL for better metadata
-				if '/' in remote_url:
-					parts = remote_url.split('/')
-					if len(parts) > 1:
-						git_repo.github_repo_name = parts[-1]
-						if git_repo.github_repo_name.endswith('.git'):
-							git_repo.github_repo_name = git_repo.github_repo_name[:-4]
-
-						if len(parts) > 2:
-							git_repo.github_owner = parts[-2]
-
-				# Set all datetime fields properly
-				git_repo.first_scan = datetime.now()
-				git_repo.last_scan = datetime.now()
-
-				# Get config path for stats
-				git_config_path = os.path.join(git_folder_path, '.git', 'config')
-				if os.path.exists(git_config_path):
-					stat = os.stat(git_config_path)
-					git_repo.config_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
-					git_repo.config_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
-					git_repo.config_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
-
-				# Try to get metadata from GitHub, but don't fail if not available
-				try:
-					metadata = await fetch_metadata(git_repo)
-					if metadata:
-						git_repo = populate_from_metadata(git_repo, metadata)
-				except Exception as e:
-					logger.warning(f"Error fetching metadata for {git_repo.github_repo_name}: {e}")
-
-				git_repo.scan_count = 1
-				session.add(git_repo)
-
-				# Flush to get the ID without committing
-				session.flush()
-				logger.debug(f'Created new GitRepo: {git_repo}')
-			else:
-				# Update existing repo
-				logger.debug(f'Found existing GitRepo: {git_repo}')
-				git_repo.last_scan = datetime.now()
-				git_repo.scan_count += 1
-
-			# Now handle the GitFolder entry
-			if git_folder:
-				# Update existing folder
-				git_folder.scan_count += 1
-				git_folder.last_scan = datetime.now()
-				git_folder.gitrepo_id = git_repo.id
-
-				# Ensure all datetime fields are valid
-				try:
-					git_folder.get_folder_time()
-					git_folder.get_folder_stats()
-				except Exception as e:
-					logger.warning(f"Error updating folder stats: {e}")
-
-				logger.debug(f'Updated GitFolder: {git_folder}')
-			else:
-				# Create new folder
-				git_folder = GitFolder(git_folder_path, git_repo.id)
-				git_folder.scan_count = 1
-				session.add(git_folder)
-				logger.debug(f'Created new GitFolder: {git_folder}')
-
-			# Commit the transaction
-			session.commit()
-			return git_folder
-
-		except Exception as e:
-			# Roll back on any error
-			logger.error(f'Error in database transaction: {e}')
-			if session.is_active:
-				session.rollback()
-			return None
-
-	except Exception as e:
-		# Catch any other errors
 		logger.error(f'Error processing git folder {git_folder_path}: {e}')
 		if session.is_active:
 			session.rollback()
@@ -622,7 +494,7 @@ async def populate_repo_data(session, args):
 
 	stats = {
 		"total_db_repos": len(git_repos),
-		"total_starred_repos": len(starred_repos['repos']),
+		"total_starred_repos": len(starred_repos),
 		"matched": 0,
 		"updated": 0,
 		"not_found": 0,
@@ -634,7 +506,7 @@ async def populate_repo_data(session, args):
 	github_repos_by_name = {}
 
 	# Build lookup dictionaries
-	for repo_data in starred_repos['repos']:
+	for repo_data in starred_repos:
 		# Index by various URLs
 		if repo_data.get('clone_url'):
 			github_repos_by_url[repo_data['clone_url']] = repo_data
@@ -745,13 +617,13 @@ async def fetch_missing_repo_data(session, update_all=False):
 			async with aiofiles.open(stars_cache_file, 'r') as f:
 				cache_content = await f.read()
 				cache_data = json.loads(cache_content)
-				logger.info(f"Loaded {len(cache_data['repos'])} repositories from cache")
+				logger.info(f"Loaded {len(cache_data)} repositories from cache")
 		except Exception as e:
 			logger.error(f"Failed to load cache: {e}")
 
 	# Build lookup dictionary for cached repos
 	cache_repos_by_name = {}
-	for repo in cache_data.get('repos', []):
+	for repo in cache_data:
 		if repo.get('full_name'):
 			cache_repos_by_name[repo['full_name'].lower()] = repo
 		if repo.get('name'):
@@ -847,7 +719,7 @@ async def process_repo(repo, api_session, headers, cache_repos_by_name, cache_da
 					repo_data = await response.json()
 
 					# Add to cache
-					cache_data['repos'].append(repo_data)
+					cache_data.append(repo_data)
 					cache_repos_by_name[repo_path.lower()] = repo_data
 
 				elif response.status == 404:
@@ -1054,7 +926,7 @@ async def fetch_metadata(repo):
 
 	# Setup cache file
 	metadata_cache_file = f'{CACHE_DIR}/repo_metadata_cache.json'
-	cache_data = {'repos': {}, 'last_updated': {}}
+	cache_data = {}
 
 	# Create cache directory if it doesn't exist
 	try:
@@ -1068,7 +940,7 @@ async def fetch_metadata(repo):
 			with open(metadata_cache_file, 'r') as f:
 				try:
 					cache_data = json.load(f)
-					# logger.debug(f"Loaded metadata cache with {len(cache_data['repos'])} entries")
+					# logger.debug(f"Loaded metadata cache with {len(cache_data)} entries")
 				except json.JSONDecodeError as e:
 					logger.warning(f"Corrupted JSON cache file: {e}. Creating backup and using empty cache.")
 					# Create a backup of the corrupted file
@@ -1080,7 +952,7 @@ async def fetch_metadata(repo):
 						logger.error(f"Failed to create backup of corrupted cache: {backup_err}")
 
 					# Use empty cache data
-					cache_data = {'repos': {}, 'last_updated': {}}
+					cache_data = {}
 	except Exception as e:
 		logger.error(f"Failed to load metadata cache: {e} {type(e)}")
 
@@ -1088,7 +960,7 @@ async def fetch_metadata(repo):
 	current_time = datetime.now().timestamp()
 	one_day_seconds = 86400  # 24 hours in seconds
 
-	cached_repo = cache_data.get('repos', {}).get(repo_path)
+	cached_repo = cache_data.get(repo_path)
 	cache_time = cache_data.get('last_updated', {}).get(repo_path, 0)
 	cache_age = current_time - cache_time
 
@@ -1119,12 +991,10 @@ async def fetch_metadata(repo):
 					repo_metadata = await r.json()
 
 					# Update cache
-					if 'repos' not in cache_data:
-						cache_data['repos'] = {}
 					if 'last_updated' not in cache_data:
 						cache_data['last_updated'] = {}
 
-					cache_data['repos'][repo_path] = repo_metadata
+					cache_data[repo_path] = repo_metadata
 					cache_data['last_updated'][repo_path] = current_time
 
 					# Save updated cache safely
