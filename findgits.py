@@ -65,7 +65,7 @@ def get_args():
 	myparse.add_argument('--create_stars', help='add repos from git stars', action='store_true', default=False, dest='create_stars')
 	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
-	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=10, dest='max_pages')
+	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
 	myparse.add_argument('--no_cache', help='no_cache', action='store_true', default=False, dest='no_cache')
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
@@ -108,7 +108,7 @@ async def main():
 	if args.gitstars:
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_git_list_stars(use_cache=args.use_cache)
-		starred_repos = await get_git_stars()
+		starred_repos = await get_git_stars(args)
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
@@ -117,8 +117,8 @@ async def main():
 		return
 
 	if args.fetch_stars:
-		fetched_repos = await fetch_starred_repos(max_pages=args.max_pages, use_cache=args.use_cache)
-		print(f'Fetched {len(fetched_repos)} ( {type(fetch_starred_repos)} ) starred repos from GitHub API')
+		fetched_repos = await fetch_starred_repos(args)
+		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API')
 		return
 
 	if args.scanpath:
