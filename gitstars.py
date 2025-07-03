@@ -48,7 +48,9 @@ async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
                 logger.debug(f"Loaded cache for {repo_name} from database")
             except Exception as e:
                 logger.error(f"Failed to parse cache data: {e}")
-                # Continue with empty cache_data
+        else:
+            logger.warning(f"No cache entry found for {repo_name} in database")
+            # Continue with empty cache_data
 
     # Fetch repository data from GitHub API
     auth = get_auth_param()
@@ -89,8 +91,75 @@ async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
                     session.commit()
 
                     return repo_data
+                elif r.status == 404:
+                    logger.warning(f"Repository not found: {api_url} - Creating default data structure")
+
+                    # Create default repo data structure based on what we know
+                    # Parse owner and repo name from the repo_name
+                    owner, name = None, None
+                    if '/' in repo_name:
+                        parts = repo_name.split('/')
+                        if len(parts) >= 2:
+                            owner = parts[0]
+                            name = parts[1]
+                    else:
+                        name = repo_name
+
+                    # Generate a current timestamp for consistency
+                    current_time = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+                    # Create default repository data structure
+                    default_repo_data = {
+                        "id": None,
+                        "node_id": None,
+                        "name": name,
+                        "full_name": f"{owner}/{name}" if owner else name,
+                        "owner": {
+                            "login": owner
+                        } if owner else None,
+                        "private": False,
+                        "html_url": f"https://github.com/{repo_name}",
+                        "description": "Repository data unavailable (404 error)",
+                        "fork": False,
+                        "url": api_url,
+                        "created_at": current_time,
+                        "updated_at": current_time,
+                        "pushed_at": current_time,
+                        "git_url": f"git://github.com/{repo_name}.git",
+                        "ssh_url": f"git@github.com:{repo_name}.git",
+                        "clone_url": f"https://github.com/{repo_name}.git",
+                        "svn_url": f"https://github.com/{repo_name}",
+                        "homepage": None,
+                        "size": 0,
+                        "stargazers_count": 0,
+                        "watchers_count": 0,
+                        "language": None,
+                        "forks_count": 0,
+                        "forks": 0,
+                        "open_issues_count": 0,
+                        "open_issues": 0,
+                        "watchers": 0,
+                        "default_branch": "main",
+                        "temp_clone_token": None,
+                        "network_count": 0,
+                        "subscribers_count": 0,
+                        "archived": False,
+                        "disabled": False,
+                        "license": None,
+                        "topics": [],
+                        "visibility": "unknown",
+                        "_unavailable": True  # Flag to indicate this is default data
+                    }
+
+                    # Add to cache so we don't keep trying to fetch it
+                    cache_data.append(default_repo_data)
+                    set_cache_entry(session, cache_key, cache_type, json.dumps(cache_data))
+                    session.commit()
+                    logger.debug(f"Added default data for unavailable repository to cache: {repo_name}")
+
+                    return default_repo_data
                 else:
-                    logger.error(f"Failed to fetch repository data: {r.status} {await r.text()}")
+                    logger.error(f"Failed to fetch repository data: {r.status} {await r.text()} api_url: {api_url}")
                     return None
     except Exception as e:
         logger.error(f"Error fetching repository data: {e} {type(e)}")
