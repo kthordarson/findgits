@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import asyncio
 import traceback
 import aiohttp
 import json
@@ -8,6 +9,10 @@ from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA
+
+def RateLimitExceededError(Exception):
+	"""Custom exception for rate limit exceeded errors"""
+	pass
 
 async def update_repo_cache(repo_name_or_url, session, args):
 	"""
@@ -46,6 +51,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 		if cache_entry:
 			try:
 				cache_data = json.loads(cache_entry.data)
+				return cache_data[0]
 				# logger.debug(f"Loaded cache for {repo_name} from database")
 			except Exception as e:
 				logger.error(f"Failed to parse cache data: {e}")
@@ -58,7 +64,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 			# logger.debug(f"cache_data for repo: {repo_name} : {cache_data}")
 			logger.debug(f"cache_entry: {cache_entry}")
 		return cache_data[0]
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
+	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
 	if not auth:
 		logger.error('update_repo_cache: no auth provided')
 		return None
@@ -74,30 +80,46 @@ async def update_repo_cache(repo_name_or_url, session, args):
 	try:
 		async with aiohttp.ClientSession() as api_session:
 			async with api_session.get(api_url, headers=headers) as r:
+				if args.debug:
+					logger.debug(f"Fetching repository data from GitHub API: {api_url}")
 				if r.status == 200:
 					repo_data = await r.json()
-
 					# Check if repo already exists in cache
 					existing_index = None
 					for i, repo in enumerate(cache_data):
 						if repo.get('id') == repo_data.get('id'):
 							existing_index = i
-							logger.debug(f"Found existing repository in cache: {repo_data.get('name')} at index {i} cache_data: {len(cache_data)}")
+							# logger.debug(f"Found existing repository in cache: {repo_data.get('name')} at index {i} cache_data: {len(cache_data)}")
 							break
 
 					# Update or add to cache
 					if existing_index is not None:
 						cache_data[existing_index] = repo_data
-						logger.info(f"Updated existing repository in cache: {repo_name} cache_data: {len(cache_data)}")
+						# logger.info(f"Updated existing repository in cache: {repo_name} cache_data: {len(cache_data)}")
 					else:
 						cache_data.append(repo_data)
-						logger.info(f"Added new repository to cache: {repo_name}")
+						# logger.info(f"Added new repository to cache: {repo_name}")
 
 					# Update the database cache
 					set_cache_entry(session, cache_key, cache_type, json.dumps(cache_data))
 					session.commit()
 
 					return repo_data
+				elif r.status == 403:
+					rtext = await r.text()
+					ratelimit_reset = datetime.fromtimestamp(int(r.headers.get('X-RateLimit-Reset')))
+					logger.error(f"Rate limit exceeded for repository {repo_name}: {r.status} rtext: {rtext}")
+					logger.error(f"xratelimits: {r.headers.get('X-RateLimit-Used')}/{r.headers.get('X-RateLimit-Remaining')}/{r.headers.get('X-RateLimit-Limit')} 'X-RateLimit-Reset': {ratelimit_reset}")
+					logger.error(f'rheaders: {r.headers}')
+					# Handle rate limiting by returning cached data if available
+					if cache_data:
+						logger.debug(f"Returning cached data for {repo_name} due to rate limit")
+						await asyncio.sleep(60)  # Wait before retrying
+						return cache_data[0]
+					else:
+						logger.error(f"No cached data available for {repo_name} after rate limit exceeded")
+						await asyncio.sleep(60)  # Wait before retrying
+						raise RateLimitExceededError(f"Rate limit exceeded for repository {repo_name}, no cached data available")
 				elif r.status == 404 or r.status == 451:
 					logger.warning(f"Repository error {r.status}: {api_url} - Creating default data structure")
 
@@ -122,6 +144,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 					default_repo_data['name'] = name
 					default_repo_data['full_name'] = f"{owner}/{name}" if owner else name
 					default_repo_data['owner'] = {"login": owner} if owner else {"login": "unknown"}
+					default_repo_data['error_code'] = r.status
 
 					cache_data.append(default_repo_data)
 					set_cache_entry(session, cache_key, cache_type, json.dumps(cache_data))

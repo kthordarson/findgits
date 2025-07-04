@@ -7,7 +7,6 @@ from loguru import logger
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
-from dbstuff import BLANK_REPO_DATA
 from cacheutils import get_cache_entry, set_cache_entry
 
 async def get_git_stars(args, session):
@@ -50,7 +49,7 @@ async def download_git_stars(args, session):
     if args.nodl:
         logger.warning('get_git_stars: Skipping API call due to --nodl flag')
         return jsonbuffer
-    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
+    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
     if not auth:
         logger.error('get_git_stars: no auth provided')
         return None
@@ -146,7 +145,7 @@ async def get_git_list_stars(session, args) -> dict:
     cache_key = "git_list_stars"
     cache_type = "list_stars"
 
-    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
+    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
     if not auth:
         logger.error('get_git_list_stars: no auth provided')
         return {}
@@ -253,9 +252,6 @@ async def get_info_for_list(link, headers, session, args):
 
     return list_hrefs
 
-def get_updated_at_sort(x) -> HTTPBasicAuth:
-    return x['updated_at']
-
 async def fetch_starred_repos(args, session):
     """
     Fetch user's starred repositories from GitHub API with database caching
@@ -283,7 +279,7 @@ async def fetch_starred_repos(args, session):
         logger.warning("Skipping API call due to --nodl flag")
         return []
     # Get authentication
-    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
+    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
     if not auth:
         logger.error("No GitHub authentication available")
         return []

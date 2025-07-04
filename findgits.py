@@ -66,19 +66,25 @@ def get_args():
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
+	myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
 	myparse.add_argument('--nodl', help='disable all downloads/api call', action='store_true', default=False, dest='nodl')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
+	if args.disable_cache:
+		args.use_cache = False
+		logger.info('Cache disabled')
 	return args
 
-async def main():
-	args = get_args()
+def get_session(args):
 	engine = get_engine(args)
 	s = sessionmaker(bind=engine)
 	session = s()
 	db_init(engine)
 	print(f'DB Engine: {engine} DB Type: {engine.name} DB URL: {engine.url}')
-
+	return session, engine
+async def main():
+	args = get_args()
+	session, engine = get_session(args)
 	if args.dropdatabase:
 		drop_database(engine)
 		logger.info('Database dropped')
@@ -143,7 +149,6 @@ async def main():
 		# For larger datasets, consider processing in batches
 		batch_size = 50
 		for i, folder in enumerate(git_folders):
-			folder.get_folder_time()
 			folder.get_folder_stats()
 			if args.debug:
 				# Print folder stats

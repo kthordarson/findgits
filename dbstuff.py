@@ -50,6 +50,7 @@ BLANK_REPO_DATA = {
 	"license": None,
 	"topics": [],
 	"visibility": "unknown",
+	"error_code": -1,
 	"_unavailable": True}  # Flag to indicate this is default data
 
 class MissingConfigException(Exception):
@@ -66,8 +67,7 @@ class GitFolder(Base):
 	__tablename__ = 'git_path'
 	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
-	# gitrepo_id = Column('gitrepo_id', Integer)  # id of gitrepo found in this folder
-	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))  # Change this line
+	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))
 	git_path = Column('git_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
@@ -80,7 +80,6 @@ class GitFolder(Base):
 	git_path_ctime = Column('git_path_ctime', DateTime)
 	git_path_atime = Column('git_path_atime', DateTime)
 	git_path_mtime = Column('git_path_mtime', DateTime)
-	dupe_flag = Column('dupe_flag', Boolean)
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
 	scanned = Column[bool]
@@ -93,14 +92,12 @@ class GitFolder(Base):
 		self.last_scan = self.first_scan
 		self.scan_time = 0.0
 		self.scan_count = 0
-		self.dupe_flag = False
 		self.dupe_count = 0
 		self.is_parent = False
 		self.folder_size = 0
 		self.file_count = 0
 		self.subdir_count = 0
 		self.scanned = False
-		self.get_folder_time()
 		self.get_folder_stats()
 
 	def __repr__(self):
@@ -114,10 +111,6 @@ class GitFolder(Base):
 			return
 		# t0 = datetime.now()
 		self.last_scan = datetime.now()
-		stat = os.stat(self.git_path)
-		self.git_path_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
-		self.git_path_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
-		self.git_path_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
 	def get_folder_stats(self):
 		t0 = datetime.now()
@@ -132,6 +125,10 @@ class GitFolder(Base):
 		self.last_scan = datetime.now()
 		self.scanned = True
 		self.scan_count += 1
+		stat = os.stat(self.git_path)
+		self.git_path_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
+		self.git_path_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
+		self.git_path_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
 # todo: make this better, should only be linked to one git_path
 class GitRepo(Base):
@@ -199,11 +196,11 @@ class GitRepo(Base):
 	pushed_at = Column('pushed_at', DateTime)
 
 	# Our internal tracking fields
-	dupe_flag = Column('dupe_flag', Boolean)
 	dupe_count = Column('dupe_count', BigInteger)
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_count = Column('scan_count', Integer)
+	error_code = Column('error_code', Integer)
 	config_ctime = Column('config_ctime', DateTime)
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
@@ -220,7 +217,6 @@ class GitRepo(Base):
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_count = 0
-		self.dupe_flag = False
 		self.scanned = False
 
 		# Extract repository name from URL
@@ -319,6 +315,11 @@ class CacheEntry(Base):
 
 	def __repr__(self):
 		return f'<CacheEntry {self.id} key={self.cache_key} type={self.cache_type}>'
+
+class RepoInfo:
+	def __init__(self, owner, name):
+		self.github_owner = owner
+		self.github_repo_name = name
 
 def db_init(engine: sqlalchemy.Engine) -> None:
 	Base.metadata.create_all(bind=engine)

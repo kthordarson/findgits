@@ -9,10 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from loguru import logger
 from requests.auth import HTTPBasicAuth
-from dbstuff import GitRepo, GitFolder, get_dupes
+from dbstuff import GitRepo, GitFolder, RepoInfo, get_dupes
 from utils import valid_git_folder, get_remote, ensure_datetime
 from gitstars import get_git_stars
-from cacheutils import update_repo_cache, get_cache_entry
+from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
 
 async def insert_update_git_folder(git_folder_path, session, args):
 	"""
@@ -61,11 +61,6 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		# logger.info(f'Fetching metadata for {repo_path}')
 		try:
 			# Create a simple object with the required attributes
-			class RepoInfo:
-				def __init__(self, owner, name):
-					self.github_owner = owner
-					self.github_repo_name = name
-
 			repo_info = RepoInfo(owner, repo_name)
 			repo_metadata = await fetch_metadata(repo_info, session, args)
 		except Exception as e:
@@ -102,8 +97,11 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			try:
 				# Important: Pass the session parameter
 				repo_metadata = await update_repo_cache(repo_path, session, args)
-			except Exception as e:
+			except RateLimitExceededError as e:
 				logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
+				repo_metadata = None
+			except Exception as e:
+				logger.error(f'Failed to fetch metadata for {repo_path}: {e}')
 				repo_metadata = None
 
 		# Try lookup by name if URL lookup failed
@@ -200,7 +198,11 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 
 	# Get full repository data from GitHub API
-	repo_data = await update_repo_cache(clean_path, session, args)  # Pass session to update_repo_cache
+	try:
+		repo_data = await update_repo_cache(clean_path, session, args)  # Pass session to update_repo_cache
+	except RateLimitExceededError as e:
+		logger.warning(f'Rate limit exceeded while fetching metadata for {clean_path}: {e}')
+		repo_data = None
 
 	if not git_repo:
 		# Create new repository with all available data
@@ -221,7 +223,7 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 
 def check_update_dupes(session) -> dict:
 	"""
-	Check for duplicate GitRepo entries (same git_url) and update their dupe_flag and dupe_count.
+	Check for duplicate GitRepo entries (same git_url) and update their dupe_count.
 	A duplicate repository is one with the same git_url in multiple locations.
 
 	Parameters:
@@ -241,7 +243,6 @@ def check_update_dupes(session) -> dict:
 
 	# Reset duplicate flags on all repos
 	for repo in all_repos:
-		repo.dupe_flag = False
 		repo.dupe_count = 0
 
 	# Get list of duplicates (repos with same git_url)
@@ -261,7 +262,6 @@ def check_update_dupes(session) -> dict:
 
 		# Update their dupe flags
 		for repo in same_url_repos:
-			repo.dupe_flag = True
 			repo.dupe_count = dupe_count
 			dupes_updated += 1
 
@@ -278,196 +278,6 @@ def check_update_dupes(session) -> dict:
 
 	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
 	return result
-
-async def populate_starred_repos(session, args):
-	"""
-	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
-
-	Parameters:
-		session: SQLAlchemy session
-		max_pages: Maximum number of pages to fetch (0 for all)
-		use_cache: Whether to use cached data if available
-
-	Returns:
-		dict: Summary statistics about the operation
-	"""
-
-	# Fetch starred repositories from GitHub API
-	logger.info(f"Fetching starred repositories (max_pages={args.max_pages}, use_cache={args.use_cache})")
-	starred_repos = await get_git_stars(args, session)
-
-	stats = {
-		"total_db_repos": 0,
-		"total_starred_repos": len(starred_repos),
-		"matched": 0,
-		"updated": 0,
-		"not_found": 0,
-		"errors": 0
-	}
-
-	# Create lookup dictionaries for faster matching
-	github_repos_by_url = {}
-	github_repos_by_name = {}
-
-	for repo_data in starred_repos:
-		# Index by various URLs
-		if repo_data.get('clone_url'):
-			github_repos_by_url[repo_data['clone_url']] = repo_data
-		if repo_data.get('html_url'):
-			github_repos_by_url[repo_data['html_url']] = repo_data
-		if repo_data.get('ssh_url'):
-			github_repos_by_url[repo_data['ssh_url']] = repo_data
-		if repo_data.get('git_url'):
-			github_repos_by_url[repo_data['git_url']] = repo_data
-
-		# Index by name
-		if repo_data.get('full_name'):
-			github_repos_by_name[repo_data['full_name'].lower()] = repo_data
-		if repo_data.get('name'):
-			github_repos_by_name[repo_data['name'].lower()] = repo_data
-
-	# Process all repositories in the database
-	try:
-		db_repos = session.query(GitRepo).all()
-		stats["total_db_repos"] = len(db_repos)
-		logger.info(f"Processing {stats['total_db_repos']} database repositories github_repos_by_url:{len(github_repos_by_url)}")
-
-		for db_repo in db_repos:
-			try:
-				# Try to find matching GitHub data
-				repo_data = None
-
-				# Try matching by URL first
-				if db_repo.git_url and db_repo.git_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.git_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.git_url} {stats["matched"]}')
-				if db_repo.git_url and db_repo.git_url.replace('.git','') in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.git_url.replace('.git','')]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.git_url.replace('.git','')} {stats["matched"]}')
-				elif db_repo.clone_url and db_repo.clone_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.clone_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.clone_url} {stats["matched"]}')
-				elif db_repo.html_url and db_repo.html_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.html_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.html_url} {stats["matched"]}')
-				elif db_repo.ssh_url and db_repo.ssh_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.ssh_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.ssh_url} {stats["matched"]}')
-
-				# Then try by name
-				elif db_repo.full_name and db_repo.full_name.lower() in github_repos_by_name:
-					repo_data = github_repos_by_name[db_repo.full_name.lower()]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.full_name.lower()} {stats["matched"]}')
-				elif db_repo.github_repo_name:
-					# logger.debug(f"Trying to match by name: {db_repo.github_repo_name} {stats['matched']}")
-					# Try owner/name format
-					full_name = f"{db_repo.github_owner}/{db_repo.github_repo_name}".lower()
-					if full_name in github_repos_by_name:
-						repo_data = github_repos_by_name[full_name]
-						stats["matched"] += 1
-						# logger.debug(f"match by name: {db_repo.github_repo_name} {len(repo_data)} {stats['matched']}")
-					# Try just the name
-					elif db_repo.github_repo_name.lower() in github_repos_by_name:
-						repo_data = github_repos_by_name[db_repo.github_repo_name.lower()]
-						stats["matched"] += 1
-						# logger.debug(f"match by name: {db_repo.github_repo_name} {len(repo_data)} {stats['matched']}")
-
-				# If we found matching data, update the database entry
-				if repo_data:
-					# Update the entry with all GitHub data
-					db_repo.last_scan = datetime.now()
-					db_repo.scan_count += 1
-
-					# Update with all API data
-					db_repo.node_id = repo_data.get('node_id')
-					db_repo.full_name = repo_data.get('full_name')
-					db_repo.private = repo_data.get('private')
-					db_repo.html_url = repo_data.get('html_url')
-					db_repo.description = repo_data.get('description')
-					db_repo.fork = repo_data.get('fork')
-					db_repo.clone_url = repo_data.get('clone_url')
-					db_repo.ssh_url = repo_data.get('ssh_url')
-					db_repo.git_url_api = repo_data.get('git_url')
-					db_repo.svn_url = repo_data.get('svn_url')
-					db_repo.homepage = repo_data.get('homepage')
-
-					# Statistics
-					db_repo.size = repo_data.get('size')
-					db_repo.stargazers_count = repo_data.get('stargazers_count')
-					db_repo.watchers_count = repo_data.get('watchers_count')
-					db_repo.forks_count = repo_data.get('forks_count')
-					db_repo.open_issues_count = repo_data.get('open_issues_count')
-					db_repo.language = repo_data.get('language')
-
-					# Repository features
-					db_repo.has_issues = repo_data.get('has_issues')
-					db_repo.has_projects = repo_data.get('has_projects')
-					db_repo.has_downloads = repo_data.get('has_downloads')
-					db_repo.has_wiki = repo_data.get('has_wiki')
-					db_repo.has_pages = repo_data.get('has_pages')
-					db_repo.has_discussions = repo_data.get('has_discussions')
-					db_repo.archived = repo_data.get('archived')
-					db_repo.disabled = repo_data.get('disabled')
-					db_repo.allow_forking = repo_data.get('allow_forking')
-					db_repo.is_template = repo_data.get('is_template')
-					db_repo.web_commit_signoff_required = repo_data.get('web_commit_signoff_required')
-
-					# Topics
-					if repo_data.get('topics'):
-						db_repo.topics = ','.join(repo_data.get('topics'))
-
-					db_repo.visibility = repo_data.get('visibility')
-					db_repo.default_branch = repo_data.get('default_branch')
-
-					# License information
-					if repo_data.get('license'):
-						db_repo.license_key = repo_data.get('license', {}).get('key')
-						db_repo.license_name = repo_data.get('license', {}).get('name')
-						db_repo.license_url = repo_data.get('license', {}).get('url')
-
-					# Try to parse timestamps
-					try:
-						if repo_data.get('created_at'):
-							db_repo.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
-						if repo_data.get('updated_at'):
-							db_repo.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
-						if repo_data.get('pushed_at'):
-							db_repo.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
-					except ValueError as e:
-						logger.warning(f"Error parsing timestamps: {e}")
-
-					stats["updated"] += 1
-					# logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name}")
-				else:
-					# No matching GitHub data found
-					stats["not_found"] += 1
-					# logger.warning(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
-
-				# Commit periodically to avoid large transactions
-				if (stats["updated"] + stats["not_found"]) % 100 == 0:
-					session.commit()
-					logger.warning(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
-
-			except Exception as e:
-				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
-				stats["errors"] += 1
-
-		# Final commit
-		session.commit()
-		logger.info(f"Finished processing repositories: {stats}")
-
-	except Exception as e:
-		logger.error(f"Error fetching database repositories: {e}")
-		stats["errors"] += 1
-		return {"errors": stats["errors"], "message": str(e)}
-
-	return stats
 
 async def populate_repo_data(session, args):
 	"""
@@ -588,162 +398,6 @@ async def populate_repo_data(session, args):
 		return {"errors": stats["errors"], "message": str(e)}
 
 	return stats
-
-async def fetch_missing_repo_data(session, args, update_all=False):
-	"""
-	Fetch GitHub API data for repositories that weren't found in starred repos
-	"""
-
-	stats = {
-		"total_repos": 0,
-		"processed": 0,
-		"updated": 0,
-		"failed": 0,
-		"skipped": 0,
-		"from_cache": 0
-	}
-
-	# Load cache first
-	stars_cache_file = 'missing_repo_data.json'
-	cache_data = {'repos': []}
-
-	if os.path.exists(stars_cache_file):
-		try:
-			async with aiofiles.open(stars_cache_file, 'r') as f:
-				cache_content = await f.read()
-				cache_data = json.loads(cache_content)
-				logger.info(f"Loaded {len(cache_data)} repositories from cache")
-		except Exception as e:
-			logger.error(f"Failed to load cache: {e}")
-
-	# Build lookup dictionary for cached repos
-	cache_repos_by_name = {}
-	for repo in cache_data:
-		if repo.get('full_name'):
-			cache_repos_by_name[repo['full_name'].lower()] = repo
-		if repo.get('name'):
-			# Also index by name only as fallback
-			cache_repos_by_name[repo['name'].lower()] = repo
-
-	# Get GitHub auth token
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
-	if not auth:
-		logger.error('fetch_missing_repo_data: no auth provided')
-		return stats
-
-	# Setup GitHub API headers
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
-
-	# Query repos from database that need updating
-	if update_all:
-		db_repos = session.query(GitRepo).all()
-	else:
-		# Only get repos that are missing key GitHub data
-		db_repos = session.query(GitRepo).filter((GitRepo.node_id.is_(None)) | (GitRepo.full_name.is_(None)) | (GitRepo.description.is_(None))).all()
-
-	stats["total_repos"] = len(db_repos)
-	logger.info(f"Found {stats['total_repos']} repositories that need GitHub data")
-	if args.nodl:
-		logger.warning("Running in --nodl mode, no API requests will be made")
-		return stats
-	# Process repositories in batches for efficiency
-	batch_size = 10
-	for i in range(0, len(db_repos), batch_size):
-		batch = db_repos[i:i+batch_size]
-		tasks = []
-
-		async with aiohttp.ClientSession() as api_session:
-			for repo in batch:
-				tasks.append(process_repo(repo, api_session, headers, cache_repos_by_name, cache_data, stats, session, args))
-
-			await asyncio.gather(*tasks)
-
-			# Commit after each batch
-			session.commit()
-			logger.info(f"Progress: {i+len(batch)}/{stats['total_repos']} repositories processed")
-
-	# Final cache update
-	try:
-		async with aiofiles.open(stars_cache_file, 'w') as f:
-			cache_data['timestamp'] = str(datetime.now())
-			await f.write(json.dumps(cache_data, indent=4))
-			logger.info("Final update to cache file with new data")
-	except Exception as e:
-		logger.error(f"Failed to update cache: {e}")
-
-	# Final commit
-	session.commit()
-	logger.info(f"Finished fetching repository data: {stats}")
-
-	return stats
-
-async def process_repo(repo, api_session, headers, cache_repos_by_name, cache_data, stats, session, args):
-	"""Helper function to process a single repository"""
-	stats["processed"] += 1
-
-	# Skip if no owner/name information is available
-	if not repo.github_owner or not repo.github_repo_name:
-		stats["skipped"] += 1
-		logger.warning(f"Skipping repo with missing owner/name: {repo}")
-		return
-
-	# Construct the repository path
-	repo_path = f"{repo.github_owner}/{repo.github_repo_name}"
-	api_url = f"https://api.github.com/repos/{repo_path}"
-
-	# First check if repo exists in cache
-	repo_data = None
-	repo_key = repo_path.lower()
-
-	if repo_key in cache_repos_by_name:
-		repo_data = cache_repos_by_name[repo_key]
-		stats["from_cache"] += 1
-	else:
-		# Not in cache, make API request
-		logger.info(f"Fetching GitHub data for {repo_path} ({stats['processed']}/{stats['total_repos']})")
-		if args.nodl:
-			logger.warning(f"Skipping API request for {repo_path} due to --nodl flag")
-			stats["skipped"] += 1
-			return
-		else:
-			try:
-				# Make the API request
-				async with api_session.get(api_url, headers=headers) as response:
-					if response.status == 200:
-						repo_data = await response.json()
-
-						# Add to cache
-						cache_data.append(repo_data)
-						cache_repos_by_name[repo_path.lower()] = repo_data
-
-					elif response.status == 404:
-						logger.warning(f"Repository not found on GitHub: {repo_path} (possibly private, renamed or deleted)")
-						stats["failed"] += 1
-						return
-					else:
-						error_text = await response.text()
-						logger.error(f"GitHub API error ({response.status}): {error_text}")
-						stats["failed"] += 1
-						return
-			except Exception as e:
-				logger.error(f"Error processing {repo_path}: {e}")
-				stats["failed"] += 1
-				return
-
-	# If we have data (either from cache or API), update the repository
-	if repo_data:
-		try:
-			# Update repository with data
-			update_repo_from_data(repo, repo_data)
-			stats["updated"] += 1
-
-		except Exception as e:
-			logger.error(f"Error updating repository {repo_path}: {e}")
-			stats["failed"] += 1
 
 def update_repo_from_data(repo, repo_data):
 	"""Update a repository with data from GitHub API"""
@@ -901,7 +555,7 @@ def populate_from_metadata(repo, metadata):
 	# Store complete metadata if needed for reference
 	# repo.raw_metadata = json.dumps(metadata)  # If you want to store the raw JSON
 
-	logger.debug(f"Populated metadata for repoid: {repo.id} - {repo.full_name}")
+	# logger.debug(f"Populated metadata for repoid: {repo.id} - {repo.full_name}")
 	return repo
 
 async def fetch_metadata(repo, session, args):
@@ -957,6 +611,15 @@ async def fetch_metadata(repo, session, args):
 			try:
 				repo_metadata = await update_repo_cache(repo_path, session, args)
 				return repo_metadata
+			except RateLimitExceededError as e:
+				logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
+				# Return cached data if available
+				if cache_entry:
+					try:
+						return json.loads(cache_entry.data)
+					except Exception as e:
+						logger.error(f"Error parsing cached metadata: {e}")
+						return None
 			except Exception as e:
 				logger.error(f"Error fetching repository metadata: {e}")
 				return None

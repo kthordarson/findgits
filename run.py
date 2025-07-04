@@ -131,35 +131,6 @@ class MainApp(QMainWindow):
 				item1.setText(3, f"{g.folder_size:,}")
 		self.ui.repotree.resizeColumnToContents(0)
 		self.ui.repotree.resizeColumnToContents(1)
-		# self.ui.repotree.addTopLevelItem(item_1)
-# QTreeWidget treeWidget = new QTreeWidget();
-# treeWidget->setColumnCount(1);
-# QList<QTreeWidgetItem > items;
-# for (int i = 0; i < 10; ++i)
-#       items.append(new QTreeWidgetItem((QTreeWidget*)0, QStringList(QString("item: %1").arg(i))));
-# treeWidget->insertTopLevelItems(0, items);
-
-	def xrepotree_populate(self):
-		self.ui.repotree.clear()
-		self.ui.repotree.setColumnCount(3)
-		[self.ui.repotree.headerItem().setText(k[0],k[1]) for k in enumerate(["id", "dupes", "url"])]
-		# self.repotree.headerItem().setText(0, "id")
-		# self.repotree.headerItem().setText(1, "path")
-		# self.repotree.headerItem().setText(2, "dupe")
-		# self.repotree.headerItem().setText(3, "dupe_count")
-		if self.dupefilter:
-			gitrepos = session.query(GitRepo).filter(GitRepo.dupe_flag == self.dupefilter).all()
-		else:
-			gitrepos = session.query(GitRepo).all()
-		for k in gitrepos:
-			item_1 = QTreeWidgetItem(self.ui.repotree)
-			item_1.setText(0, f"{k.id}")
-			item_1.setText(1, f"{k.dupe_count}")
-			item_1.setText(2, f"{k.git_url}")
-		self.ui.repotree.resizeColumnToContents(0)
-		self.ui.repotree.resizeColumnToContents(1)
-		self.ui.repotree.resizeColumnToContents(2)
-		# self.dupecountlabel.setText(f'Dupes: {k.dupe_count}')
 
 if __name__ == '__main__':
 	myparse = ArgumentParser(description="findgits")
