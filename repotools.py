@@ -202,7 +202,7 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 		repo_data = await update_repo_cache(clean_path, session, args)  # Pass session to update_repo_cache
 	except RateLimitExceededError as e:
 		logger.warning(f'Rate limit exceeded while fetching metadata for {clean_path}: {e}')
-		repo_data = None
+		raise e
 
 	if not git_repo:
 		# Create new repository with all available data
@@ -613,13 +613,7 @@ async def fetch_metadata(repo, session, args):
 				return repo_metadata
 			except RateLimitExceededError as e:
 				logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
-				# Return cached data if available
-				if cache_entry:
-					try:
-						return json.loads(cache_entry.data)
-					except Exception as e:
-						logger.error(f"Error parsing cached metadata: {e}")
-						return None
+				raise e
 			except Exception as e:
 				logger.error(f"Error fetching repository metadata: {e}")
 				return None

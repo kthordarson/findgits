@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA
 
-def RateLimitExceededError(Exception):
+class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
 	pass
 
@@ -108,17 +108,18 @@ async def update_repo_cache(repo_name_or_url, session, args):
 				elif r.status == 403:
 					rtext = await r.text()
 					ratelimit_reset = datetime.fromtimestamp(int(r.headers.get('X-RateLimit-Reset')))
-					logger.error(f"Rate limit exceeded for repository {repo_name}: {r.status} rtext: {rtext}")
-					logger.error(f"xratelimits: {r.headers.get('X-RateLimit-Used')}/{r.headers.get('X-RateLimit-Remaining')}/{r.headers.get('X-RateLimit-Limit')} 'X-RateLimit-Reset': {ratelimit_reset}")
-					logger.error(f'rheaders: {r.headers}')
+					logger.error(f"Rate limit exceeded for repository {repo_name}: {r.status} xratelimits: {r.headers.get('X-RateLimit-Used')}/{r.headers.get('X-RateLimit-Remaining')}/{r.headers.get('X-RateLimit-Limit')} 'X-RateLimit-Reset': {ratelimit_reset}")
+					# rtext: {rtext}
+					# logger.error(f"")
+					# logger.error(f'rheaders: {r.headers}')
 					# Handle rate limiting by returning cached data if available
 					if cache_data:
 						logger.debug(f"Returning cached data for {repo_name} due to rate limit")
-						await asyncio.sleep(60)  # Wait before retrying
+						await asyncio.sleep(1)  # Wait before retrying
 						return cache_data[0]
 					else:
-						logger.error(f"No cached data available for {repo_name} after rate limit exceeded")
-						await asyncio.sleep(60)  # Wait before retrying
+						logger.warning(f"No cached data available for {repo_name} after rate limit exceeded")
+						await asyncio.sleep(1)  # Wait before retrying
 						raise RateLimitExceededError(f"Rate limit exceeded for repository {repo_name}, no cached data available")
 				elif r.status == 404 or r.status == 451:
 					logger.warning(f"Repository error {r.status}: {api_url} - Creating default data structure")
@@ -155,6 +156,9 @@ async def update_repo_cache(repo_name_or_url, session, args):
 				else:
 					logger.error(f"Failed to fetch repository data: {r.status} {await r.text()} api_url: {api_url}")
 					return None
+	except RateLimitExceededError as e:
+		logger.warning(f"Rate limit exceeded while fetching repository {repo_name}: {e}")
+		return None
 	except Exception as e:
 		logger.error(f"Error fetching repository data: {e} {type(e)}")
 		logger.error(f'traceback: {traceback.format_exc()}')
