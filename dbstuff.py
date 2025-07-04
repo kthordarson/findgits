@@ -83,7 +83,8 @@ class GitFolder(Base):
 		""" Get stats for this git_path"""
 		if not os.path.exists(self.git_path):  # redundant check, but just in case?
 			self.valid = False
-			raise MissingGitFolderException(f'{self} does not exist')
+			logger.error(f'{self} does not exist')
+			return
 		# t0 = datetime.now()
 		self.last_scan = datetime.now()
 		stat = os.stat(self.git_path)
@@ -93,6 +94,10 @@ class GitFolder(Base):
 
 	def get_folder_stats(self):
 		t0 = datetime.now()
+		if not os.path.exists(self.git_path):  # redundant check, but just in case?
+			self.valid = False
+			logger.error(f'{self} does not exist')
+			return
 		self.folder_size = get_directory_size(self.git_path)
 		self.file_count = get_subfilecount(self.git_path)
 		self.subdir_count = get_subdircount(self.git_path)
@@ -278,12 +283,14 @@ class CacheEntry(Base):
 	cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
 	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)
 	timestamp = Column('timestamp', DateTime)  # When this entry was created/updated
+	last_scan = Column('last_scan', DateTime)  # When this entry was last scanned
 
 	def __init__(self, cache_key, cache_type, data):
 		self.cache_key = cache_key
 		self.cache_type = cache_type
 		self.data = data
 		self.timestamp = datetime.now()
+		self.last_scan = datetime.now()
 
 	def __repr__(self):
 		return f'<CacheEntry {self.id} key={self.cache_key} type={self.cache_type}>'
@@ -349,9 +356,11 @@ def set_cache_entry(session, cache_key, cache_type, data):
 		# Update existing entry
 		entry.data = data
 		entry.timestamp = datetime.now()
+		entry.last_scan = datetime.now()
 	else:
 		# Create new entry
 		entry = CacheEntry(cache_key, cache_type, data)
+		entry.last_scan = datetime.now()
 		session.add(entry)
 
 	# The caller is responsible for committing the session

@@ -32,8 +32,8 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		# Get remote URL and normalize it
 		remote_url = get_remote(git_folder_path).lower().strip()
 		if not remote_url or remote_url == '[no remote]':
-			logger.warning(f'Could not determine remote URL for {git_folder_path}')
 			remote_url = f"file://{git_folder_path}"  # Use local path as fallback URL
+			logger.warning(f'Could not determine remote URL for {git_folder_path} remote_url set to {remote_url}')
 
 		# Extract repo name and owner from URL for GitHub API lookup
 		repo_name = None
@@ -70,7 +70,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 						self.github_repo_name = name
 
 				repo_info = RepoInfo(owner, repo_name)
-				repo_metadata = await fetch_metadata(repo_info, session)
+				repo_metadata = await fetch_metadata(repo_info, session, args)
 			except Exception as e:
 				logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
 				repo_metadata = None
@@ -105,7 +105,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 				logger.info(f'Fetching metadata for {repo_path}')
 				try:
 					# Important: Pass the session parameter
-					repo_metadata = await update_repo_cache(repo_path, session)
+					repo_metadata = await update_repo_cache(repo_path, session, args)
 				except Exception as e:
 					logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
 					repo_metadata = None
@@ -176,7 +176,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		return None
 
 
-async def insert_update_starred_repo(github_repo, session, create_new=False):
+async def insert_update_starred_repo(github_repo, session, args, create_new=False):
 	"""
 	Insert a new GitRepo or update an existing one in the database
 
@@ -206,7 +206,7 @@ async def insert_update_starred_repo(github_repo, session, create_new=False):
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 
 	# Get full repository data from GitHub API
-	repo_data = await update_repo_cache(clean_path, session)  # Pass session to update_repo_cache
+	repo_data = await update_repo_cache(clean_path, session, args)  # Pass session to update_repo_cache
 
 	if not git_repo:
 		# Create new repository with all available data
@@ -300,7 +300,7 @@ async def populate_starred_repos(session, args):
 
 	# Fetch starred repositories from GitHub API
 	logger.info(f"Fetching starred repositories (max_pages={args.max_pages}, use_cache={args.use_cache})")
-	starred_repos = await get_git_stars(args)
+	starred_repos = await get_git_stars(args, session)
 
 	stats = {
 		"total_db_repos": 0,
@@ -491,7 +491,7 @@ async def populate_repo_data(session, args):
 	git_repos = session.query(GitRepo).all()
 
 	# Fetch starred repositories from GitHub API
-	starred_repos = await get_git_stars(args)
+	starred_repos = await get_git_stars(args, session)
 
 	stats = {
 		"total_db_repos": len(git_repos),
@@ -905,7 +905,7 @@ def populate_from_metadata(repo, metadata):
 	logger.debug(f"Populated metadata for {repo.full_name} ({repo.id})")
 	return repo
 
-async def fetch_metadata(repo, session):
+async def fetch_metadata(repo, session, args):
 	"""
 	Fetch metadata from GitHub API for this repository with database caching
 
@@ -949,10 +949,12 @@ async def fetch_metadata(repo, session):
 				return cached_repo
 		except Exception as e:
 			logger.error(f"Error parsing cached metadata: {e}")
+	else:
+		logger.warning(f"No cache entry found for {repo_path}, fetching from GitHub")
 
 	# Use update_repo_cache to get metadata
 	try:
-		repo_metadata = await update_repo_cache(repo_path, session, use_existing_cache=True)
+		repo_metadata = await update_repo_cache(repo_path, session, args)
 		return repo_metadata
 	except Exception as e:
 		logger.error(f"Error fetching repository metadata: {e}")

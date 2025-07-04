@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 import datetime
 from dbstuff import get_cache_entry, set_cache_entry
 
-async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
+async def update_repo_cache(repo_name_or_url, session, args):
     """
     Fetch repository data from GitHub API and update the database cache
     """
@@ -40,7 +40,7 @@ async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
 
     # Load existing cache if available and requested
     cache_data = []
-    if use_existing_cache:
+    if args.use_cache:
         cache_entry = get_cache_entry(session, cache_key, cache_type)
         if cache_entry:
             try:
@@ -76,6 +76,7 @@ async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
                     for i, repo in enumerate(cache_data):
                         if repo.get('id') == repo_data.get('id'):
                             existing_index = i
+                            logger.debug(f"Found existing repository in cache: {repo_data.get('name')} at index {i}")
                             break
 
                     # Update or add to cache
@@ -91,8 +92,8 @@ async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
                     session.commit()
 
                     return repo_data
-                elif r.status == 404:
-                    logger.warning(f"Repository not found: {api_url} - Creating default data structure")
+                elif r.status == 404 or r.status == 451:
+                    logger.warning(f"Repository error {r.status}: {api_url} - Creating default data structure")
 
                     # Create default repo data structure based on what we know
                     # Parse owner and repo name from the repo_name
@@ -119,7 +120,7 @@ async def update_repo_cache(repo_name_or_url, session, use_existing_cache=True):
                         } if owner else None,
                         "private": False,
                         "html_url": f"https://github.com/{repo_name}",
-                        "description": "Repository data unavailable (404 error)",
+                        "description": f"Repository data unavailable ({r.status} error)",
                         "fork": False,
                         "url": api_url,
                         "created_at": current_time,
@@ -176,29 +177,28 @@ async def get_git_stars(args, session):
     do_download = False
 
     # Try to load from cache first if use_cache is enabled
-    if not args.use_cache:
-        do_download = True
     if args.use_cache:
         cache_entry = get_cache_entry(session, cache_key, cache_type)
         if cache_entry:
             try:
                 jsonbuffer = json.loads(cache_entry.data)
                 logger.info(f"Loaded {len(jsonbuffer)} starred repos from database cache")
-                return jsonbuffer
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON in cache entry: {e}")
                 do_download = True
             except Exception as e:
                 logger.error(f"Error loading from cache: {e}")
                 do_download = True
-        else:
-            logger.info("No cache entry found in database for starred repos")
-            do_download = True
+            finally:
+                if len(jsonbuffer) == 0:
+                    logger.warning("No cache entry found in database for starred repos")
+                return jsonbuffer
+            # do_download = True
 
-    if do_download or not jsonbuffer or not args.use_cache:
-        git_starred_repos = await download_git_stars(args, session)
-        logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={args.max_pages}")
-        return git_starred_repos
+        # if do_download or not jsonbuffer or not args.use_cache:
+        #     git_starred_repos = await download_git_stars(args, session)
+        #     logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={args.max_pages}")
+        #     return git_starred_repos
 
 async def download_git_stars(args, session):
     # If we get here, we need to fetch from the API
@@ -307,7 +307,7 @@ async def get_git_list_stars(session, use_cache=True) -> dict:
     listurl = f'https://github.com/{auth.username}?tab=stars'
     headers = {'Authorization': f'Bearer {auth.password}','X-GitHub-Api-Version': '2022-11-28'}
     soup = None
-
+    cache_entry = None
     if use_cache:
         cache_entry = get_cache_entry(session, cache_key, cache_type)
         if cache_entry:
@@ -315,7 +315,9 @@ async def get_git_list_stars(session, use_cache=True) -> dict:
                 soup = BeautifulSoup(cache_entry.data, 'html.parser')
                 logger.debug("Loaded star list from database cache")
             except Exception as e:
-                logger.error(f'Failed to parse cached star list: {e}')
+                logger.error(f'Failed to parse cached star list: {e} {type(e)} {cache_key} not found in database cache type {cache_type}')
+        else:
+            logger.warning(f'Failed to parse cached star list: {cache_key} not found in database cache type {cache_type}')
 
     if not soup:
         async with aiohttp.ClientSession() as api_session:
@@ -377,6 +379,8 @@ async def get_info_for_list(link, headers, session, use_cache):
                 logger.debug(f"Loaded list info from database cache for {link}")
             except Exception as e:
                 logger.error(f'Failed to parse cached list info: {e}')
+        else:
+            logger.warning(f"No cache entry found for {link} in database")
 
     if not soup:
         async with aiohttp.ClientSession() as api_session:
@@ -429,6 +433,9 @@ async def fetch_starred_repos(args, session):
                     return cache_data
             except Exception as e:
                 logger.warning(f"Failed to load cache: {e}")
+        else:
+            logger.warning("No cache entry found in database for starred repos")
+            # Proceed to download if no cache or cache is too old
 
     # Get authentication
     auth = get_auth_param()

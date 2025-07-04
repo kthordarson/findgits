@@ -49,9 +49,9 @@ def get_remote(git_path: str) -> str:
 	try:
 		remote_url = remote_out[0].split()[1]
 	except IndexError as e:
-		pass  # logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out}')
+		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 	except Exception as e:
-		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out}')
+		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 	return remote_url
 
 def get_directory_size(directory: str) -> int:

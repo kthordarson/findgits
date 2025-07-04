@@ -37,10 +37,10 @@ async def process_git_folder(git_path, session, args):
 			session.rollback()
 		return None
 
-async def process_starred_repo(repo, session):
+async def process_starred_repo(repo, session, args):
 	"""Process a single starred repo asynchronously"""
 	try:
-		await insert_update_starred_repo(repo, session)
+		await insert_update_starred_repo(repo, session, args)
 	except Exception as e:
 		logger.error(f'Error processing {repo}: {e} {type(e)}')
 
@@ -139,6 +139,10 @@ async def main():
 	if args.populate:
 		stats = await populate_repo_data(session, args)
 		print(f"GitHub Stars Processing Stats:{stats}")
+
+		git_folders = session.query(GitFolder).all()
+		print(f'Git Folders: {len(git_folders)}')
+
 		# For larger datasets, consider processing in batches
 		batch_size = 50
 		for i, folder in enumerate(git_folders):
@@ -183,7 +187,7 @@ async def main():
 			tasks = []
 
 			for repo in batch:
-				tasks.append(process_starred_repo(repo, session))
+				tasks.append(process_starred_repo(repo, session, args))
 
 			await asyncio.gather(*tasks)
 			session.commit()
