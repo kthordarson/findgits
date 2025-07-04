@@ -44,7 +44,7 @@ class Ui_MainWindow(object):
         self.formLayout.setObjectName(u"formLayout")
         self.formLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.formLayout.setLabelAlignment(Qt.AlignCenter)
-        self.formLayout.setFormAlignment(Qt.AlignJustify|Qt.AlignTop)  # type: ignore
+        self.formLayout.setFormAlignment(Qt.AlignJustify | Qt.AlignTop)  # type: ignore
         self.formLayout.setContentsMargins(0, 3, 3, 3)
         self.idLabel = QLabel(self.formLayoutWidget_3)
         self.idLabel.setObjectName(u"idLabel")

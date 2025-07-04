@@ -12,27 +12,54 @@ from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import Session
 from utils import ensure_datetime
 from utils import get_directory_size, get_subfilecount, get_subdircount
-# from git_tasks import get_git_show
 
-# Base = declarative_base()
+BLANK_REPO_DATA = {
+	"id": None,
+	"node_id": None,
+	"name": 'BLANK_REPO_DATA',
+	"full_name": 'BLANK_REPO_DATA',
+	"owner": {"login": 'BLANK_REPO_DATA'},
+	"private": False,
+	"html_url": "https://github.com/",
+	"description": "Repository BLANK_REPO_DATA",
+	"fork": False,
+	"url": 'BLANK_REPO_DATA',
+	"created_at": None,
+	"updated_at": None,
+	"pushed_at": None,
+	"git_url": "git://github.com/BLANK_REPO_DATA.git",
+	"ssh_url": "git@github.com:BLANK_REPO_DATA.git",
+	"clone_url": "https://github.com/BLANK_REPO_DATA.git",
+	"svn_url": "https://github.com/BLANK_REPO_DATA",
+	"homepage": None,
+	"size": 0,
+	"stargazers_count": 0,
+	"watchers_count": 0,
+	"language": None,
+	"forks_count": 0,
+	"forks": 0,
+	"open_issues_count": 0,
+	"open_issues": 0,
+	"watchers": 0,
+	"default_branch": "main",
+	"temp_clone_token": None,
+	"network_count": 0,
+	"subscribers_count": 0,
+	"archived": False,
+	"disabled": False,
+	"license": None,
+	"topics": [],
+	"visibility": "unknown",
+	"_unavailable": True}  # Flag to indicate this is default data
 
 class MissingConfigException(Exception):
 	pass
 
-
 class MissingGitFolderException(Exception):
 	pass
 
-
 class Base(DeclarativeBase):
 	pass
-
-
-# GPP folders that contain more than one git repo
-# --addpath to GPP to db
-# todo: if a subfolder of a GPP contains other git repos, make those a GPP and add to db
-#       example: GPP folder ~/development2 has one called games, which should be a GPP
-
 
 class GitFolder(Base):
 	""" A folder containing one git repo """
@@ -110,9 +137,7 @@ class GitFolder(Base):
 class GitRepo(Base):
 	""" A git repo, linked to one or more git_paths """
 	__tablename__ = 'gitrepo'
-	__table_args__ = (
-		sqlalchemy.UniqueConstraint('git_url', name='uix_git_url'),
-	)
+	# __table_args__ = (sqlalchemy.UniqueConstraint('git_url', name='uix_git_url'),)
 
 	id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -344,27 +369,6 @@ def get_dupes(session: Session) -> list:
 	# sql = text('select * from dupeview;')
 	dupes = session.execute(sql).all()
 	return dupes
-
-def get_cache_entry(session, cache_key, cache_type):
-	"""Get a cache entry from the database"""
-	return session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
-
-def set_cache_entry(session, cache_key, cache_type, data):
-	"""Set or update a cache entry in the database"""
-	entry = get_cache_entry(session, cache_key, cache_type)
-	if entry:
-		# Update existing entry
-		entry.data = data
-		entry.timestamp = datetime.now()
-		entry.last_scan = datetime.now()
-	else:
-		# Create new entry
-		entry = CacheEntry(cache_key, cache_type, data)
-		entry.last_scan = datetime.now()
-		session.add(entry)
-
-	# The caller is responsible for committing the session
-	return entry
 
 if __name__ == '__main__':
 	pass

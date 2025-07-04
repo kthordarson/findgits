@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import traceback
 import aiohttp
 import json
 import os
@@ -6,165 +7,8 @@ from loguru import logger
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
-from dbstuff import get_cache_entry, set_cache_entry
-
-async def update_repo_cache(repo_name_or_url, session, args):
-    """
-    Fetch repository data from GitHub API and update the database cache
-    """
-    # Extract repo name if URL is provided, with improved path handling
-    if '/' in repo_name_or_url:
-        # Handle URLs with leading slash
-        clean_path = repo_name_or_url.lstrip('/')
-
-        if 'github.com' in clean_path:
-            parts = clean_path.split('github.com/')
-            if len(parts) > 1:
-                repo_name = parts[1].rstrip('.git')
-            else:
-                logger.error(f"Invalid GitHub URL format: {repo_name_or_url}")
-                return None
-        else:
-            # Assume format is already owner/repo
-            repo_name = clean_path
-    else:
-        logger.error(f"Invalid repository name or URL: {repo_name_or_url}")
-        return None
-
-    # Ensure repo_name doesn't have leading/trailing slashes
-    repo_name = repo_name.strip('/')
-
-    # Create cache key for this repository
-    cache_key = f"repo:{repo_name}"
-    cache_type = "repo_data"
-
-    # Load existing cache if available and requested
-    cache_data = []
-    if args.use_cache:
-        cache_entry = get_cache_entry(session, cache_key, cache_type)
-        if cache_entry:
-            try:
-                cache_data = json.loads(cache_entry.data)
-                logger.debug(f"Loaded cache for {repo_name} from database")
-            except Exception as e:
-                logger.error(f"Failed to parse cache data: {e}")
-        else:
-            logger.warning(f"No cache entry found for {repo_name} in database")
-            # Continue with empty cache_data
-
-    # Fetch repository data from GitHub API
-    auth = get_auth_param()
-    if not auth:
-        logger.error('update_repo_cache: no auth provided')
-        return None
-
-    api_url = f'https://api.github.com/repos/{repo_name}'
-    headers = {
-        'Accept': 'application/vnd.github+json',
-        'Authorization': f'Bearer {auth.password}',
-        'X-GitHub-Api-Version': '2022-11-28'
-    }
-
-    try:
-        async with aiohttp.ClientSession() as api_session:
-            async with api_session.get(api_url, headers=headers) as r:
-                if r.status == 200:
-                    repo_data = await r.json()
-
-                    # Check if repo already exists in cache
-                    existing_index = None
-                    for i, repo in enumerate(cache_data):
-                        if repo.get('id') == repo_data.get('id'):
-                            existing_index = i
-                            logger.debug(f"Found existing repository in cache: {repo_data.get('name')} at index {i}")
-                            break
-
-                    # Update or add to cache
-                    if existing_index is not None:
-                        cache_data[existing_index] = repo_data
-                        logger.info(f"Updated existing repository in cache: {repo_name}")
-                    else:
-                        cache_data.append(repo_data)
-                        logger.info(f"Added new repository to cache: {repo_name}")
-
-                    # Update the database cache
-                    set_cache_entry(session, cache_key, cache_type, json.dumps(cache_data))
-                    session.commit()
-
-                    return repo_data
-                elif r.status == 404 or r.status == 451:
-                    logger.warning(f"Repository error {r.status}: {api_url} - Creating default data structure")
-
-                    # Create default repo data structure based on what we know
-                    # Parse owner and repo name from the repo_name
-                    owner, name = None, None
-                    if '/' in repo_name:
-                        parts = repo_name.split('/')
-                        if len(parts) >= 2:
-                            owner = parts[0]
-                            name = parts[1]
-                    else:
-                        name = repo_name
-
-                    # Generate a current timestamp for consistency
-                    current_time = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
-
-                    # Create default repository data structure
-                    default_repo_data = {
-                        "id": None,
-                        "node_id": None,
-                        "name": name,
-                        "full_name": f"{owner}/{name}" if owner else name,
-                        "owner": {
-                            "login": owner
-                        } if owner else None,
-                        "private": False,
-                        "html_url": f"https://github.com/{repo_name}",
-                        "description": f"Repository data unavailable ({r.status} error)",
-                        "fork": False,
-                        "url": api_url,
-                        "created_at": current_time,
-                        "updated_at": current_time,
-                        "pushed_at": current_time,
-                        "git_url": f"git://github.com/{repo_name}.git",
-                        "ssh_url": f"git@github.com:{repo_name}.git",
-                        "clone_url": f"https://github.com/{repo_name}.git",
-                        "svn_url": f"https://github.com/{repo_name}",
-                        "homepage": None,
-                        "size": 0,
-                        "stargazers_count": 0,
-                        "watchers_count": 0,
-                        "language": None,
-                        "forks_count": 0,
-                        "forks": 0,
-                        "open_issues_count": 0,
-                        "open_issues": 0,
-                        "watchers": 0,
-                        "default_branch": "main",
-                        "temp_clone_token": None,
-                        "network_count": 0,
-                        "subscribers_count": 0,
-                        "archived": False,
-                        "disabled": False,
-                        "license": None,
-                        "topics": [],
-                        "visibility": "unknown",
-                        "_unavailable": True  # Flag to indicate this is default data
-                    }
-
-                    # Add to cache so we don't keep trying to fetch it
-                    cache_data.append(default_repo_data)
-                    set_cache_entry(session, cache_key, cache_type, json.dumps(cache_data))
-                    session.commit()
-                    logger.debug(f"Added default data for unavailable repository to cache: {repo_name}")
-
-                    return default_repo_data
-                else:
-                    logger.error(f"Failed to fetch repository data: {r.status} {await r.text()} api_url: {api_url}")
-                    return None
-    except Exception as e:
-        logger.error(f"Error fetching repository data: {e} {type(e)}")
-        return None
+from dbstuff import BLANK_REPO_DATA
+from cacheutils import get_cache_entry, set_cache_entry
 
 async def get_git_stars(args, session):
     """
@@ -202,7 +46,11 @@ async def get_git_stars(args, session):
 
 async def download_git_stars(args, session):
     # If we get here, we need to fetch from the API
-    auth = get_auth_param()
+    jsonbuffer = []
+    if args.nodl:
+        logger.warning('get_git_stars: Skipping API call due to --nodl flag')
+        return jsonbuffer
+    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
     if not auth:
         logger.error('get_git_stars: no auth provided')
         return None
@@ -212,7 +60,6 @@ async def download_git_stars(args, session):
         'Accept': 'application/vnd.github+json',
         'Authorization': f'Bearer {auth.password}',
         'X-GitHub-Api-Version': '2022-11-28'}
-    jsonbuffer = []
 
     cache_key = "starred_repos_list"
     cache_type = "starred_repos"
@@ -292,14 +139,14 @@ async def download_git_stars(args, session):
             logger.error(f"Failed to write cache: {e}")
     return jsonbuffer
 
-async def get_git_list_stars(session, use_cache=True) -> dict:
+async def get_git_list_stars(session, args) -> dict:
     """
     Get lists of starred repos using database cache
     """
     cache_key = "git_list_stars"
     cache_type = "list_stars"
 
-    auth = get_auth_param()
+    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
     if not auth:
         logger.error('get_git_list_stars: no auth provided')
         return {}
@@ -308,7 +155,7 @@ async def get_git_list_stars(session, use_cache=True) -> dict:
     headers = {'Authorization': f'Bearer {auth.password}','X-GitHub-Api-Version': '2022-11-28'}
     soup = None
     cache_entry = None
-    if use_cache:
+    if args.use_cache:
         cache_entry = get_cache_entry(session, cache_key, cache_type)
         if cache_entry:
             try:
@@ -318,7 +165,9 @@ async def get_git_list_stars(session, use_cache=True) -> dict:
                 logger.error(f'Failed to parse cached star list: {e} {type(e)} {cache_key} not found in database cache type {cache_type}')
         else:
             logger.warning(f'Failed to parse cached star list: {cache_key} not found in database cache type {cache_type}')
-
+    if args.nodl:
+        logger.warning("Skipping API call due to --nodl flag")
+        return {}
     if not soup:
         async with aiohttp.ClientSession() as api_session:
             async with api_session.get(listurl, headers=headers) as r:
@@ -348,7 +197,7 @@ async def get_git_list_stars(session, use_cache=True) -> dict:
             list_description = ''
 
         try:
-            list_repos = await get_info_for_list(list_link, headers, session, use_cache)
+            list_repos = await get_info_for_list(list_link, headers, session, args)
         except Exception as e:
             logger.warning(f'{e} {type(e)} failed to get list info for {listname}')
             list_repos = []
@@ -362,7 +211,7 @@ async def get_git_list_stars(session, use_cache=True) -> dict:
 
     return lists
 
-async def get_info_for_list(link, headers, session, use_cache):
+async def get_info_for_list(link, headers, session, args):
     """
     Get info for a list using database cache
     """
@@ -371,7 +220,7 @@ async def get_info_for_list(link, headers, session, use_cache):
 
     soup = None
 
-    if use_cache:
+    if args.use_cache:
         cache_entry = get_cache_entry(session, cache_key, cache_type)
         if cache_entry:
             try:
@@ -381,7 +230,9 @@ async def get_info_for_list(link, headers, session, use_cache):
                 logger.error(f'Failed to parse cached list info: {e}')
         else:
             logger.warning(f"No cache entry found for {link} in database")
-
+    if args.nodl:
+        logger.warning(f"Skipping API call for {link} due to --nodl flag")
+        return []
     if not soup:
         async with aiohttp.ClientSession() as api_session:
             async with api_session.get(link, headers=headers) as r:
@@ -404,14 +255,6 @@ async def get_info_for_list(link, headers, session, use_cache):
 
 def get_updated_at_sort(x) -> HTTPBasicAuth:
     return x['updated_at']
-
-def get_auth_param():
-    try:
-        auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
-    except Exception as e:
-        logger.error(f'failed to get auth param {e} {type(e)}')
-        return None
-    return auth
 
 async def fetch_starred_repos(args, session):
     """
@@ -436,9 +279,11 @@ async def fetch_starred_repos(args, session):
         else:
             logger.warning("No cache entry found in database for starred repos")
             # Proceed to download if no cache or cache is too old
-
+    if args.nodl:
+        logger.warning("Skipping API call due to --nodl flag")
+        return []
     # Get authentication
-    auth = get_auth_param()
+    auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("GITHUBAPITOKEN",''))
     if not auth:
         logger.error("No GitHub authentication available")
         return []

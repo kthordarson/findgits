@@ -24,7 +24,7 @@ def dbcheck(session) -> dict:
 
 async def process_git_folder(git_path, session, args):
 	"""Process a single git folder asynchronously"""
-	logger.info(f'Processing {git_path}')
+	# logger.info(f'Processing {git_path}')
 	try:
 		# Always ensure the session is in a valid state
 		if not session.is_active:
@@ -66,6 +66,7 @@ def get_args():
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
+	myparse.add_argument('--nodl', help='disable all downloads/api call', action='store_true', default=False, dest='nodl')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 	return args
@@ -101,7 +102,7 @@ async def main():
 	if args.gitstars:
 		starred_repos = []
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session)  # Updated call
+		git_lists = await get_git_list_stars(session, args)
 		starred_repos = await get_git_stars(args, session)  # Updated call
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -119,18 +120,14 @@ async def main():
 		scanpath = Path(args.scanpath[0])
 		if scanpath.is_dir():
 			# Find git folders
-			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir()]
+			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir() and '.cargo' not in str(k) and 'developmenttest' not in str(k)]
 			logger.info(f'Scan path: {scanpath} found {len(git_folders)} git folders')
-			# Process git folders in batches
-			batch_size = 10
-			for i in range(0, len(git_folders), batch_size):
-				batch = git_folders[i:i+batch_size]
-				tasks = []
-				for git_folder in batch:
-					git_path = git_folder.parent
-					tasks.append(process_git_folder(git_path, session, args))
-				await asyncio.gather(*tasks)
-				session.commit()
+			tasks = set()
+			for git_folder in git_folders:
+				git_path = git_folder.parent
+				tasks.add(process_git_folder(git_path, session, args))
+			await asyncio.gather(*tasks)
+			session.commit()
 			print(f'Processed {len(git_folders)} git folders')
 		else:
 			logger.error(f'Scan path: {scanpath} is not a valid directory')
@@ -162,7 +159,7 @@ async def main():
 
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session)  # Updated call
+		git_lists = await get_git_list_stars(session, args)
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -173,7 +170,7 @@ async def main():
 
 	if args.create_stars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session)  # Updated call
+		git_lists = await get_git_list_stars(session, args)
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]

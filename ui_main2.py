@@ -97,9 +97,7 @@ class Ui_FindGitsApp(object):
     def retranslateUi(self, FindGitsApp):
         FindGitsApp.setWindowTitle(QCoreApplication.translate("FindGitsApp", u"Form", None))
         self.actionactionone.setText(QCoreApplication.translate("FindGitsApp", u"actionone", None))
-#if QT_CONFIG(tooltip)
         self.actionactionone.setToolTip(QCoreApplication.translate("FindGitsApp", u"actiononetooltip", None))
-#endif // QT_CONFIG(tooltip)
         self.folderButton.setText(QCoreApplication.translate("FindGitsApp", u"Folders", None))
         self.getdupes_button.setText(QCoreApplication.translate("FindGitsApp", u"Dupes", None))
         self.searchpaths_button.setText(QCoreApplication.translate("FindGitsApp", u"Searchpaths", None))
