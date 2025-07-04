@@ -6,13 +6,90 @@ import json
 import os
 from loguru import logger
 from requests.auth import HTTPBasicAuth
-from bs4 import BeautifulSoup
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA
 
 class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
 	pass
+
+async def get_api_rate_limits():
+	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	headers = {
+			'Accept': 'application/vnd.github+json',
+			'Authorization': f'Bearer {auth.password}',
+			'X-GitHub-Api-Version': '2022-11-28'
+		}
+	rate_limits = {'limit_hit':False, 'rate_limits': {}}
+	try:
+		async with aiohttp.ClientSession() as api_session:
+			async with api_session.get('https://api.github.com/rate_limit', headers=headers) as r:
+				rates = await r.json()
+	except aiohttp.client_exceptions.ContentTypeError as e:
+		logger.error(f"ContentTypeError while fetching rate limits: {e}")
+		rates = {}
+		rate_limits['limit_hit'] = True
+		rate_limits['rate_limits'] = {'error': 'ContentTypeError', 'message': str(e)}
+		return rate_limits
+	except Exception as e:
+		logger.error(f'fatal {e} {type(e)}')
+	finally:
+		rate_limits['rate_limits'] = rates
+		return rate_limits
+
+async def is_rate_limit_hit(threshold_percent=10):
+	"""
+	Check if any GitHub API rate limits are hit or approaching their limits
+	Args:
+		threshold_percent (int): Percentage of remaining calls below which the limit is considered hit (default: 10%)
+	Returns:
+		bool: True if any rate limit is hit or approaching the threshold, False otherwise
+	"""
+	try:
+		# Get current rate limits from GitHub API
+		rate_limits_data = await get_api_rate_limits()
+
+		# Check if limit_hit is already set
+		if rate_limits_data.get('limit_hit', False):
+			return True
+
+		# Get the resources section
+		resources = rate_limits_data.get('rate_limits', {}).get('resources', {})
+
+		# Also check the overall rate limit
+		rate = rate_limits_data.get('rate_limits', {}).get('rate', {})
+		if rate:
+			resources['overall'] = rate
+
+		# Check each resource type
+		for resource_name, resource_data in resources.items():
+			# Skip if missing essential data
+			if not all(k in resource_data for k in ('limit', 'remaining', 'reset')):
+				continue
+
+			limit = resource_data.get('limit', 0)
+			remaining = resource_data.get('remaining', 0)
+			reset_time = resource_data.get('reset', 0)
+
+			# Skip if limit is 0 (unlimited)
+			if limit == 0:
+				continue
+
+			# Calculate threshold value
+			threshold_value = max(1, int(limit * threshold_percent / 100))
+
+			# Check if below threshold
+			if remaining <= threshold_value:
+				logger.warning(f"Rate limit approaching for {resource_name}: {remaining}/{limit} remaining, resets at {datetime.fromtimestamp(reset_time)}")
+				return True
+
+		# No limits hit
+		return False
+
+	except Exception as e:
+		logger.error(f"Error checking rate limits: {e}")
+		# Return True as a precaution when we can't determine limits
+		return True
 
 async def update_repo_cache(repo_name_or_url, session, args):
 	"""
@@ -75,6 +152,11 @@ async def update_repo_cache(repo_name_or_url, session, args):
 		'Authorization': f'Bearer {auth.password}',
 		'X-GitHub-Api-Version': '2022-11-28'
 	}
+
+	if await is_rate_limit_hit():
+		logger.warning(f"Rate limit hit for repository {repo_name}, returning cached data if available")
+		await asyncio.sleep(1)
+		return None
 
 	# Fetch repository data from GitHub API
 	try:

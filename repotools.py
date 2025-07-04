@@ -1,14 +1,10 @@
 from __future__ import annotations
-import aiohttp
-import asyncio
-import aiofiles
 import os
 import json
 import traceback
 from datetime import datetime
 from pathlib import Path
 from loguru import logger
-from requests.auth import HTTPBasicAuth
 from dbstuff import GitRepo, GitFolder, RepoInfo, get_dupes
 from utils import valid_git_folder, get_remote, ensure_datetime
 from gitstars import get_git_stars
