@@ -119,12 +119,19 @@ async def main():
 
 			for repo in repos:
 				stars = repo.get('stargazers_count', 0)
-				lang = repo.get('language', 'Unknown')
-				desc = repo.get('description', 'No description')
+				# lang = repo.get('language', 'Unknown')
+				if repo.get('language'):
+					lang = repo.get('language', 'Unknown')[:15].ljust(15)  # Ensure fixed width
+				else:
+					lang = 'Unknown'.ljust(15)
+				if repo.get('description'):
+					desc = repo.get('description', 'No description')
+				else:
+					desc = 'No description'
 				if len(desc) > 60:
 					desc = desc[:57] + "..."
 
-				print(f"⭐ {stars:5d} | {lang:15} | {repo['full_name']:40} | {desc}")
+				print(f"⭐ {stars:7d} | {lang:15} | {repo['full_name']:40} | {desc}")
 
 		return
 

@@ -21,41 +21,59 @@ async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 		Dict[str, List[dict]]: Dictionary with list names as keys and lists of repos as values
 	"""
 	try:
-		# Get all lists first
-		git_lists = await get_git_list_stars(session, args)
-		if not git_lists:
-			logger.warning("No GitHub lists found")
+		try:
+			# Get all lists first
+			git_lists = await get_git_list_stars(session, args)
+			if not git_lists:
+				logger.warning("No GitHub lists found")
+				return {}
+		except Exception as e:
+			logger.error(f"Error getting starred repos by list: {e}")
 			return {}
-
-		# Get all starred repos
-		starred_repos = await get_git_stars(args, session)
-		if not starred_repos:
-			logger.warning("No starred repositories found")
+		try:
+			# Get all starred repos
+			starred_repos = await get_git_stars(args, session)
+			if not starred_repos:
+				logger.warning("No starred repositories found")
+				return {}
+		except Exception as e:
+			logger.error(f"Error getting starred repos by list: {e}")
 			return {}
-
-		# Create lookup dict for starred repos by full name
-		repo_lookup = {repo['full_name']: repo for repo in starred_repos}
-
-		# Group repos by list
-		grouped_repos = defaultdict(list)
+		try:
+			# Create lookup dict for starred repos by full name
+			repo_lookup = {repo['full_name']: repo for repo in starred_repos}
+			# Group repos by list
+			grouped_repos = defaultdict(list)
+		except Exception as e:
+			logger.error(f"Error getting starred repos by list: {e}")
+			return {}
 
 		for list_name, list_data in git_lists.items():
-			for href in list_data['hrefs']:
-				# Convert href to full_name format (owner/repo)
-				full_name = href.strip('/').split('github.com/')[-1]
-				if full_name in repo_lookup:
-					grouped_repos[list_name].append(repo_lookup[full_name])
-				else:
-					logger.debug(f"Repository {full_name} found in list but not in starred repos")
-
+			try:
+				for href in list_data['hrefs']:
+					# Convert href to full_name format (owner/repo)
+					full_name = href.strip('/').split('github.com/')[-1]
+					if full_name in repo_lookup:
+						grouped_repos[list_name].append(repo_lookup[full_name])
+					else:
+						logger.debug(f"Repository {full_name} found in list but not in starred repos")
+			except Exception as e:
+				logger.error(f"Error getting starred repos by list: {e}")
+				return {}
 		# Add "Uncategorized" list for repos not in any list
-		in_lists = {repo for repos in grouped_repos.values() for repo in repos}
-		uncategorized = [
-			repo for repo in starred_repos
-			if repo['full_name'] not in {r['full_name'] for r in in_lists}
-		]
-		if uncategorized:
-			grouped_repos["Uncategorized"] = uncategorized
+		# in_lists = {repo for repos in grouped_repos.values() for repo in repos}
+		in_list_names = {repo['full_name'] for repos in grouped_repos.values() for repo in repos}
+		try:
+			uncategorized = []
+			# [repo for repo in starred_repos if repo['full_name'] not in {r['full_name'] for r in list(in_list_names)}]
+			for repo in starred_repos:
+				if repo['full_name'] not in in_list_names:
+					uncategorized.append(repo)
+			if uncategorized:
+				grouped_repos["Uncategorized"] = uncategorized
+		except Exception as e:
+			logger.error(f"Error getting starred repos by list: {e} {type(e)}")
+			# return {}
 
 		# Convert defaultdict to regular dict and sort repos in each list
 		result = dict(grouped_repos)
@@ -169,7 +187,8 @@ async def download_git_stars(args, session):
 						last_page_no = int(lasturl.split('=')[1])
 						# Fetch remaining pages
 						while nexturl and (args.max_pages == 0 or page_count < args.max_pages):
-							logger.debug(f'[r] p:{page_count}/{last_page_no} nexturl: {nexturl}')
+							if args.debug:
+								logger.debug(f'[r] p:{page_count}/{last_page_no} jsonbuffer: {len(jsonbuffer)} nexturl: {nexturl}')
 							async with api_session.get(nexturl, headers=headers) as r:
 								if r.status == 200:
 									data = await r.json()
