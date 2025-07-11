@@ -8,7 +8,65 @@ from loguru import logger
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
+from typing import Dict, List, Optional
+from collections import defaultdict
 from cacheutils import get_cache_entry, set_cache_entry, get_api_rate_limits, is_rate_limit_hit
+from utils import get_client_session
+
+async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
+	"""
+	Get starred repositories grouped by list name
+
+	Returns:
+		Dict[str, List[dict]]: Dictionary with list names as keys and lists of repos as values
+	"""
+	try:
+		# Get all lists first
+		git_lists = await get_git_list_stars(session, args)
+		if not git_lists:
+			logger.warning("No GitHub lists found")
+			return {}
+
+		# Get all starred repos
+		starred_repos = await get_git_stars(args, session)
+		if not starred_repos:
+			logger.warning("No starred repositories found")
+			return {}
+
+		# Create lookup dict for starred repos by full name
+		repo_lookup = {repo['full_name']: repo for repo in starred_repos}
+
+		# Group repos by list
+		grouped_repos = defaultdict(list)
+
+		for list_name, list_data in git_lists.items():
+			for href in list_data['hrefs']:
+				# Convert href to full_name format (owner/repo)
+				full_name = href.strip('/').split('github.com/')[-1]
+				if full_name in repo_lookup:
+					grouped_repos[list_name].append(repo_lookup[full_name])
+				else:
+					logger.debug(f"Repository {full_name} found in list but not in starred repos")
+
+		# Add "Uncategorized" list for repos not in any list
+		in_lists = {repo for repos in grouped_repos.values() for repo in repos}
+		uncategorized = [
+			repo for repo in starred_repos
+			if repo['full_name'] not in {r['full_name'] for r in in_lists}
+		]
+		if uncategorized:
+			grouped_repos["Uncategorized"] = uncategorized
+
+		# Convert defaultdict to regular dict and sort repos in each list
+		result = dict(grouped_repos)
+		for list_name in result:
+			result[list_name].sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+
+		return result
+
+	except Exception as e:
+		logger.error(f"Error getting starred repos by list: {e}")
+		return {}
 
 async def get_git_stars(args, session):
 	"""
@@ -37,12 +95,19 @@ async def get_git_stars(args, session):
 				if len(jsonbuffer) == 0:
 					logger.warning("No cache entry found in database for starred repos")
 				return jsonbuffer
-			# do_download = True
-
-		# if do_download or not jsonbuffer or not args.use_cache:
-		#     git_starred_repos = await download_git_stars(args, session)
-		#     logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={args.max_pages}")
-		#     return git_starred_repos
+		else:
+			logger.warning("No cache entry found in database for starred repos")
+			git_starred_repos = await download_git_stars(args, session)
+			logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API.")
+			return git_starred_repos
+	else:
+		logger.info("[todofix] Cache not used, will download starred repos...")
+	return jsonbuffer
+	# do_download = True
+	# if do_download or not jsonbuffer or not args.use_cache:
+	#     git_starred_repos = await download_git_stars(args, session)
+	#     logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={args.max_pages}")
+	#     return git_starred_repos
 
 async def download_git_stars(args, session):
 	# If we get here, we need to fetch from the API
@@ -69,9 +134,10 @@ async def download_git_stars(args, session):
 		await asyncio.sleep(1)
 		return None
 
-	async with aiohttp.ClientSession() as api_session:
+	# async with aiohttp.ClientSession() as api_session:
+	async with get_client_session() as api_session:
 		try:
-			async with api_session.get(apiurl, headers=headers) as r:
+			async with api_session.get(apiurl) as r:
 				if r.status == 401:
 					logger.error(f"[r] autherr:401 a:{auth}")
 				elif r.status == 404:
@@ -173,26 +239,34 @@ async def get_git_list_stars(session, args) -> dict:
 	if args.nodl:
 		logger.warning("Skipping API call due to --nodl flag")
 		return {}
-	if not soup:
+	if not soup or len(soup) == 0:
 		if await is_rate_limit_hit():
 			logger.warning("Rate limit hit!")
 			await asyncio.sleep(1)
 			return None
 
+		# async with get_client_session() as api_session:
 		async with aiohttp.ClientSession() as api_session:
-			async with api_session.get(listurl, headers=headers) as r:
-				content = await r.text()
-				soup = BeautifulSoup(content, 'html.parser')
-				# Save to database cache
-				set_cache_entry(session, cache_key, cache_type, str(soup))
-				session.commit()
-				logger.debug("Saved star list to database cache")
+			async with api_session.get(listurl) as r:
+				if r.status == 200:
+					content = await r.text()
+					soup = BeautifulSoup(content, 'html.parser')
+					# Save to database cache
+					set_cache_entry(session, cache_key, cache_type, str(soup))
+					session.commit()
+					logger.debug("Saved star list to database cache")
+				else:
+					logger.error(f"Failed to fetch star list: {r.status} {listurl}")
+					return {}
 
 	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
+	if len(listsoup) == 0:
+		logger.warning("No lists found in soup")
+		return {}
 	try:
 		list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
-	except IndexError as e:
-		logger.error(f'Failed to find list items in soup {e} {type(e)}')
+	except (TypeError, IndexError) as e:
+		logger.error(f'Failed to find list items in soup {e} {type(e)} from listsoup: {type(listsoup)} {len(listsoup)}')
 		return {}
 
 	lists = {}
@@ -249,8 +323,11 @@ async def get_info_for_list(link, headers, session, args):
 			await asyncio.sleep(1)
 			return None
 
-		async with aiohttp.ClientSession() as api_session:
-			async with api_session.get(link, headers=headers) as r:
+		# async with aiohttp.ClientSession() as api_session:
+		async with get_client_session() as api_session:
+			if args.debug:
+				logger.debug(f"Fetching list info from {link}")
+			async with api_session.get(link) as r:
 				content = await r.content.read()
 				soup = BeautifulSoup(content, 'html.parser')
 
@@ -318,7 +395,8 @@ async def fetch_starred_repos(args, session):
 		return None
 
 	# Make API requests with pagination
-	async with aiohttp.ClientSession() as api_session:
+	# async with aiohttp.ClientSession() as api_session:
+	async with get_client_session() as api_session:
 		while True:
 			url = f"{api_url}?page={page}&per_page={per_page}"
 			if args.debug:
@@ -328,7 +406,7 @@ async def fetch_starred_repos(args, session):
 					logger.debug(f"hit max: {args.max_pages} page {page}")
 				break
 			try:
-				async with api_session.get(url, headers=headers) as response:
+				async with api_session.get(url) as response:
 					if response.status == 200:
 						page_data = await response.json()
 						# No more data to fetch

@@ -8,6 +8,7 @@ from loguru import logger
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA
+from utils import get_client_session
 
 class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
@@ -22,8 +23,9 @@ async def get_api_rate_limits():
 		}
 	rate_limits = {'limit_hit':False, 'rate_limits': {}}
 	try:
-		async with aiohttp.ClientSession() as api_session:
-			async with api_session.get('https://api.github.com/rate_limit', headers=headers) as r:
+		# async with aiohttp.ClientSession() as api_session:
+		async with get_client_session() as api_session:
+			async with api_session.get('https://api.github.com/rate_limit') as r:
 				rates = await r.json()
 	except aiohttp.client_exceptions.ContentTypeError as e:
 		logger.error(f"ContentTypeError while fetching rate limits: {e}")
@@ -160,8 +162,9 @@ async def update_repo_cache(repo_name_or_url, session, args):
 
 	# Fetch repository data from GitHub API
 	try:
-		async with aiohttp.ClientSession() as api_session:
-			async with api_session.get(api_url, headers=headers) as r:
+		# async with aiohttp.ClientSession() as api_session:
+		async with get_client_session() as api_session:
+			async with api_session.get(api_url) as r:
 				if args.debug:
 					logger.debug(f"Fetching repository data from GitHub API: {api_url}")
 				if r.status == 200:

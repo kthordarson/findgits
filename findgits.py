@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
 from dbstuff import get_engine, db_init, drop_database
 from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos
+from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
 
 
@@ -52,6 +52,7 @@ def get_args():
 	myparse.add_argument('-fs', '--fullscan', action='store_true', default=False, dest='fullscan', help='run full scan on all search paths in db')
 	myparse.add_argument('-sp','--scanpath', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
 	myparse.add_argument('--scanstars', help='include starred from github', action='store_true', dest='scanstars', default=False)
+	myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
 	myparse.add_argument('-spt', '--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
 	myparse.add_argument('-gd', '--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
@@ -82,6 +83,7 @@ def get_session(args):
 	db_init(engine)
 	print(f'DB Engine: {engine} DB Type: {engine.name} DB URL: {engine.url}')
 	return session, engine
+
 async def main():
 	args = get_args()
 	session, engine = get_session(args)
@@ -103,6 +105,27 @@ async def main():
 		chk = dbcheck(session)
 		print(f'dbcheck: {chk}')
 		print(f'Git Folders: {git_folders} Git Repos: {git_repos} Dupes: {dupes['dupe_repos']} ')
+		return
+
+	if args.list_by_group:
+		grouped_repos = await get_starred_repos_by_list(session, args)
+		total_repos = sum(len(repos) for repos in grouped_repos.values())
+
+		print(f"\nFound {len(grouped_repos)} lists with {total_repos} total repositories:\n")
+
+		for list_name, repos in grouped_repos.items():
+			print(f"\n{list_name} ({len(repos)} repos):")
+			print("-" * (len(list_name) + 10))
+
+			for repo in repos:
+				stars = repo.get('stargazers_count', 0)
+				lang = repo.get('language', 'Unknown')
+				desc = repo.get('description', 'No description')
+				if len(desc) > 60:
+					desc = desc[:57] + "..."
+
+				print(f"⭐ {stars:5d} | {lang:15} | {repo['full_name']:40} | {desc}")
+
 		return
 
 	if args.gitstars:

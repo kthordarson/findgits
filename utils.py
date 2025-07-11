@@ -3,6 +3,26 @@ from pathlib import Path
 from loguru import logger
 from subprocess import Popen, PIPE
 from datetime import datetime
+from requests.auth import HTTPBasicAuth
+import aiohttp
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def get_client_session():
+	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	if not auth:
+		logger.error('get_git_stars: no auth provided')
+	if auth:
+		headers = {
+			'Accept': 'application/vnd.github+json',
+			'Authorization': f'Bearer {auth.password}',
+			'X-GitHub-Api-Version': '2022-11-28'}
+
+		async with aiohttp.ClientSession(headers=headers) as session:
+			try:
+				yield session
+			finally:
+				await session.close()
 
 def flatten(nested_list):
 	flattened = []
