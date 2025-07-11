@@ -147,13 +147,13 @@ async def download_git_stars(args, session):
 	cache_key = "starred_repos_list"
 	cache_type = "starred_repos"
 
-	if await is_rate_limit_hit():
+	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
 		return None
 
 	# async with aiohttp.ClientSession() as api_session:
-	async with get_client_session() as api_session:
+	async with get_client_session(args) as api_session:
 		try:
 			async with api_session.get(apiurl) as r:
 				if r.status == 401:
@@ -259,13 +259,15 @@ async def get_git_list_stars(session, args) -> dict:
 		logger.warning("Skipping API call due to --nodl flag")
 		return {}
 	if not soup or len(soup) == 0:
-		if await is_rate_limit_hit():
+		if await is_rate_limit_hit(args):
 			logger.warning("Rate limit hit!")
 			await asyncio.sleep(1)
 			return None
 
 		# async with get_client_session() as api_session:
 		async with aiohttp.ClientSession() as api_session:
+			if args.debug:
+				logger.debug(f"Fetching star list from {listurl}")
 			async with api_session.get(listurl) as r:
 				if r.status == 200:
 					content = await r.text()
@@ -337,13 +339,13 @@ async def get_info_for_list(link, headers, session, args):
 		logger.warning(f"Skipping API call for {link} due to --nodl flag")
 		return []
 	if not soup:
-		if await is_rate_limit_hit():
+		if await is_rate_limit_hit(args):
 			logger.warning("Rate limit hit!")
 			await asyncio.sleep(1)
 			return None
 
 		# async with aiohttp.ClientSession() as api_session:
-		async with get_client_session() as api_session:
+		async with get_client_session(args) as api_session:
 			if args.debug:
 				logger.debug(f"Fetching list info from {link}")
 			async with api_session.get(link) as r:
@@ -408,14 +410,14 @@ async def fetch_starred_repos(args, session):
 	page = 1
 	per_page = 100  # Max allowed by GitHub API
 
-	if await is_rate_limit_hit():
+	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
 		return None
 
 	# Make API requests with pagination
 	# async with aiohttp.ClientSession() as api_session:
-	async with get_client_session() as api_session:
+	async with get_client_session(args) as api_session:
 		while True:
 			url = f"{api_url}?page={page}&per_page={per_page}"
 			if args.debug:

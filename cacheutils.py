@@ -14,17 +14,17 @@ class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
 	pass
 
-async def get_api_rate_limits():
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
-	headers = {
-			'Accept': 'application/vnd.github+json',
-			'Authorization': f'Bearer {auth.password}',
-			'X-GitHub-Api-Version': '2022-11-28'
-		}
+async def get_api_rate_limits(args):
+	# auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	# headers = {
+	# 		'Accept': 'application/vnd.github+json',
+	# 		'Authorization': f'Bearer {auth.password}',
+	# 		'X-GitHub-Api-Version': '2022-11-28'
+	# 	}
 	rate_limits = {'limit_hit':False, 'rate_limits': {}}
 	try:
 		# async with aiohttp.ClientSession() as api_session:
-		async with get_client_session() as api_session:
+		async with get_client_session(args) as api_session:
 			async with api_session.get('https://api.github.com/rate_limit') as r:
 				rates = await r.json()
 	except aiohttp.client_exceptions.ContentTypeError as e:
@@ -39,7 +39,7 @@ async def get_api_rate_limits():
 		rate_limits['rate_limits'] = rates
 		return rate_limits
 
-async def is_rate_limit_hit(threshold_percent=10):
+async def is_rate_limit_hit(args, threshold_percent=10):
 	"""
 	Check if any GitHub API rate limits are hit or approaching their limits
 	Args:
@@ -49,7 +49,7 @@ async def is_rate_limit_hit(threshold_percent=10):
 	"""
 	try:
 		# Get current rate limits from GitHub API
-		rate_limits_data = await get_api_rate_limits()
+		rate_limits_data = await get_api_rate_limits(args)
 
 		# Check if limit_hit is already set
 		if rate_limits_data.get('limit_hit', False):
@@ -155,7 +155,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 		'X-GitHub-Api-Version': '2022-11-28'
 	}
 
-	if await is_rate_limit_hit():
+	if await is_rate_limit_hit(args):
 		logger.warning(f"Rate limit hit for repository {repo_name}, returning cached data if available")
 		await asyncio.sleep(1)
 		return None
@@ -163,7 +163,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 	# Fetch repository data from GitHub API
 	try:
 		# async with aiohttp.ClientSession() as api_session:
-		async with get_client_session() as api_session:
+		async with get_client_session(args) as api_session:
 			async with api_session.get(api_url) as r:
 				if args.debug:
 					logger.debug(f"Fetching repository data from GitHub API: {api_url}")

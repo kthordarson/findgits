@@ -8,7 +8,7 @@ import aiohttp
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
-async def get_client_session():
+async def get_client_session(args):
 	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
 	if not auth:
 		logger.error('get_git_stars: no auth provided')
