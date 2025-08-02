@@ -63,6 +63,7 @@ async def process_starred_repo(repo, session, args):
 		logger.error(f'Error processing {repo}: {e} {type(e)}')
 
 async def populate_git_lists(session, args):
+	# fetch lists from GitHub
 	list_data = await get_lists(args)
 	for entry in list_data:
 		# Check if list already exists by name or URL
