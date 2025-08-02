@@ -8,21 +8,6 @@ import asyncio
 
 CPU_COUNT = cpu_count()
 
-async def get_git_log(gitrepo: GitRepo) -> list:
-	"""Get git log for a repository"""
-	os.chdir(gitrepo.folder)
-	cmdstr = ['git', '-P', 'log', '--format="%aI %H %T %P %ae subject=%s"']
-
-	proc = await asyncio.create_subprocess_exec(
-		*cmdstr,
-		stdout=asyncio.subprocess.PIPE,
-		stderr=asyncio.subprocess.PIPE
-	)
-
-	stdout, stderr = await proc.communicate()
-	log_out = [k.strip() for k in stdout.decode('utf8').split('\n') if k]
-	return log_out
-
 async def get_git_show(gitrepo: GitRepo) -> dict:
 	"""Get git show information for a repository"""
 	result = {}
