@@ -8,9 +8,12 @@
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import *  # type: ignore
-from PySide6.QtGui import *  # type: ignore
-from PySide6.QtWidgets import *  # type: ignore
+from PySide6.QtCore import Qt, QRect, QCoreApplication, QMetaObject  # type: ignore
+from PySide6.QtGui import QAction  # type: ignore
+from PySide6.QtWidgets import (
+    QWidget, QFormLayout, QLabel, QLineEdit, QHBoxLayout, QPushButton,
+    QTreeWidget, QTreeWidgetItem, QMenuBar, QMenu, QStatusBar
+)  # type: ignore
 
 
 class Ui_MainWindow(object):
@@ -36,7 +39,7 @@ class Ui_MainWindow(object):
         self.formLayout.setObjectName(u"formLayout")
         self.formLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.formLayout.setLabelAlignment(Qt.AlignCenter)
-        self.formLayout.setFormAlignment(Qt.AlignJustify|Qt.AlignTop)
+        self.formLayout.setFormAlignment(Qt.AlignJustify | Qt.AlignTop)
         self.formLayout.setContentsMargins(0, 3, 3, 3)
         self.idLabel = QLabel(self.formLayoutWidget_3)
         self.idLabel.setObjectName(u"idLabel")
@@ -85,13 +88,13 @@ class Ui_MainWindow(object):
 
         self.dupe_paths_widget = QTreeWidget(self.centralwidget)
         __qtreewidgetitem = QTreeWidgetItem()
-        __qtreewidgetitem.setText(0, u"1");
+        __qtreewidgetitem.setText(0, u"1")
         self.dupe_paths_widget.setHeaderItem(__qtreewidgetitem)
         self.dupe_paths_widget.setObjectName(u"dupe_paths_widget")
         self.dupe_paths_widget.setGeometry(QRect(880, 120, 241, 121))
         self.repotree = QTreeWidget(self.centralwidget)
         __qtreewidgetitem1 = QTreeWidgetItem()
-        __qtreewidgetitem1.setText(0, u"1");
+        __qtreewidgetitem1.setText(0, u"1")
         self.repotree.setHeaderItem(__qtreewidgetitem1)
         self.repotree.setObjectName(u"repotree")
         self.repotree.setGeometry(QRect(10, 10, 861, 581))
