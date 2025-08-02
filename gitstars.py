@@ -223,6 +223,34 @@ async def download_git_stars(args, session):
 			logger.error(f"Failed to write cache: {e}")
 	return jsonbuffer
 
+async def get_lists(args) -> dict:
+	git_lists = []
+	listurl = f'https://github.com/{os.getenv("GITHUB_USERNAME",'')}?tab=stars'
+	async with aiohttp.ClientSession() as api_session:
+		if args.debug:
+			logger.debug(f"Fetching star list from {listurl}")
+		async with api_session.get(listurl) as r:
+			if r.status == 200:
+				content = await r.text()
+	soup = BeautifulSoup(content, 'html.parser')
+	souplist = soup.find_all('a',class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
+	# souplist = soup.find_all('div',id="profile-lists-container")
+	for sl in souplist:
+		list_name = sl.find('h3', class_="f4 text-bold no-wrap mr-3").get_text(strip=True)
+		repo_count = sl.find('div', class_="color-fg-muted text-small no-wrap").get_text(strip=True).split()[0]
+		list_description = sl.find('span', class_="Truncate-text color-fg-muted mr-3").get_text(strip=True) if sl.find('span', class_="Truncate-text color-fg-muted mr-3") else ''
+		list_url = sl['href']
+		list_item = {
+			'name': list_name,
+			'repo_count': repo_count,
+			'description': list_description,
+			'list_url': list_url,
+		}
+		git_lists.append(list_item)
+		if args.debug:
+			logger.debug(f"List found: {list_name}, Count: {repo_count}, Description: {list_description}, total lists: {len(git_lists)}")
+	return git_lists
+
 async def get_git_list_stars(session, args) -> dict:
 	"""
 	Get lists of starred repos using database cache

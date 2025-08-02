@@ -4,10 +4,10 @@ from pathlib import Path
 import argparse
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
-from dbstuff import GitRepo, GitFolder
+from dbstuff import GitRepo, GitFolder, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, check_git_dates
 from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
+from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
 
 
@@ -31,7 +31,24 @@ async def process_git_folder(git_path, session, args):
 			logger.warning(f'Session is not active, rolling back for {git_path}')
 			session.rollback()
 		result = await insert_update_git_folder(git_path, session, args)
-		return result
+		if result:
+			# After updating/creating GitFolder, check if repo is starred
+			git_repo = session.query(GitRepo).filter(GitRepo.id == result.gitrepo_id).first()
+			star_entry = session.query(GitStar).filter(GitStar.gitrepo_id == git_repo.id).first()
+			if star_entry:
+				result.is_starred = True
+				result.star_id = star_entry.id
+				# Optionally, link to lists if available
+				list_entry = session.query(GitList).filter(GitList.gitstar_id == star_entry.id).first()
+				if list_entry:
+					result.list_id = list_entry.id
+			else:
+				result.is_starred = False
+				result.star_id = None
+				result.list_id = None
+			session.commit()
+
+			return result
 	except Exception as e:
 		logger.error(f'Error processing {git_path}: {e} {type(e)}')
 		if session.is_active:
@@ -44,6 +61,25 @@ async def process_starred_repo(repo, session, args):
 		await insert_update_starred_repo(repo, session, args)
 	except Exception as e:
 		logger.error(f'Error processing {repo}: {e} {type(e)}')
+
+async def populate_git_lists(session, args):
+	list_data = await get_lists(args)
+	for entry in list_data:
+		# Check if list already exists by name or URL
+		db_list = session.query(GitList).filter((GitList.list_name == entry['name']) | (GitList.list_url == entry['list_url'])).first()
+		if db_list:
+			# Update existing entry
+			db_list.list_description = entry.get('description', '')
+			db_list.repo_count = entry.get('repo_count', '0')
+			db_list.list_url = entry.get('list_url', '')
+		else:
+			# Create new entry
+			db_list = GitList(list_name=entry.get('name', ''), list_description=entry.get('description', ''), list_url=entry.get('list_url', ''),)
+			# Optionally add count if you want to store it
+			if hasattr(GitList, 'repo_count'):
+				db_list.list_count = entry.get('repo_count', '0')
+			session.add(db_list)
+	session.commit()
 
 def get_args():
 	myparse = argparse.ArgumentParser(description="findgits")
@@ -146,6 +182,7 @@ async def main():
 		return
 
 	if args.scanpath:
+		await populate_git_lists(session, args)
 		scanpath = Path(args.scanpath[0])
 		if scanpath.is_dir():
 			# Find git folders

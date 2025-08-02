@@ -91,6 +91,9 @@ class GitFolder(Base):
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
 	scanned = Column[bool]
+	is_starred = Column(Boolean, default=False)
+	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
+	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
 
 	def __init__(self, git_path: str, gitrepo_id):
@@ -327,6 +330,36 @@ class RepoInfo:
 	def __init__(self, owner, name):
 		self.github_owner = owner
 		self.github_repo_name = name
+
+class GitStar(Base):
+	"""A starred repo, linked to a GitRepo"""
+	__tablename__ = 'gitstars'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
+	starred_at = Column(DateTime)
+	# Add other available info as needed, e.g. stargazers_count, description, etc.
+	stargazers_count = Column(Integer)
+	description = Column(String(1024))
+	full_name = Column(String(255))
+	html_url = Column(String(255))
+	# Relationship
+	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="star_entry")
+
+class GitList(Base):
+	"""A starred repo list, linked to GitStar"""
+	__tablename__ = 'gitlists'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	list_name = Column(String(255))
+	list_description = Column(String(1024))
+	list_url = Column(String(255))
+	repo_count = Column(Integer, default=0)
+	# Link to GitStar (many-to-one)
+	gitstar_id = Column(Integer, ForeignKey('gitstars.id'))
+	star: Mapped["GitStar"] = relationship("GitStar", back_populates="lists")
+
+# Add relationships to GitRepo and GitStar
+GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
+GitStar.lists = relationship("GitList", back_populates="star")
 
 def db_init(engine: sqlalchemy.Engine) -> None:
 	Base.metadata.create_all(bind=engine)
