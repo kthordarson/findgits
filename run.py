@@ -35,22 +35,6 @@ class MainApp(QMainWindow):
 		self.populate_gitrepos()
 		# self.repotree_populate()
 
-	def gitshow_button_clicked(self, widget):
-		pass
-
-	def gitlog_button_clicked(self, widget):
-		pass
-
-	def gitstatus_button_clicked(self, widget):
-		pass
-
-	def searchpaths_button_clicked(self, widget):
-		pass
-
-	# def checkBox_filterdupes_toggle(self, *args):
-	# 	self.dupefilter = self.checkBox_filterdupes.isChecked()
-	# 	self.folderButton_clicked(self)
-
 	def getdupes_button_clicked(self, widget):
 		# self.checkBox_filterdupes.setEnabled(False)
 		self.ui.repotree.clear()
