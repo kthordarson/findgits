@@ -379,7 +379,7 @@ def get_dupes(session: Session) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
-def check_git_dates(session):
+def check_git_dates(session, create_heatmap=False):
 	df = pd.DataFrame(session.execute(text('select git_path.git_path, git_path.git_path_ctime, git_path.git_path_atime, git_path.git_path_mtime, gitrepo.created_at, gitrepo.updated_at, gitrepo.pushed_at from git_path inner join gitrepo on git_path.gitrepo_id=gitrepo.id ')).tuples())
 	# Convert timestamp columns to datetime if not already
 	timestamp_columns = ['git_path_ctime', 'git_path_atime', 'git_path_mtime', 'created_at', 'updated_at', 'pushed_at']
@@ -403,34 +403,33 @@ def check_git_dates(session):
 	df['project'] = df['git_path'].str.split('/').str[-1]
 	print(df.groupby('project')[timestamp_columns].mean())
 
-	# Create a list of all unique pairs of timestamp columns
-	pairs = list(combinations(timestamp_columns, 2))
+	if create_heatmap:
+		# Create a list of all unique pairs of timestamp columns
+		pairs = list(combinations(timestamp_columns, 2))
 
-	# Compute absolute time differences (in days) for each pair
-	diff_data = []
-	for index, row in df.iterrows():
-		row_diffs = {}
-		for col1, col2 in pairs:
-			pair_name = f"{col1}_to_{col2}"
-			diff = abs((row[col1] - row[col2]).total_seconds() / (60 * 60 * 24))  # Convert to days
-			row_diffs[pair_name] = diff
-		diff_data.append(row_diffs)
+		# Compute absolute time differences (in days) for each pair
+		diff_data = []
+		for index, row in df.iterrows():
+			row_diffs = {}
+			for col1, col2 in pairs:
+				pair_name = f"{col1}_to_{col2}"
+				diff = abs((row[col1] - row[col2]).total_seconds() / (60 * 60 * 24))  # Convert to days
+				row_diffs[pair_name] = diff
+			diff_data.append(row_diffs)
+		# Create a DataFrame of differences, indexed by git_path
+		diff_df = pd.DataFrame(diff_data, index=df['git_path'])
+		# Create a heatmap
+		plt.figure(figsize=(12, 8))
+		sns.heatmap(diff_df, annot=False, fmt=".1f", cmap="YlOrRd", cbar_kws={'label': 'Days'})
+		plt.title('Heatmap of Absolute Time Differences Between Timestamps')
+		plt.xlabel('Timestamp Pairs')
+		plt.ylabel('Repository Path')
+		plt.xticks(rotation=45, ha='right')
+		plt.tight_layout()
 
-	# Create a DataFrame of differences, indexed by git_path
-	diff_df = pd.DataFrame(diff_data, index=df['git_path'])
-
-	# Create a heatmap
-	plt.figure(figsize=(12, 8))
-	sns.heatmap(diff_df, annot=False, fmt=".1f", cmap="YlOrRd", cbar_kws={'label': 'Days'})
-	plt.title('Heatmap of Absolute Time Differences Between Timestamps')
-	plt.xlabel('Timestamp Pairs')
-	plt.ylabel('Repository Path')
-	plt.xticks(rotation=45, ha='right')
-	plt.tight_layout()
-
-	# Save or display the heatmap
-	plt.savefig('timestamp_differences_heatmap.png')
-	plt.show()
+		# Save or display the heatmap
+		plt.savefig('timestamp_differences_heatmap.png')
+		plt.show()
 
 
 if __name__ == '__main__':

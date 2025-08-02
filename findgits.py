@@ -5,7 +5,7 @@ import argparse
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder
-from dbstuff import get_engine, db_init, drop_database
+from dbstuff import get_engine, db_init, drop_database, check_git_dates
 from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
@@ -69,6 +69,7 @@ def get_args():
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
 	myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
 	myparse.add_argument('--nodl', help='disable all downloads/api call', action='store_true', default=False, dest='nodl')
+	myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
 	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 	if args.disable_cache:
@@ -223,7 +224,10 @@ async def main():
 
 			await asyncio.gather(*tasks)
 			session.commit()
-	return
+		return
+
+	if args.checkdates:
+		check_git_dates(session)
 
 if __name__ == '__main__':
 	asyncio.run(main())
