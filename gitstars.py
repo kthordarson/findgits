@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-import traceback
 import asyncio
 import aiohttp
 import json
@@ -8,9 +7,9 @@ from loguru import logger
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 from collections import defaultdict
-from cacheutils import get_cache_entry, set_cache_entry, get_api_rate_limits, is_rate_limit_hit
+from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
 from utils import get_client_session
 
 async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
@@ -121,11 +120,6 @@ async def get_git_stars(args, session):
 	else:
 		logger.info("[todofix] Cache not used, will download starred repos...")
 	return jsonbuffer
-	# do_download = True
-	# if do_download or not jsonbuffer or not args.use_cache:
-	#     git_starred_repos = await download_git_stars(args, session)
-	#     logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API. max_pages={args.max_pages}")
-	#     return git_starred_repos
 
 async def download_git_stars(args, session):
 	# If we get here, we need to fetch from the API

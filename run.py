@@ -1,18 +1,14 @@
 #!/usr/bin/python3
 
-import os
 import sys
 from argparse import ArgumentParser
 from loguru import logger
-from ui_main import Ui_FindGitsApp
 from ui_mainwindow import Ui_MainWindow
 from dbstuff import GitRepo, GitFolder, get_engine
-from sqlalchemy import and_, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor, QFont, QFontDatabase, QGradient, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPalette, QPixmap, QRadialGradient, QTransform, QStandardItemModel, QStandardItem)
-# from PySide6.QtWidgets import (QApplication, QSizePolicy, QWidget)
-from PySide6.QtWidgets import (QMainWindow, QApplication, QFormLayout, QLabel, QLineEdit,QHeaderView, QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget, QListWidgetItem, QTableWidgetItem)
+from PySide6.QtCore import (QCoreApplication)
+from PySide6.QtWidgets import (QMainWindow, QApplication, QTreeWidgetItem)
 
 # QWidget, Ui_FindGitsApp):
 class MainApp(QMainWindow):
@@ -22,15 +18,10 @@ class MainApp(QMainWindow):
 		super(MainApp, self).__init__(parent=parent)
 		self.ui = Ui_MainWindow()
 		self.ui.setupUi(self)
-		# self.setupUi(self)
 		self.ui.repotree.itemClicked.connect(self.repo_item_clicked)
 		self.ui.folderButton.clicked.connect(self.folderButton_clicked)
 		self.ui.getdupes_button.clicked.connect(self.getdupes_button_clicked)
-		# self.checkBox_filterdupes.toggled.connect(self.checkBox_filterdupes_toggle)
 		self.ui.searchpaths_button.clicked.connect(self.searchpaths_button_clicked)
-		# self.ui.gitshow_button.clicked.connect(self.gitshow_button_clicked)
-		# self.ui.gitlog_button.clicked.connect(self.gitlog_button_clicked)
-		# self.ui.gitstatus_button.clicked.connect(self.gitstatus_button_clicked)
 		self.dupefilter = False
 		self.populate_gitrepos()
 
