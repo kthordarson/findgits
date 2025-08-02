@@ -47,7 +47,7 @@ class MainApp(QMainWindow):
 		else:
 			duperepos = session.query(GitRepo).where(text(f'git_url like "{repo.git_url}"')).all()
 			dupe_locations = [session.query(GitFolder.git_path).filter(GitFolder.id == k.id).first() for k in duperepos]
-			logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
+			# logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
 			self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
 			self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
 
@@ -70,13 +70,13 @@ class MainApp(QMainWindow):
 	def folderButton_clicked(self, widget):  # change to folder tree view
 		if widget:
 			repo = session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
-			logger.debug(f'folderButton_clicked {repo=}')
+			# logger.debug(f'folderButton_clicked {repo=}')
 		# self.checkBox_filterdupes.setEnabled(True)
 
 if __name__ == '__main__':
 	myparse = ArgumentParser(description="findgits")
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
-	myparse.add_argument('--dbsqlitefile', help='sqlitedb filename', default='gitrepo.db', dest='dbsqlitefile', action='store', metavar='dbsqlitefile')
+	myparse.add_argument('--db_file', help='sqlitedb filename', default='gitrepo.db', dest='db_file', action='store', metavar='db_file')
 	args = myparse.parse_args()
 	engine = get_engine(args)
 	Session = sessionmaker(bind=engine)

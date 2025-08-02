@@ -55,7 +55,7 @@ async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 					if full_name in repo_lookup:
 						grouped_repos[list_name].append(repo_lookup[full_name])
 					else:
-						logger.debug(f"Repository {full_name} found in list but not in starred repos")
+						logger.warning(f"Repository {full_name} found in list but not in starred repos")
 			except Exception as e:
 				logger.error(f"Error getting starred repos by list: {e}")
 				return {}
@@ -244,7 +244,8 @@ async def get_git_list_stars(session, args) -> dict:
 		if cache_entry:
 			try:
 				soup = BeautifulSoup(cache_entry.data, 'html.parser')
-				logger.debug("Loaded star list from database cache")
+				if args.debug:
+					logger.debug("Loaded star list from database cache")
 			except Exception as e:
 				logger.error(f'Failed to parse cached star list: {e} {type(e)} {cache_key} not found in database cache type {cache_type}')
 		else:
@@ -269,7 +270,7 @@ async def get_git_list_stars(session, args) -> dict:
 					# Save to database cache
 					set_cache_entry(session, cache_key, cache_type, str(soup))
 					session.commit()
-					logger.debug("Saved star list to database cache")
+					logger.info("Saved star list to database cache")
 				else:
 					logger.error(f"Failed to fetch star list: {r.status} {listurl}")
 					return {}
@@ -324,7 +325,8 @@ async def get_info_for_list(link, headers, session, args):
 		if cache_entry:
 			try:
 				soup = BeautifulSoup(cache_entry.data, 'html.parser')
-				logger.debug(f"Loaded list info from database cache for {link}")
+				if args.debug:
+					logger.debug(f"Loaded list info from database cache for {link}")
 			except Exception as e:
 				logger.error(f'Failed to parse cached list info: {e}')
 		else:
@@ -350,7 +352,7 @@ async def get_info_for_list(link, headers, session, args):
 					# Save to database cache
 					set_cache_entry(session, cache_key, cache_type, str(soup))
 					session.commit()
-					logger.debug(f"Saved list info to database cache for {link}")
+					logger.info(f"Saved list info to database cache for {link}")
 				except Exception as e:
 					logger.error(f'Failed to save list info: {e} {type(e)}')
 
@@ -455,7 +457,7 @@ async def fetch_starred_repos(args, session):
 					else:
 						logger.error(f"API request failed with status {response.status}")
 						error_data = await response.text()
-						logger.debug(f"Error response: {error_data}")
+						logger.warning(f"Error response: {error_data}")
 						break
 			except Exception as e:
 				logger.error(f"Request error: {e} {type(e)}")

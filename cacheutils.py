@@ -131,7 +131,6 @@ async def update_repo_cache(repo_name_or_url, session, args):
 			try:
 				cache_data = json.loads(cache_entry.data)
 				return cache_data[0]
-				# logger.debug(f"Loaded cache for {repo_name} from database")
 			except Exception as e:
 				logger.error(f"Failed to parse cache data: {e}")
 		else:
@@ -140,8 +139,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 	if args.nodl:
 		logger.warning(f"Skipping API call for {repo_name} due to --nodl flag, returning cached data if available {type(cache_data)} {len(cache_data) if cache_data else 0}")
 		if args.debug:
-			# logger.debug(f"cache_data for repo: {repo_name} : {cache_data}")
-			logger.debug(f"cache_entry: {cache_entry}")
+			logger.debug(f"repo: {repo_name} cache_entry: {cache_entry}")
 		return cache_data[0]
 	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
 	if not auth:
@@ -199,7 +197,6 @@ async def update_repo_cache(repo_name_or_url, session, args):
 					# logger.error(f'rheaders: {r.headers}')
 					# Handle rate limiting by returning cached data if available
 					if cache_data:
-						logger.debug(f"Returning cached data for {repo_name} due to rate limit")
 						await asyncio.sleep(1)  # Wait before retrying
 						return cache_data[0]
 					else:
@@ -235,7 +232,8 @@ async def update_repo_cache(repo_name_or_url, session, args):
 					cache_data.append(default_repo_data)
 					set_cache_entry(session, cache_key, cache_type, json.dumps(cache_data))
 					session.commit()
-					logger.debug(f"Added default data for unavailable repository to cache: {repo_name}")
+					if args.debug:
+						logger.debug(f"Added default data for unavailable repository to cache: {repo_name}")
 
 					return default_repo_data
 				else:

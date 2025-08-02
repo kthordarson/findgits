@@ -242,7 +242,6 @@ class GitRepo(Base):
 
 		# If repo_data is provided (from GitHub API), populate additional fields
 		if repo_data and isinstance(repo_data, dict):
-			logger.debug(f'got repo_data for {self} from GitHub API')
 			self.node_id = repo_data.get('node_id')
 			self.full_name = repo_data.get('full_name')
 			self.private = repo_data.get('private')
@@ -363,7 +362,7 @@ def get_engine(args) -> sqlalchemy.Engine:
 		dburl = f"postgresql://{dbuser}:{dbpass}@{dbhost}/{dbname}"
 		return create_engine(dburl)
 	elif args.dbmode == 'sqlite':
-		return create_engine(f'sqlite:///{args.dbsqlitefile}', echo=False, connect_args={'check_same_thread': False})
+		return create_engine(f'sqlite:///{args.db_file}', echo=False, connect_args={'check_same_thread': False})
 	else:
 		raise TypeError(f'[db] unknown dbtype {args} ')
 

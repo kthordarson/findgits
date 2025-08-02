@@ -127,10 +127,11 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 				session.add(git_repo)
 				session.flush()  # Get the ID without committing
-				logger.debug(f'Created new GitRepo: {git_repo}')
+				logger.info(f'Created new GitRepo: {git_repo}')
 		else:
 			# Update existing repo
-			logger.debug(f'Found existing GitRepo: {git_repo}')
+			if args.debug:
+				logger.debug(f'Found existing GitRepo: {git_repo}')
 			git_repo.last_scan = datetime.now()
 			git_repo.scan_count += 1
 

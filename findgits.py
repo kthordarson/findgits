@@ -28,6 +28,7 @@ async def process_git_folder(git_path, session, args):
 	try:
 		# Always ensure the session is in a valid state
 		if not session.is_active:
+			logger.warning(f'Session is not active, rolling back for {git_path}')
 			session.rollback()
 		result = await insert_update_git_folder(git_path, session, args)
 		return result
@@ -46,31 +47,28 @@ async def process_starred_repo(repo, session, args):
 
 def get_args():
 	myparse = argparse.ArgumentParser(description="findgits")
-	myparse.add_argument('-ap', '--addpath', dest='add_path', action='store', help='add new search path to db')
-	myparse.add_argument('--importpaths', dest='importpaths')
-	myparse.add_argument('-l', '--listpaths', action='store_true', help='list paths in db', dest='listpaths')
-	myparse.add_argument('-fs', '--fullscan', action='store_true', default=False, dest='fullscan', help='run full scan on all search paths in db')
-	myparse.add_argument('-sp','--scanpath', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
-	myparse.add_argument('--scanstars', help='include starred from github', action='store_true', dest='scanstars', default=False)
+	myparse.add_argument('--scanpath','-sp', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
+	# info
+	myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
 	myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
-	myparse.add_argument('-spt', '--scanpath_threads', help='run scan on path, specify pathid', action='store', dest='scanpath_threads')
-	myparse.add_argument('-gd', '--getdupes', help='show dupe repos', action='store_true', default=False, dest='getdupes')
-	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
-	myparse.add_argument('--dbsqlitefile', help='sqlitedb filename', default='gitrepo.db', dest='dbsqlitefile', action='store', metavar='dbsqlitefile')
-	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
+	myparse.add_argument('--scanpath_threads', '-spt', help='scanpath_threads', action='store', dest='scanpath_threads')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
-	myparse.add_argument('--dbcheck', help='run checks', action='store_true', default=False, dest='dbcheck')
+	# db
+	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
+	myparse.add_argument('--db_file', help='sqlitedb filename', default='gitrepo.db', dest='db_file', action='store', metavar='db_file')
+	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
+	# stars/lists
 	myparse.add_argument('--gitstars', help='gitstars info', action='store_true', default=False, dest='gitstars')
+	myparse.add_argument('--scanstars', help='scam starts from github', action='store_true', dest='scanstars', default=False)
 	myparse.add_argument('--create_stars', help='add repos from git stars', action='store_true', default=False, dest='create_stars')
 	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
+	# tuning, debug, etc
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
 	myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
 	myparse.add_argument('--nodl', help='disable all downloads/api call', action='store_true', default=False, dest='nodl')
-	myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
-	# myparse.add_argument('--rungui', action='store_true', default=False, dest='rungui')
 	args = myparse.parse_args()
 	if args.disable_cache:
 		args.use_cache = False
@@ -88,16 +86,15 @@ def get_session(args):
 async def main():
 	args = get_args()
 	session, engine = get_session(args)
+
 	if args.dropdatabase:
 		drop_database(engine)
 		logger.info('Database dropped')
 		session.close()
 		return
 
-	if args.dbcheck:
-		res = dbcheck(session)
-		print(f'dbcheck res: {res}')
-		return
+	if args.checkdates:
+		check_git_dates(session)
 
 	if args.dbinfo:
 		git_folders = session.query(GitFolder).count()
@@ -111,13 +108,10 @@ async def main():
 	if args.list_by_group:
 		grouped_repos = await get_starred_repos_by_list(session, args)
 		total_repos = sum(len(repos) for repos in grouped_repos.values())
-
 		print(f"\nFound {len(grouped_repos)} lists with {total_repos} total repositories:\n")
-
 		for list_name, repos in grouped_repos.items():
 			print(f"\n{list_name} ({len(repos)} repos):")
 			print("-" * (len(list_name) + 10))
-
 			for repo in repos:
 				stars = repo.get('stargazers_count', 0)
 				# lang = repo.get('language', 'Unknown')
@@ -131,9 +125,7 @@ async def main():
 					desc = 'No description'
 				if len(desc) > 60:
 					desc = desc[:57] + "..."
-
 				print(f"⭐ {stars:7d} | {lang:15} | {repo['full_name']:40} | {desc}")
-
 		return
 
 	if args.gitstars:
@@ -158,7 +150,7 @@ async def main():
 		if scanpath.is_dir():
 			# Find git folders
 			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir() and '.cargo' not in str(k) and 'developmenttest' not in str(k)]
-			logger.info(f'Scan path: {scanpath} found {len(git_folders)} git folders')
+			print(f'Scan path: {scanpath} found {len(git_folders)} git folders')
 			tasks = set()
 			for git_folder in git_folders:
 				git_path = git_folder.parent
@@ -182,12 +174,12 @@ async def main():
 		for i, folder in enumerate(git_folders):
 			folder.get_folder_stats()
 			if args.debug:
-				# Print folder stats
 				logger.debug(f'Git Folder: {folder.git_path} ID: {folder.id} Scan Count: {folder.scan_count} ')
 			# Commit changes in batches to avoid large transactions
 			if (i + 1) % batch_size == 0 or i == len(git_folders) - 1:
 				session.commit()
-				logger.info(f"Committed batch of folder updates ({i+1}/{len(git_folders)})")
+				if args.debug:
+					logger.info(f"Committed batch of folder updates ({i+1}/{len(git_folders)})")
 		# Make sure all changes are committed
 		session.commit()
 		logger.info(f"Updated {len(git_folders)} folders in database")
@@ -225,9 +217,6 @@ async def main():
 			await asyncio.gather(*tasks)
 			session.commit()
 		return
-
-	if args.checkdates:
-		check_git_dates(session)
 
 if __name__ == '__main__':
 	asyncio.run(main())
