@@ -21,7 +21,7 @@ class MainApp(QMainWindow):
 		self.ui.repotree.itemClicked.connect(self.repo_item_clicked)
 		self.ui.folderButton.clicked.connect(self.folderButton_clicked)
 		self.ui.getdupes_button.clicked.connect(self.getdupes_button_clicked)
-		self.ui.searchpaths_button.clicked.connect(self.searchpaths_button_clicked)
+		# self.ui.searchpaths_button.clicked.connect(self.searchpaths_button_clicked)
 		self.dupefilter = False
 		self.populate_gitrepos()
 
@@ -50,16 +50,6 @@ class MainApp(QMainWindow):
 			logger.debug(f'repo_item_clicked {repo} {len(duperepos)} path: {len(dupe_locations)}')
 			self.ui.idLabel.setText(QCoreApplication.translate("FindGitsApp", u"id", None))
 			self.ui.idLineEdit.setText(QCoreApplication.translate("FindGitsApp", f"{repo.id}", None))
-			# self.ui.dupe_paths_widget.clear()
-			# self.ui.dupe_paths_widget.setColumnCount(1)
-			# self.ui.dupe_paths_widget.headerItem().setText(0, "path")
-			# for dp in dupe_locations:
-			# 	item0 = QTreeWidgetItem(self.ui.dupe_paths_widget)
-			# 	try:
-			# 		item0.setText(0, f"{dp[0]}")
-			# 	except TypeError as e:
-			# 		logger.error(f'Error setting text for dupe path: {e} dp={dp}')
-			# 		item0.setText(0, f"{dp}")
 
 	def populate_gitrepos(self):
 		self.ui.repotree.clear()
