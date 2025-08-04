@@ -11,6 +11,8 @@ from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_re
 from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
+from cacheutils import get_cache_entry
+import json
 
 
 def dbcheck(session) -> dict:
@@ -348,13 +350,10 @@ async def main():
 			logger.debug(f'Populated git lists from GitHub, got {len(list_data)} ... starting populate_repo_data')
 
 		# Pass the already-fetched starred_repos to populate_repo_data instead of letting it fetch again
-		stats = await populate_repo_data(session, args, starred_repos=starred_repos)  # Modified
+		stats = await populate_repo_data(session, args, starred_repos=starred_repos)
 
 		if args.debug:
 			logger.debug(f'populate_repo_data done stats: {stats}')
-
-		# Remove this redundant call since we already have starred_repos
-		# fetched_repos = await fetch_starred_repos(args, session)  # REMOVE THIS LINE
 
 		# Use the existing starred_repos data
 		print(f'Using {len(starred_repos)} starred repos from GitHub API')
@@ -368,7 +367,13 @@ async def main():
 		if args.debug:
 			logger.debug(f'Git Repos: {len(git_repos)} starting get_git_list_stars')
 
-		git_lists = await get_git_list_stars(session, args)
+		# Instead, use the cached data or fetch from cache
+		cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
+		if cache_entry:
+			git_lists = json.loads(cache_entry.data)
+		else:
+			# Fallback if cache somehow failed
+			git_lists = await get_git_list_stars(session, args)
 
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
