@@ -260,7 +260,6 @@ class GitRepo(Base):
 			self.github_owner = '[unknown]'
 
 		self.update_config_times()
-		self.update_local_git_info()
 
 		# If repo_data is provided (from GitHub API), populate additional fields
 		if repo_data and isinstance(repo_data, dict):
