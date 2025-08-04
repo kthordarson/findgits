@@ -309,6 +309,7 @@ def get_args():
 	# info
 	myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
 	myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
+	myparse.add_argument('--list-stats', help='show starred repo count statistics by list', action='store_true', default=False, dest='list_stats')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
 	myparse.add_argument('--check_rate_limits', help='check_rate_limits', action='store_true', default=False, dest='check_rate_limits')
 	# db
@@ -330,6 +331,7 @@ def get_args():
 		args.checkdates = True
 		args.dbinfo = True
 		args.list_by_group = True
+		args.list_stats = True  # Add this to debug mode
 		args.check_rate_limits = True
 	return args
 
@@ -340,6 +342,85 @@ def get_session(args):
 	db_init(engine)
 	print(f'DB Engine: {engine} DB Type: {engine.name} DB URL: {engine.url}')
 	return session, engine
+
+def show_starred_repo_stats(session):
+	"""Pretty print starred repo count statistics by list"""
+	from sqlalchemy import text
+
+	query = text("""
+		SELECT COALESCE(gl.list_name, 'not in a list') as list_name,
+		COUNT(*) as repo_count
+		FROM gitrepo gr
+		LEFT JOIN gitstars gs ON gr.id = gs.gitrepo_id
+		LEFT JOIN gitlists gl ON gs.gitlist_id = gl.id
+		WHERE gr.is_starred = 1
+		GROUP BY gl.list_name
+		ORDER BY list_name;
+	""")
+
+	result = session.execute(query).fetchall()
+
+	if not result:
+		print("No starred repositories found.")
+		return
+
+	# Calculate totals
+	total_repos = sum(row[1] for row in result)
+	total_lists = len([row for row in result if row[0] != 'not in a list'])
+	unlisted_count = next((row[1] for row in result if row[0] == 'not in a list'), 0)
+	listed_count = total_repos - unlisted_count
+
+	print("\n" + "=" * 60)
+	print("📊 STARRED REPOSITORIES BY LIST")
+	print("=" * 60)
+
+	# Summary stats
+	print("📈 Summary:")
+	print(f"   Total starred repositories: {total_repos:,}")
+	print(f"   Repositories in lists: {listed_count:,} ({(listed_count/total_repos*100):.1f}%)")
+	print(f"   Repositories not in lists: {unlisted_count:,} ({(unlisted_count/total_repos*100):.1f}%)")
+	print(f"   Total lists: {total_lists}")
+	print()
+
+	# Table header
+	print(f"{'List Name':<20} {'Count':<8} {'Percentage':<12} {'Bar'}")
+	print("-" * 60)
+
+	# Sort results - put 'not in a list' at the end
+	sorted_result = sorted(result, key=lambda x: (x[0] == 'not in a list', x[0]))
+
+	for list_name, repo_count in sorted_result:
+		percentage = (repo_count / total_repos) * 100
+
+		# Create a visual bar
+		bar_length = 20
+		filled_length = int(bar_length * repo_count / max(row[1] for row in result))
+		bar = '█' * filled_length + '░' * (bar_length - filled_length)
+
+		# Different emoji for different categories
+		if list_name == 'not in a list':
+			emoji = "📂"
+		elif repo_count >= 100:
+			emoji = "🔥"
+		elif repo_count >= 50:
+			emoji = "⭐"
+		elif repo_count >= 10:
+			emoji = "📋"
+		else:
+			emoji = "📄"
+
+		print(f"{emoji} {list_name:<18} {repo_count:<8,} {percentage:<11.1f}% {bar}")
+
+	print("-" * 60)
+	print(f"{'TOTAL':<20} {total_repos:<8,} {'100.0%':<12}")
+	print("=" * 60)
+
+	# Top lists
+	top_lists = sorted([row for row in result if row[0] != 'not in a list'], key=lambda x: x[1], reverse=True)[:5]
+	if top_lists:
+		print("\n🏆 Top 5 Lists by Repository Count:")
+		for i, (list_name, count) in enumerate(top_lists, 1):
+			print(f"   {i}. {list_name}: {count:,} repos")
 
 async def main():
 	args = get_args()
@@ -541,6 +622,10 @@ async def main():
 				if len(desc) > 60:
 					desc = desc[:57] + "..."
 				print(f"⭐ {stars:7d} | {lang:15} | {repo['full_name']:40} | {desc}")
+	if args.list_stats:
+		show_starred_repo_stats(session)
+		session.close()
+		return
 
 if __name__ == '__main__':
 	asyncio.run(main())
