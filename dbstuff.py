@@ -61,12 +61,6 @@ BLANK_REPO_DATA = {
 	"error_code": -1,
 	"_unavailable": True}  # Flag to indicate this is default data
 
-class MissingConfigException(Exception):
-	pass
-
-class MissingGitFolderException(Exception):
-	pass
-
 class Base(DeclarativeBase):
 	pass
 
