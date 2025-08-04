@@ -75,6 +75,8 @@ class GitFolder(Base):
 	__tablename__ = 'git_path'
 	id: Mapped[int] = mapped_column(primary_key=True)
 	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))
+	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
+	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
 	git_path = Column('git_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
@@ -91,8 +93,6 @@ class GitFolder(Base):
 	valid = Column(Boolean, default=True)
 	scanned = Column(Boolean, default=False)  # Fixed this line
 	is_starred = Column(Boolean, default=False)
-	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
-	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
 
 	# Relationships
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
@@ -235,12 +235,7 @@ class GitRepo(Base):
 
 	# Relationships - specify foreign_keys explicitly to resolve ambiguity
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
-	star_entry: Mapped[Optional["GitStar"]] = relationship(
-		"GitStar",
-		back_populates="repo",
-		uselist=False,
-		foreign_keys="GitStar.gitrepo_id"  # Specify which FK to use
-	)
+	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", back_populates="repo", uselist=False, foreign_keys="GitStar.gitrepo_id")
 
 	def __init__(self, git_url, local_path, repo_data=None):
 		# Initialize with minimal information

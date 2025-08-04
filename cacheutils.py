@@ -81,6 +81,7 @@ async def is_rate_limit_hit(args, threshold_percent=10):
 				return True
 		if args.debug:
 			logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
+			# print(resources)
 		# No limits hit
 		return False
 
