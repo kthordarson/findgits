@@ -872,6 +872,12 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 	Returns:
 		Tuple of (page_num, page_data)
 	"""
+
+	if await is_rate_limit_hit(args):
+		logger.warning("Rate limit hit!")
+		await asyncio.sleep(1)
+		return None
+
 	async with semaphore:
 		# Check if we should stop (other pages found empty results)
 		if stop_signal and stop_signal.is_set():

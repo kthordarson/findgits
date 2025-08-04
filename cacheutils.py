@@ -17,6 +17,7 @@ class RateLimitExceededError(Exception):
 
 async def get_api_rate_limits(args):
 	rate_limits = {'limit_hit':False, 'rate_limits': {}}
+	rates = {}
 	try:
 		# async with aiohttp.ClientSession() as api_session:
 		async with get_client_session(args) as api_session:
@@ -24,7 +25,6 @@ async def get_api_rate_limits(args):
 				rates = await r.json()
 	except aiohttp.client_exceptions.ContentTypeError as e:
 		logger.error(f"ContentTypeError while fetching rate limits: {e}")
-		rates = {}
 		rate_limits['limit_hit'] = True
 		rate_limits['rate_limits'] = {'error': 'ContentTypeError', 'message': str(e)}
 		return rate_limits
