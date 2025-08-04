@@ -24,15 +24,6 @@ async def verify_star_list_links(session, args):
 
 		logger.info(f"GitStar verification: Total={total_stars}, Linked={linked_stars}, Unlinked={unlinked_stars}")
 
-		# Show some examples of linked entries
-		linked_examples = session.query(GitStar, GitList).join(
-			GitList, GitStar.gitlist_id == GitList.id
-		).limit(5).all()
-
-		logger.info("Sample linked entries:")
-		for star, git_list in linked_examples:
-			logger.info(f"  GitStar {star.id} ({star.full_name}) -> GitList {git_list.id} ({git_list.list_name})")
-
 		return {
 			'total_stars': total_stars,
 			'linked_stars': linked_stars,
