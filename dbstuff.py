@@ -15,7 +15,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from itertools import combinations
 
-from utils import ensure_datetime
+from utils import ensure_datetime, get_git_info
 from utils import get_directory_size, get_subfilecount, get_subdircount
 
 # find dupes
@@ -260,6 +260,7 @@ class GitRepo(Base):
 			self.github_owner = '[unknown]'
 
 		self.update_config_times()
+		self.update_local_git_info()
 
 		# If repo_data is provided (from GitHub API), populate additional fields
 		if repo_data and isinstance(repo_data, dict):
@@ -341,6 +342,11 @@ class GitRepo(Base):
 		self.config_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
 		self.config_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
 		self.config_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
+
+	def update_local_git_info(self):
+		git_info = get_git_info(self.local_path)
+		self.branch = git_info.get('branch')
+		self.remote = git_info.get('remote')
 
 class CacheEntry(Base):
 	""" A table for storing cache data from GitHub API responses """
