@@ -350,6 +350,8 @@ class GitRepo(Base):
 			if 'target' in remote_branch:
 				if remote_branch.get('target') == 'origin/master':
 					self.remote = remote_branch['name']
+				if remote_branch.get('target') == 'origin/main':
+					self.remote = remote_branch['name']
 			elif 'name' in remote_branch:
 				if remote_branch.get('type') == 'remote':
 					self.remote = remote_branch['name']
