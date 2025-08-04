@@ -107,7 +107,7 @@ async def get_git_stars(args, session):
 			except Exception as e:
 				logger.error(f"Error loading from cache: {e}")
 		else:
-			logger.warning("[get_git_stars] ]o cache entry found in database for starred repos")
+			logger.warning("[get_git_stars]] no cache entry found in database for starred repos")
 
 		# If we reach here, either no cache or cache failed - download fresh data
 		logger.info("Downloading fresh starred repos data from GitHub API...")
@@ -726,8 +726,6 @@ async def fetch_starred_repos(args, session):
 							page_num, page_data = result
 							if page_data:
 								successful_pages.append((page_num, page_data))
-							else:
-								logger.warning(f"Page {page_num} returned no data")
 
 						# Sort by page number to maintain order
 						successful_pages.sort(key=lambda x: x[0])
@@ -779,7 +777,7 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 		# Check if we should stop (other pages found empty results)
 		if stop_signal and stop_signal.is_set():
 			if args.debug:
-				logger.debug(f"Skipping page {page_num} due to stop signal")
+				logger.warning(f"Skipping page {page_num} due to stop signal")
 			return page_num, []
 
 		# Handle different URL formats

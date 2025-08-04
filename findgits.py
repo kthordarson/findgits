@@ -179,6 +179,13 @@ async def populate_git_lists(session, args):
 			if hasattr(GitList, 'repo_count'):
 				db_list.list_count = entry.get('repo_count', '0')
 			session.add(db_list)
+	try:
+		logger.info("Pre-populating list stars cache...")
+		git_lists = await get_git_list_stars(session, args)
+		logger.info(f"Pre-populated list stars cache with {len(git_lists)} lists")
+	except Exception as e:
+		logger.warning(f"Failed to pre-populate list stars cache: {e}")
+
 	session.commit()
 	return list_data
 
@@ -288,6 +295,11 @@ async def main():
 		if args.debug:
 			logger.debug(f'Scan path: {scanpath}')
 
+		starred_repos = await get_git_stars(args, session)  # Updated call
+
+		if args.debug:
+			logger.debug(f'get_git_stars done, starred_repos: {len(starred_repos)} starting populate_git_lists')
+
 		list_data = await populate_git_lists(session, args)
 		if args.debug:
 			logger.debug(f'Populated git lists from GitHub, got {len(list_data)} ... starting populate_repo_data')
@@ -305,14 +317,6 @@ async def main():
 			logger.debug(f'Git Repos: {len(git_repos)} starting get_git_list_stars')
 
 		git_lists = await get_git_list_stars(session, args)
-
-		if args.debug:
-			logger.debug(f'get_git_list_stars done, git_lists: {len(git_lists)} starting get_git_stars')
-
-		starred_repos = await get_git_stars(args, session)  # Updated call
-
-		if args.debug:
-			logger.debug(f'get_git_stars done, starred_repos: {len(starred_repos)} starting fetch_starred_repos')
 
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]

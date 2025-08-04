@@ -308,9 +308,31 @@ def set_cache_entry(session, cache_key, cache_type, data):
 	try:
 		session.commit()
 	except sqlite3.IntegrityError as e:
-		logger.error(f"IntegrityError while committing cache entry: {e}")
-		session.rollback()
-		return None
+		if "UNIQUE constraint failed" in str(e):
+			# Handle race condition - another process may have inserted the same key
+			logger.warning(f"Cache key already exists, attempting update: {cache_key}")
+			session.rollback()
+			# Try to update existing entry
+			existing_entry = get_cache_entry(session, cache_key, cache_type)
+			if existing_entry:
+				existing_entry.data = data
+				existing_entry.timestamp = datetime.now()
+				existing_entry.last_scan = datetime.now()
+				try:
+					session.commit()
+					logger.info(f"Successfully updated existing cache entry: {cache_key}")
+					return existing_entry
+				except Exception as update_error:
+					logger.error(f"Failed to update existing cache entry: {update_error}")
+					session.rollback()
+					return None
+			else:
+				logger.error(f"Cache entry disappeared during update attempt: {cache_key}")
+				return None
+		else:
+			logger.error(f"IntegrityError while committing cache entry: {e}")
+			session.rollback()
+			return None
 	except Exception as e:
 		logger.error(f"Failed to commit cache entry: {e}")
 		logger.error(f"Traceback: {traceback.format_exc()}")
