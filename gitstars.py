@@ -506,11 +506,16 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	souplist = soup.find_all('a', class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
 
 	for sl in souplist:
+		# Fix: Update selectors to match the actual HTML structure
 		list_info = {
-			'name': sl.find('span', class_='text-normal').text.strip() if sl.find('span', class_='text-normal') else 'Unknown',
-			'description': sl.find('p', class_='color-fg-muted').text.strip() if sl.find('p', class_='color-fg-muted') else '',
+			# The list name is in h3 with class "f4 text-bold no-wrap mr-3"
+			'name': sl.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if sl.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown',
+			# There's no description in this structure, so keep it empty
+			'description': '',
+			# The href attribute contains the list URL
 			'list_url': sl.get('href', ''),
-			'repo_count': sl.find('span', class_='Counter').text.strip() if sl.find('span', class_='Counter') else '0'
+			# The repo count is in div with class "color-fg-muted text-small no-wrap"
+			'repo_count': sl.find('div', class_='color-fg-muted text-small no-wrap').text.strip() if sl.find('div', class_='color-fg-muted text-small no-wrap') else '0'
 		}
 		git_lists_metadata.append(list_info)
 
@@ -522,14 +527,13 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 			list_items = listsoup[0].find_all('a', attrs={'class': 'd-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
 
 			for item in list_items:
-				listname = item.find('h3').text if item.find('h3') else 'Unknown'
+				# Fix: Use the same selectors as above for consistency
+				listname = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'
 				list_link = f"https://github.com{item.attrs['href']}"
 				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''
 
-				try:
-					list_description = item.select('span', class_="Truncate-text color-fg-muted mr-3")[1].text.strip()
-				except IndexError:
-					list_description = ''
+				# There's no description in this structure
+				list_description = ''
 
 				# Get individual list repository links
 				try:

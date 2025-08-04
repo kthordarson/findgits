@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import argparse
 from typing import Dict, List
+import json
 from collections import defaultdict
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
@@ -13,9 +14,7 @@ from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_re
 from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
 from utils import flatten
-from cacheutils import get_cache_entry, get_api_rate_limits
-import json
-
+from cacheutils import set_cache_entry, get_cache_entry, get_api_rate_limits
 
 def dbcheck(session) -> dict:
 	"""
@@ -199,9 +198,6 @@ async def populate_git_lists(session, args):
 		logger.debug(f'populate_git_lists: {len(list_data)} lists fetched from GitHub')
 
 	# Cache the list data
-	from cacheutils import set_cache_entry
-	import json
-
 	# Cache the main list data
 	cache_key = "git_lists_metadata"
 	cache_type = "list_metadata"
@@ -217,10 +213,7 @@ async def populate_git_lists(session, args):
 				list_name = url_parts[-1]
 
 		# Check if list already exists by name or URL
-		db_list = session.query(GitList).filter(
-			(GitList.list_name == list_name) |
-			(GitList.list_url == entry.get('list_url', ''))
-		).first()
+		db_list = session.query(GitList).filter((GitList.list_name == list_name) | (GitList.list_url == entry.get('list_url', ''))).first()
 
 		if db_list:
 			# Update existing entry
