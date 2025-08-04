@@ -600,9 +600,6 @@ async def get_info_for_list(link, headers, session, args):
 
 	async with get_client_session(args) as api_session:
 		while current_url:
-			if args.debug:
-				logger.debug(f"Fetching list info from {current_url} (page {page_num})")
-
 			try:
 				async with api_session.get(current_url, headers=headers) as r:
 					if r.status != 200:

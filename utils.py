@@ -97,7 +97,8 @@ def get_git_info(git_path: str) -> dict:
 		'tracking_info': {},
 		'error': None
 	}
-
+	if git_path == '[notcloned]':
+		return git_info
 	try:
 		os.chdir(git_path)
 		cmdstr = ['git', 'branch', '-v', '-a', '-l']
