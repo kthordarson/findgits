@@ -173,42 +173,61 @@ async def populate_git_lists(session, args):
 	set_cache_entry(session, cache_key, cache_type, json.dumps(list_data))
 
 	for entry in list_data:
+		# Extract the actual list name from the URL if the name is "Unknown"
+		list_name = entry.get('name', 'Unknown')
+		if list_name == 'Unknown' and entry.get('list_url'):
+			# Extract list name from URL like "/stars/kthordarson/lists/az" -> "az"
+			url_parts = entry.get('list_url', '').split('/')
+			if len(url_parts) > 0:
+				list_name = url_parts[-1]
+
 		# Check if list already exists by name or URL
-		db_list = session.query(GitList).filter((GitList.list_name == entry['name']) | (GitList.list_url == entry['list_url'])).first()
+		db_list = session.query(GitList).filter((GitList.list_name == list_name) | (GitList.list_url == entry.get('list_url', ''))).first()
 		if db_list:
 			# Update existing entry
+			db_list.list_name = list_name  # Update the name in case it was "Unknown" before
 			db_list.list_description = entry.get('description', '')
 			db_list.repo_count = entry.get('repo_count', '0')
 			db_list.list_url = entry.get('list_url', '')
 		else:
 			# Create new entry
-			db_list = GitList(list_name=entry.get('name', ''), list_description=entry.get('description', ''), list_url=entry.get('list_url', ''),)
+			db_list = GitList(
+				list_name=list_name,
+				list_description=entry.get('description', ''),
+				list_url=entry.get('list_url', '')
+			)
 			if args.debug:
-				logger.debug(f'Adding new GitList: {db_list.list_name} with URL: {db_list.list_url}')
+				logger.debug(f'Adding new GitList: {list_name} with URL: {db_list.list_url}')
 			# Optionally add count if you want to store it
 			if hasattr(GitList, 'repo_count'):
 				db_list.list_count = entry.get('repo_count', '0')
 			session.add(db_list)
 
-		# Cache individual list data for faster retrieval
-		list_cache_key = f"git_list:{entry['name']}"
+		# Cache individual list data for faster retrieval using the corrected name
+		list_cache_key = f"git_list:{list_name}"
 		list_cache_type = "individual_list"
-		set_cache_entry(session, list_cache_key, list_cache_type, json.dumps(entry))
+		# Update the entry with the corrected name before caching
+		entry_to_cache = entry.copy()
+		entry_to_cache['name'] = list_name
+		set_cache_entry(session, list_cache_key, list_cache_type, json.dumps(entry_to_cache))
+
+	# Commit the database changes first
+	session.commit()
 
 	try:
 		logger.info("Pre-populating list stars cache...")
 		git_lists = await get_git_list_stars(session, args)
 		logger.info(f"Pre-populated list stars cache with {len(git_lists)} lists")
 
-		# Cache the complete git_lists data as well
-		git_lists_cache_key = "git_list_stars_complete"
+		# Cache the complete git_lists data with the correct cache key
+		git_lists_cache_key = "git_list_stars"
 		git_lists_cache_type = "list_stars"
 		set_cache_entry(session, git_lists_cache_key, git_lists_cache_type, json.dumps(git_lists))
 
 	except Exception as e:
 		logger.warning(f"Failed to pre-populate list stars cache: {e}")
+		# Don't let this failure stop the function - it's just a cache optimization
 
-	session.commit()
 	return list_data
 
 def get_args():
