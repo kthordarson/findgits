@@ -178,21 +178,24 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 	if isinstance(github_repo, dict):
 		repo_data = github_repo
 		remote_url = repo_data.get('html_url') or f"https://github.com/{repo_data.get('full_name')}"
+		full_name = repo_data.get('full_name')
 	else:
 		clean_path = github_repo.strip('/')
 		if 'github.com' in clean_path:
 			remote_url = f"https://{clean_path}"
+			full_name = clean_path.split('github.com/')[-1]
 		else:
 			remote_url = f"https://github.com/{clean_path}"
+			full_name = clean_path
 
 	# Get or create GitRepo object
 	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
 
 	# Get full repository data from GitHub API
 	try:
-		repo_data = await update_repo_cache(clean_path, session, args)
+		repo_data = await update_repo_cache(clean_path if isinstance(github_repo, str) else full_name, session, args)
 	except RateLimitExceededError as e:
-		logger.warning(f'Rate limit exceeded while fetching metadata for {clean_path}: {e}')
+		logger.warning(f'Rate limit exceeded while fetching metadata for {clean_path if isinstance(github_repo, str) else full_name}: {e}')
 		raise e
 
 	if not git_repo:
@@ -234,7 +237,23 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
 			if git_list:
 				git_star.gitlist_id = git_list.id
-				git_repo.gitstar_id = git_star.id
+				logger.info(f"Linked GitStar {git_star.id} to GitList {git_list.id} ({list_name})")
+		else:
+			# Try to determine which list this repo belongs to
+			git_lists_data = await get_git_list_stars(session, args)
+			repo_full_name = git_repo.full_name or full_name
+
+			for list_name_check, list_data in git_lists_data.items():
+				for href in list_data.get('hrefs', []):
+					href_clean = href.strip('/').split('github.com/')[-1].rstrip('.git')
+					if href_clean == repo_full_name:
+						git_list = session.query(GitList).filter(GitList.list_name == list_name_check).first()
+						if git_list:
+							git_star.gitlist_id = git_list.id
+							logger.info(f"Auto-linked GitStar {git_star.id} to GitList {git_list.id} ({list_name_check})")
+						break
+				if git_star.gitlist_id:
+					break
 	else:
 		logger.warning(f'No GitRepo found for remote_url: {remote_url}')
 
