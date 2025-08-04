@@ -159,7 +159,7 @@ async def link_existing_repos_to_stars(session, args):
 
 async def populate_git_lists(session, args):
 	# fetch lists from GitHub
-	list_data = await get_lists(args)
+	list_data = await get_lists(args, session)
 	if args.debug:
 		logger.debug(f'populate_git_lists: {len(list_data)} lists fetched from GitHub')
 

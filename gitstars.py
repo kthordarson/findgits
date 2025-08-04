@@ -440,42 +440,58 @@ async def get_list_members(args, list_url) -> List[dict]:
 		logger.debug(f"Found {len(members)} members in list {list_url}")
 	return members
 
-async def get_lists(args) -> dict:
+async def get_lists(args, session) -> dict:
 	"""
 	Fetches the user's GitHub starred repository lists by scraping the stars page.
-
-	Returns:
-		A list of dictionaries, each containing:
-			- name: The list's name
-			- repo_count: Number of repositories in the list
-			- description: List description (if available)
-			- list_url: Relative URL to the list on GitHub
 	"""
+
+	cache_key = "git_lists_metadata"
+	cache_type = "list_metadata"
+
+	# Try cache first if enabled
+	if args.use_cache:
+		cache_entry = get_cache_entry(session, cache_key, cache_type)
+		if cache_entry:
+			try:
+				cached_data = json.loads(cache_entry.data)
+				if args.debug:
+					logger.debug(f"Using cached git lists data: {len(cached_data)} lists")
+				return cached_data
+			except (json.JSONDecodeError, AttributeError) as e:
+				logger.warning(f"Failed to load cached git lists data: {e}")
+
+	if args.nodl:
+		logger.warning("Skipping API call for git lists due to --nodl flag")
+		return []
+
 	git_lists = []
-	listurl = f'https://github.com/{os.getenv("GITHUB_USERNAME",'')}?tab=stars'
+	auth = await get_auth_params()
+	if not auth:
+		logger.error("No authentication provided for get_lists")
+		return []
+
+	listurl = f'https://github.com/{auth.username}?tab=stars'
+
 	async with aiohttp.ClientSession() as api_session:
-		if args.debug:
-			logger.debug(f"Fetching star list from {listurl}")
-		async with api_session.get(listurl) as r:
-			if r.status == 200:
-				content = await r.text()
+		async with api_session.get(listurl) as response:
+			content = await response.text()
+
 	soup = BeautifulSoup(content, 'html.parser')
 	souplist = soup.find_all('a',class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
-	# souplist = soup.find_all('div',id="profile-lists-container")
+
 	for sl in souplist:
-		list_name = sl.find('h3', class_="f4 text-bold no-wrap mr-3").get_text(strip=True)
-		repo_count = sl.find('div', class_="color-fg-muted text-small no-wrap").get_text(strip=True).split()[0]
-		list_description = sl.find('span', class_="Truncate-text color-fg-muted mr-3").get_text(strip=True) if sl.find('span', class_="Truncate-text color-fg-muted mr-3") else ''
-		list_url = sl['href']
-		list_item = {
-			'name': list_name,
-			'repo_count': repo_count,
-			'description': list_description,
-			'list_url': list_url,
+		list_info = {
+			'name': sl.find('span', class_='text-normal').text.strip() if sl.find('span', class_='text-normal') else 'Unknown',
+			'description': sl.find('p', class_='color-fg-muted').text.strip() if sl.find('p', class_='color-fg-muted') else '',
+			'list_url': sl.get('href', ''),
+			'repo_count': sl.find('span', class_='Counter').text.strip() if sl.find('span', class_='Counter') else '0'
 		}
-		git_lists.append(list_item)
-		if args.debug:
-			logger.debug(f"List found: {list_name}, Count: {repo_count}, Description: {list_description}, total lists: {len(git_lists)}")
+		git_lists.append(list_info)
+
+	# Cache the results
+	if git_lists:
+		set_cache_entry(session, cache_key, cache_type, json.dumps(git_lists))
+
 	return git_lists
 
 async def get_git_list_stars(session, args) -> dict:
