@@ -316,7 +316,6 @@ def get_args():
 	myparse.add_argument('--db_file', help='sqlitedb filename', default='gitrepo.db', dest='db_file', action='store', metavar='db_file')
 	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
 	# stars/lists
-	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
 	# tuning, debug, etc
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
@@ -541,30 +540,6 @@ async def main():
 		logger.info("Creating repo-to-list mapping...")
 		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
 		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
-
-		return
-
-	if args.populate:
-		stats = await populate_repo_data(session, args)
-		print(f"GitHub Stars Processing Stats:{stats}")
-
-		git_folders = session.query(GitFolder).all()
-		print(f'Git Folders: {len(git_folders)}')
-
-		# For larger datasets, consider processing in batches
-		batch_size = 50
-		for i, folder in enumerate(git_folders):
-			folder.get_folder_stats()
-			if args.debug:
-				logger.debug(f'Git Folder: {folder.git_path} ID: {folder.id} Scan Count: {folder.scan_count} ')
-			# Commit changes in batches to avoid large transactions
-			if (i + 1) % batch_size == 0 or i == len(git_folders) - 1:
-				session.commit()
-				if args.debug:
-					logger.info(f"Committed batch of folder updates ({i+1}/{len(git_folders)})")
-		# Make sure all changes are committed
-		session.commit()
-		logger.info(f"Updated {len(git_folders)} folders in database")
 		return
 
 if __name__ == '__main__':
