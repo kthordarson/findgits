@@ -5,7 +5,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from loguru import logger
-from dbstuff import GitRepo, GitFolder, RepoInfo, get_dupes
+from dbstuff import GitRepo, GitFolder, RepoInfo, GitStar, GitList, get_dupes
 from utils import valid_git_folder, get_remote, ensure_datetime
 from gitstars import get_git_stars
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
@@ -165,27 +165,19 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		return None
 
 
-async def insert_update_starred_repo(github_repo, session, args, create_new=False):
+async def insert_update_starred_repo(github_repo, session, args, create_new=False, list_name=None):
 	"""
 	Insert a new GitRepo or update an existing one in the database
-
-	Parameters:
-		github_repo: repository object from GitHub API or owner/repo string
-		session: SQLAlchemy session
-		create_new: bool - whether to create a new repo if it doesn't exist
+	Also create GitStar entry and link to GitList if provided
 	"""
 	git_folder_path = '[notcloned]'
 
 	# Check if github_repo is a string (URL or owner/repo) or a dict
 	if isinstance(github_repo, dict):
-		# Already have full repo data
 		repo_data = github_repo
 		remote_url = repo_data.get('html_url') or f"https://github.com/{repo_data.get('full_name')}"
 	else:
-		# Normalize the path by removing leading/trailing slashes
 		clean_path = github_repo.strip('/')
-
-		# It's a string, construct proper GitHub URL
 		if 'github.com' in clean_path:
 			remote_url = f"https://{clean_path}"
 		else:
@@ -196,25 +188,50 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 
 	# Get full repository data from GitHub API
 	try:
-		repo_data = await update_repo_cache(clean_path, session, args)  # Pass session to update_repo_cache
+		repo_data = await update_repo_cache(clean_path, session, args)
 	except RateLimitExceededError as e:
 		logger.warning(f'Rate limit exceeded while fetching metadata for {clean_path}: {e}')
 		raise e
 
 	if not git_repo:
-		# Create new repository with all available data
 		if create_new:
 			git_repo = GitRepo(remote_url, git_folder_path, repo_data)
 			session.add(git_repo)
+			session.flush()  # Get the ID
 			logger.info(f'Created new GitRepo: {git_repo}')
 	else:
 		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}')
-		# Update existing repository if we have repo_data
 		if repo_data:
 			update_repo_from_data(git_repo, repo_data)
 
+	# Create or update GitStar entry
+	if git_repo:
+		# Mark repo as starred
+		git_repo.is_starred = True
+		git_repo.starred_at = datetime.now()
+
+		# Check if GitStar entry exists
+		git_star = session.query(GitStar).filter(GitStar.gitrepo_id == git_repo.id).first()
+		if not git_star:
+			git_star = GitStar()
+			git_star.gitrepo_id = git_repo.id
+			git_star.starred_at = datetime.now()
+			if repo_data:
+				git_star.stargazers_count = repo_data.get('stargazers_count')
+				git_star.description = repo_data.get('description')
+				git_star.full_name = repo_data.get('full_name')
+				git_star.html_url = repo_data.get('html_url')
+			session.add(git_star)
+			session.flush()  # Get the ID
+
+		# Link to GitList if list_name provided
+		if list_name:
+			git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+			if git_list:
+				git_star.gitlist_id = git_list.id
+				git_repo.gitstar_id = git_star.id
+
 	if create_new:
-		# Save changes
 		session.commit()
 	return git_repo
 
