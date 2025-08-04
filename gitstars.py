@@ -607,7 +607,7 @@ async def get_info_for_list(link, headers, session, args):
 
 async def fetch_starred_repos(args, session):
 	"""
-	Fetch user's starred repositories from GitHub API with database caching
+	Fetch user's starred repositories from GitHub API with database caching and concurrent page downloads
 	"""
 	cache_key = "starred_repos_fetch"
 	cache_type = "starred_repos"
@@ -627,10 +627,11 @@ async def fetch_starred_repos(args, session):
 				logger.warning(f"Failed to load cache: {e}")
 		else:
 			logger.warning("No cache entry found in database for starred repos")
-			# Proceed to download if no cache or cache is too old
+
 	if args.nodl:
 		logger.warning("Skipping API call due to --nodl flag")
 		return []
+
 	# Get authentication
 	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
 	if not auth:
@@ -645,8 +646,6 @@ async def fetch_starred_repos(args, session):
 		'X-GitHub-Api-Version': '2022-11-28'
 	}
 
-	repos = []
-	page = 1
 	per_page = 100  # Max allowed by GitHub API
 
 	if await is_rate_limit_hit(args):
@@ -654,57 +653,123 @@ async def fetch_starred_repos(args, session):
 		await asyncio.sleep(1)
 		return None
 
-	# Make API requests with pagination
-	# async with aiohttp.ClientSession() as api_session:
 	async with get_client_session(args) as api_session:
-		while True:
-			url = f"{api_url}?page={page}&per_page={per_page}"
-			if args.debug:
-				logger.debug(f"Fetching starred repos page {page}")
-			if args.max_pages > 0 and page > args.max_pages:
-				if args.debug:
-					logger.debug(f"hit max: {args.max_pages} page {page}")
-				break
-			try:
-				async with api_session.get(url) as response:
-					if response.status == 200:
-						page_data = await response.json()
-						# No more data to fetch
-						if not page_data:
-							if args.debug:
-								logger.debug(f"No more starred repos found on page {page}")
-							break
+		# First, get the first page to determine total pages
+		first_page_url = f"{api_url}?page=1&per_page={per_page}"
 
-						repos.extend(page_data)
-						if args.debug:
-							logger.debug(f"Fetched {len(page_data)} repos from page {page}")
-
-						# Check if we've reached the last page
-						if len(page_data) < per_page:
-							break
-
-						page += 1
-					elif response.status == 401:
-						logger.error("Authentication failed - check your token")
-						break
-					elif response.status == 403:
-						# Check rate limit headers
-						reset_time = response.headers.get('X-RateLimit-Reset')
-						if reset_time:
-							reset_datetime = datetime.datetime.fromtimestamp(int(reset_time))
-							wait_time = (reset_datetime - datetime.datetime.now()).total_seconds()
-							logger.warning(f"Rate limit exceeded. Resets in {wait_time:.1f} seconds")
-						else:
-							logger.warning("Rate limit exceeded")
-						break
+		try:
+			async with api_session.get(first_page_url, headers=headers) as response:
+				if response.status == 401:
+					logger.error("Authentication failed - check your token")
+					return []
+				elif response.status == 403:
+					reset_time = response.headers.get('X-RateLimit-Reset')
+					if reset_time:
+						reset_datetime = datetime.datetime.fromtimestamp(int(reset_time))
+						wait_time = (reset_datetime - datetime.datetime.now()).total_seconds()
+						logger.warning(f"Rate limit exceeded. Resets in {wait_time:.1f} seconds")
 					else:
-						logger.error(f"API request failed with status {response.status}")
-						error_data = await response.text()
-						logger.warning(f"Error response: {error_data}")
-						break
-			except Exception as e:
-				logger.error(f"Request error: {e} {type(e)}")
-				break
+						logger.warning("Rate limit exceeded")
+					return []
+				elif response.status != 200:
+					logger.error(f"API request failed with status {response.status}")
+					error_data = await response.text()
+					logger.warning(f"Error response: {error_data}")
+					return []
+
+				first_page_data = await response.json()
+				repos = list(first_page_data)  # Start with first page data
+
+				# Determine total pages from Link header or response size
+				total_pages = 1
+				if 'link' in response.headers:
+					links = response.headers['link'].split(',')
+					for link in links:
+						if 'last' in link:
+							last_url = link.split('>')[0].replace('<','')
+							try:
+								total_pages = int(last_url.split('page=')[-1].split('&')[0])
+							except (ValueError, IndexError):
+								# If we can't parse, estimate from first page
+								if len(first_page_data) == per_page:
+									total_pages = 10  # Conservative estimate
+								break
+							break
+				elif len(first_page_data) == per_page:
+					# No link header but full page, estimate more pages exist
+					total_pages = 10  # Conservative estimate
+
+				# Apply max_pages limit
+				if args.max_pages > 0:
+					total_pages = min(total_pages, args.max_pages)
+
+				logger.info(f"Fetched page 1, found {len(first_page_data)} repos. Total pages to fetch: {total_pages}")
+
+				# If only one page, return early
+				if total_pages == 1 or len(first_page_data) < per_page:
+					logger.info(f"Single page download completed. Total repos: {len(repos)}")
+				else:
+					# Create tasks for remaining pages (starting from page 2)
+					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
+
+					async def fetch_page(page_num):
+						async with semaphore:
+							page_url = f"{api_url}?page={page_num}&per_page={per_page}"
+							try:
+								if args.debug:
+									logger.debug(f"Fetching starred repos page {page_num}")
+
+								async with api_session.get(page_url, headers=headers) as page_response:
+									if page_response.status == 200:
+										page_data = await page_response.json()
+										if args.debug:
+											logger.debug(f"Page {page_num}: got {len(page_data)} repos")
+										return page_num, page_data
+									elif page_response.status == 403:
+										logger.warning(f"Rate limit hit on page {page_num}")
+										return page_num, []
+									else:
+										logger.warning(f"Page {page_num} failed with status {page_response.status}")
+										return page_num, []
+							except Exception as e:
+								logger.error(f"Error fetching page {page_num}: {e}")
+								return page_num, []
+
+					# Create tasks for pages 2 through total_pages
+					tasks = []
+					for page_num in range(2, total_pages + 1):
+						tasks.append(fetch_page(page_num))
+
+					# Execute all page requests concurrently
+					if tasks:
+						logger.info(f"Starting concurrent download of {len(tasks)} pages...")
+						page_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+						# Process results and add to repos list
+						successful_pages = []
+						for result in page_results:
+							if isinstance(result, Exception):
+								logger.error(f"Page fetch failed: {result}")
+								continue
+
+							page_num, page_data = result
+							if page_data:
+								successful_pages.append((page_num, page_data))
+
+						# Sort by page number to maintain order
+						successful_pages.sort(key=lambda x: x[0])
+
+						# Add all page data to repos list
+						for page_num, page_data in successful_pages:
+							repos.extend(page_data)
+							if args.debug:
+								logger.debug(f"Added page {page_num} data, total repos: {len(repos)}")
+
+						logger.info(f"Concurrent download completed. Total repos: {len(repos)}")
+
+		except Exception as e:
+			logger.error(f"Request error: {e} {type(e)}")
+			return []
 
 	# Cache the results if we got data
 	if repos:
