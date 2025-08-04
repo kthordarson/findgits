@@ -361,7 +361,7 @@ def check_update_dupes(session) -> dict:
 	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
 	return result
 
-async def populate_repo_data(session, args):
+async def populate_repo_data(session, args, starred_repos=None):
 	"""
 	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
 	Uses the provided git_repos list rather than querying again.
@@ -379,8 +379,9 @@ async def populate_repo_data(session, args):
 		# Use the existing git_repos variable
 		git_repos = session.query(GitRepo).all()
 
-	# Fetch starred repositories from GitHub API
-	starred_repos = await get_git_stars(args, session)
+	# Use provided starred_repos or fetch if not provided
+	if starred_repos is None:
+		starred_repos = await get_git_stars(args, session)
 
 	stats = {
 		"total_db_repos": len(git_repos),
