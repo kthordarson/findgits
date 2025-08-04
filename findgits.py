@@ -11,7 +11,7 @@ from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_re
 from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
-from cacheutils import get_cache_entry
+from cacheutils import get_cache_entry, get_api_rate_limits
 import json
 
 
@@ -239,6 +239,7 @@ def get_args():
 	myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
 	myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
+	myparse.add_argument('--check_rate_limits', help='check_rate_limits', action='store_true', default=False, dest='check_rate_limits')
 	# db
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
 	myparse.add_argument('--db_file', help='sqlitedb filename', default='gitrepo.db', dest='db_file', action='store', metavar='db_file')
@@ -278,6 +279,76 @@ async def main():
 	if args.dropdatabase:
 		drop_database(engine)
 		logger.info('Database dropped')
+		session.close()
+		return
+
+	if args.check_rate_limits:
+		rate_limits = await get_api_rate_limits(args)
+		if rate_limits:
+			print("\n🔍 GitHub API Rate Limits Status")
+			print("=" * 50)
+
+			if rate_limits.get('limit_hit'):
+				print("⚠️  RATE LIMIT HIT!")
+			else:
+				print("✅ Rate limits OK")
+
+			# Main rate limit info
+			rate_info = rate_limits.get('rate_limits', {}).get('rate', {})
+			if rate_info:
+				limit = rate_info.get('limit', 0)
+				used = rate_info.get('used', 0)
+				remaining = rate_info.get('remaining', 0)
+				reset_timestamp = rate_info.get('reset', 0)
+
+				# Convert timestamp to readable time
+				from datetime import datetime
+				reset_time = datetime.fromtimestamp(reset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+				print(f"\n📊 Overall Rate Limit:")
+				print(f"   Limit:     {limit:,}")
+				print(f"   Used:      {used:,}")
+				print(f"   Remaining: {remaining:,}")
+				print(f"   Resets at: {reset_time}")
+
+				# Calculate percentage used
+				if limit > 0:
+					percentage_used = (used / limit) * 100
+					print(f"   Usage:     {percentage_used:.1f}%")
+
+					# Visual progress bar
+					bar_length = 30
+					filled_length = int(bar_length * used // limit)
+					bar = '█' * filled_length + '░' * (bar_length - filled_length)
+					print(f"   Progress:  [{bar}]")
+
+			# Resource-specific limits
+			resources = rate_limits.get('rate_limits', {}).get('resources', {})
+			if resources:
+				print(f"\n📋 Resource-Specific Limits:")
+				print("-" * 50)
+
+				# Sort by usage percentage for better visibility
+				resource_data = []
+				for resource, data in resources.items():
+					limit = data.get('limit', 0)
+					used = data.get('used', 0)
+					remaining = data.get('remaining', 0)
+					if limit > 0:
+						usage_pct = (used / limit) * 100
+					else:
+						usage_pct = 0
+					resource_data.append((resource, limit, used, remaining, usage_pct))
+
+				# Sort by usage percentage (highest first)
+				resource_data.sort(key=lambda x: x[4], reverse=True)
+
+				for resource, limit, used, remaining, usage_pct in resource_data:
+					if used > 0 or limit < 5000:  # Show resources that are used or have lower limits
+						status = "⚠️ " if usage_pct > 80 else "🟡" if usage_pct > 50 else "🟢"
+						print(f"{status} {resource:25} {used:4d}/{limit:4d} ({usage_pct:5.1f}%) - {remaining:4d} remaining")
+		else:
+			print("❌ No API rate limits found or unable to fetch.")
 		session.close()
 		return
 
