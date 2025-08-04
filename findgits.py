@@ -296,6 +296,7 @@ async def main():
 		if args.debug:
 			logger.debug(f'Scan path: {scanpath}')
 
+		# Fetch starred repos ONCE at the beginning
 		starred_repos = await get_git_stars(args, session)
 
 		if args.debug:
@@ -305,12 +306,18 @@ async def main():
 		if args.debug:
 			logger.debug(f'Populated git lists from GitHub, got {len(list_data)} ... starting populate_repo_data')
 
-		stats = await populate_repo_data(session, args)
+		# Pass the already-fetched starred_repos to populate_repo_data instead of letting it fetch again
+		stats = await populate_repo_data(session, args, starred_repos=starred_repos)  # Modified
 
 		if args.debug:
 			logger.debug(f'populate_repo_data done stats: {stats}')
 
-		print(f"GitHub Stars Processing Stats: total_db_repos: {stats.get('total_db_repos')} total_starred_repos: {stats.get('total_starred_repos')}")
+		# Remove this redundant call since we already have starred_repos
+		# fetched_repos = await fetch_starred_repos(args, session)  # REMOVE THIS LINE
+
+		# Use the existing starred_repos data
+		print(f'Using {len(starred_repos)} starred repos from GitHub API')
+
 		if args.global_limit > 0:
 			logger.warning(f'Global limit set to {args.global_limit}, this will limit the number of repositories processed.')
 			git_repos = session.query(GitRepo).limit(args.global_limit).all()
