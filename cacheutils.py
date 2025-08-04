@@ -312,6 +312,7 @@ def set_cache_entry(session, cache_key, cache_type, data):
 		session.commit()
 	except Exception as e:
 		logger.error(f"Failed to commit cache entry: {e}")
+		logger.error(f"Traceback: {traceback.format_exc()}")
 		session.rollback()
 		return None
 

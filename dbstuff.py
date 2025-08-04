@@ -145,7 +145,6 @@ class GitFolder(Base):
 class GitRepo(Base):
 	""" A git repo, linked to one or more git_paths """
 	__tablename__ = 'gitrepo'
-	# __table_args__ = (sqlalchemy.UniqueConstraint('git_url', name='uix_git_url'),)
 
 	id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -218,8 +217,14 @@ class GitRepo(Base):
 	valid = Column(Boolean, default=True)
 	scanned = Column[bool]
 
+	# NEW: Star tracking fields
+	is_starred = Column('is_starred', Boolean, default=False)
+	gitstar_id = Column('gitstar_id', Integer, ForeignKey('gitstars.id'), nullable=True)
+	starred_at = Column('starred_at', DateTime, nullable=True)
+
 	# Relationships
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
+	star_entry: Mapped["GitStar"] = relationship("GitStar", back_populates="repo", uselist=False)
 
 	def __init__(self, git_url, local_path, repo_data=None):
 		# Initialize with minimal information
