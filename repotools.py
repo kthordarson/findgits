@@ -7,7 +7,7 @@ from pathlib import Path
 from loguru import logger
 from dbstuff import GitRepo, GitFolder, RepoInfo, GitStar, GitList, get_dupes
 from utils import valid_git_folder, get_remote_url, ensure_datetime
-from gitstars import get_git_stars, get_git_list_stars, fetch_github_starred_repos
+from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
 
 async def verify_star_list_links(session, args):
@@ -190,7 +190,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 async def create_repo_to_list_mapping(session, args):
 	"""Create a mapping of repo URLs to list names - fetch once and reuse"""
-	git_lists_data = await get_git_list_stars(session, args)
+	git_lists_data = await get_lists_and_stars_unified(session, args)
 	repo_to_list_mapping = {}
 
 	for list_name, list_data in git_lists_data.items():
@@ -271,22 +271,6 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			if git_list:
 				git_star.gitlist_id = git_list.id
 				logger.info(f"Linked GitStar {git_star.id} to GitList {git_list.id} ({list_name})")
-		# else:
-		# 	# Try to determine which list this repo belongs to
-		# 	git_lists_data = await get_git_list_stars(session, args)
-		# 	repo_full_name = git_repo.full_name or full_name
-
-		# 	for list_name_check, list_data in git_lists_data.items():
-		# 		for href in list_data.get('hrefs', []):
-		# 			href_clean = href.strip('/').split('github.com/')[-1].rstrip('.git')
-		# 			if href_clean == repo_full_name:
-		# 				git_list = session.query(GitList).filter(GitList.list_name == list_name_check).first()
-		# 				if git_list:
-		# 					git_star.gitlist_id = git_list.id
-		# 					logger.info(f"Auto-linked GitStar {git_star.id} to GitList {git_list.id} ({list_name_check})")
-		# 				break
-		# 		if git_star.gitlist_id:
-		# 			break
 	else:
 		logger.warning(f'No GitRepo found for remote_url: {remote_url}')
 

@@ -12,283 +12,6 @@ from collections import defaultdict
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
 from utils import get_client_session, get_auth_params
 
-async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
-	"""
-	Get starred repositories grouped by list name
-
-	Returns:
-		Dict[str, List[dict]]: Dictionary with list names as keys and lists of repos as values
-	"""
-	try:
-		try:
-			# Get all lists first
-			git_lists = await get_git_list_stars(session, args)
-			if not git_lists:
-				logger.warning("No GitHub lists found")
-				return {}
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e}")
-			return {}
-		try:
-			# Get all starred repos
-			starred_repos = await fetch_github_starred_repos(args, session)
-			if not starred_repos:
-				logger.warning("No starred repositories found")
-				return {}
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e}")
-			return {}
-		try:
-			# Create lookup dict for starred repos by full name
-			repo_lookup = {repo['full_name']: repo for repo in starred_repos}
-			# Group repos by list
-			grouped_repos = defaultdict(list)
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e}")
-			return {}
-
-		for list_name, list_data in git_lists.items():
-			try:
-				for href in list_data['hrefs']:
-					# Convert href to full_name format (owner/repo)
-					full_name = href.strip('/').split('github.com/')[-1]
-					if full_name in repo_lookup:
-						grouped_repos[list_name].append(repo_lookup[full_name])
-					else:
-						logger.warning(f"Repository {full_name} found in list but not in starred repos")
-			except Exception as e:
-				logger.error(f"Error getting starred repos by list: {e}")
-				return {}
-		# Add "Uncategorized" list for repos not in any list
-		# in_lists = {repo for repos in grouped_repos.values() for repo in repos}
-		in_list_names = {repo['full_name'] for repos in grouped_repos.values() for repo in repos}
-		try:
-			uncategorized = []
-			# [repo for repo in starred_repos if repo['full_name'] not in {r['full_name'] for r in list(in_list_names)}]
-			for repo in starred_repos:
-				if repo['full_name'] not in in_list_names:
-					uncategorized.append(repo)
-			if uncategorized:
-				grouped_repos["Uncategorized"] = uncategorized
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e} {type(e)}")
-			# return {}
-
-		# Convert defaultdict to regular dict and sort repos in each list
-		result = dict(grouped_repos)
-		for list_name in result:
-			result[list_name].sort(key=lambda x: x.get('updated_at', ''), reverse=True)
-
-		return result
-
-	except Exception as e:
-		logger.error(f"Error getting starred repos by list: {e}")
-		return {}
-
-async def get_git_stars(args, session):
-	"""
-	Get all starred repos with caching support from database
-	"""
-	cache_key = "starred_repos_list"
-	cache_type = "starred_repos"
-
-	jsonbuffer = []
-
-	# Try to load from cache first if use_cache is enabled
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				jsonbuffer = json.loads(cache_entry.data)
-				logger.info(f"Loaded {len(jsonbuffer)} starred repos from database cache")
-				return jsonbuffer  # Return cached data if successful
-			except json.JSONDecodeError as e:
-				logger.error(f"Invalid JSON in cache entry: {e}")
-			except Exception as e:
-				logger.error(f"Error loading from cache: {e}")
-		else:
-			logger.warning("[get_git_stars]] no cache entry found in database for starred repos")
-
-		# If we reach here, either no cache or cache failed - download fresh data
-		logger.info("Downloading fresh starred repos data from GitHub API...")
-		git_starred_repos = await fetch_github_starred_repos(args, session)
-
-		# Store the downloaded data in the database cache
-		if git_starred_repos:
-			try:
-				cache_obj = json.dumps(git_starred_repos)
-				set_cache_entry(session, cache_key, cache_type, cache_obj)
-				session.commit()
-				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache")
-			except Exception as e:
-				logger.error(f"Failed to store data in cache: {e}")
-		if args.global_limit > 0:
-			# Limit the number of repos returned based on global limit
-			git_starred_repos = git_starred_repos[:args.global_limit]
-			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
-		return git_starred_repos
-	else:
-		# Cache not enabled - download directly and optionally store
-		logger.info("Cache not enabled, downloading starred repos from GitHub API...")
-		git_starred_repos = await fetch_github_starred_repos(args, session)
-
-		# Even if cache is disabled, we might want to store for future use
-		# Comment out the next block if you don't want to store when cache is disabled
-		if git_starred_repos:
-			try:
-				cache_obj = json.dumps(git_starred_repos)
-				set_cache_entry(session, cache_key, cache_type, cache_obj)
-				session.commit()
-				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache (cache disabled but stored anyway)")
-			except Exception as e:
-				logger.error(f"Failed to store data in cache: {e}")
-
-		if args.global_limit > 0:
-			# Limit the number of repos returned based on global limit
-			git_starred_repos = git_starred_repos[:args.global_limit]
-			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
-		return git_starred_repos
-
-async def get_lists(args, session) -> dict:
-	"""
-	Fetches the user's GitHub starred repository lists by scraping the stars page.
-	"""
-
-	cache_key = "git_lists_metadata"
-	cache_type = "list_metadata"
-
-	# Try cache first if enabled
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				cached_data = json.loads(cache_entry.data)
-				if args.debug:
-					logger.debug(f"Using cached git lists data: {len(cached_data)} lists")
-				return cached_data
-			except (json.JSONDecodeError, AttributeError) as e:
-				logger.warning(f"Failed to load cached git lists data: {e}")
-
-	if args.nodl:
-		logger.warning("Skipping API call for git lists due to --nodl flag")
-		return []
-
-	git_lists = []
-	auth = await get_auth_params()
-	if not auth:
-		logger.error("No authentication provided for get_lists")
-		return []
-
-	listurl = f'https://github.com/{auth.username}?tab=stars'
-
-	async with aiohttp.ClientSession() as api_session:
-		async with api_session.get(listurl) as response:
-			content = await response.text()
-
-	soup = BeautifulSoup(content, 'html.parser')
-	souplist = soup.find_all('a',class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
-
-	for sl in souplist:
-		list_info = {
-			'name': sl.find('span', class_='text-normal').text.strip() if sl.find('span', class_='text-normal') else 'Unknown',
-			'description': sl.find('p', class_='color-fg-muted').text.strip() if sl.find('p', class_='color-fg-muted') else '',
-			'list_url': sl.get('href', ''),
-			'repo_count': sl.find('span', class_='Counter').text.strip() if sl.find('span', class_='Counter') else '0'
-		}
-		git_lists.append(list_info)
-
-	# Cache the results
-	if git_lists:
-		set_cache_entry(session, cache_key, cache_type, json.dumps(git_lists))
-
-	return git_lists
-
-async def get_git_list_stars(session, args) -> dict:
-	"""
-	Get lists of starred repos using database cache
-	"""
-	cache_key = "git_list_stars"
-	cache_type = "list_stars"
-
-	auth = await get_auth_params()
-	if not auth:
-		logger.error('get_git_list_stars: no auth provided')
-		return {}
-
-	listurl = f'https://github.com/{auth.username}?tab=stars'
-	headers = {'Authorization': f'Bearer {auth.password}','X-GitHub-Api-Version': '2022-11-28'}
-	soup = None
-	cache_entry = None
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				soup = BeautifulSoup(cache_entry.data, 'html.parser')
-				if args.debug:
-					logger.debug("Loaded star list from database cache")
-			except Exception as e:
-				logger.error(f'Failed to parse cached star list: {e} {type(e)} {cache_key} not found in database cache type {cache_type}')
-		else:
-			logger.warning(f'Failed to parse cached star list: {cache_key} not found in database cache type {cache_type}')
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return {}
-	if not soup or len(soup) == 0:
-		if await is_rate_limit_hit(args):
-			logger.warning("Rate limit hit!")
-			await asyncio.sleep(1)
-			return None
-
-		async with aiohttp.ClientSession() as api_session:
-			if args.debug:
-				logger.debug(f"Fetching star list from {listurl}")
-			async with api_session.get(listurl) as r:
-				if r.status == 200:
-					content = await r.text()
-					soup = BeautifulSoup(content, 'html.parser')
-					# Save to database cache
-					set_cache_entry(session, cache_key, cache_type, str(soup))
-					session.commit()
-					logger.info("Saved star list to database cache")
-				else:
-					logger.error(f"Failed to fetch star list: {r.status} {listurl}")
-					return {}
-
-	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
-	if len(listsoup) == 0:
-		logger.warning("No lists found in soup")
-		return {}
-	try:
-		list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
-	except (TypeError, IndexError) as e:
-		logger.error(f'Failed to find list items in soup {e} {type(e)} from listsoup: {type(listsoup)} {len(listsoup)}')
-		return {}
-
-	lists = {}
-	for item in list_items:
-		listname = item.find('h3').text
-		list_link = f"https://github.com{item.attrs['href']}"
-		list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text
-
-		try:
-			list_description = item.select('span', class_="Truncate-text color-fg-muted mr-3")[1].text.strip()
-		except IndexError:
-			list_description = ''
-
-		try:
-			list_repos = await get_info_for_list(list_link, headers, session, args)
-		except Exception as e:
-			logger.warning(f'{e} {type(e)} failed to get list info for {listname}')
-			list_repos = []
-
-		lists[listname] = {
-			'href': list_link,
-			'count': list_count_info,
-			'description': list_description,
-			'hrefs': list_repos
-		}
-	return lists
-
 async def get_info_for_list(link, headers, session, args):
 	"""
 	Get all repository hrefs from a GitHub list, handling pagination.
@@ -671,7 +394,6 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 				successful_pages.sort(key=lambda x: x[0])
 				for page_num, page_data in successful_pages:
 					repos.extend(page_data)
-				logger.info(f"Concurrent download completed. Total repos: {len(repos)}")
 
 	# Cache results
 	if repos:
@@ -679,3 +401,167 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 		session.commit()
 		logger.info(f"Cached {len(repos)} starred repos in database")
 	return repos
+
+async def get_lists_and_stars_unified(session, args) -> dict:
+	"""
+	Unified function that gets both list metadata and repository links from GitHub stars page.
+
+	Returns:
+		dict: Combined data structure with both list metadata and repo links:
+		{
+			'lists_metadata': [list of list info dicts],
+			'lists_with_repos': {
+				'list_name': {
+					'href': 'list_url',
+					'count': 'repo_count',
+					'description': 'description',
+					'hrefs': [list of repo hrefs]
+				}
+			}
+		}
+	"""
+	cache_key_metadata = "git_lists_metadata"
+	cache_key_stars = "git_list_stars"
+	cache_type_metadata = "list_metadata"
+	cache_type_stars = "list_stars"
+
+	# Try cache first for both types
+	cached_metadata = None
+	cached_stars = None
+
+	if args.use_cache:
+		# Check for cached metadata
+		cache_entry_metadata = get_cache_entry(session, cache_key_metadata, cache_type_metadata)
+		if cache_entry_metadata:
+			try:
+				cached_metadata = json.loads(cache_entry_metadata.data)
+				if args.debug:
+					logger.debug(f"Using cached metadata: {len(cached_metadata)} lists")
+			except (json.JSONDecodeError, AttributeError) as e:
+				logger.warning(f"Failed to load cached metadata: {e}")
+
+		# Check for cached stars data
+		cache_entry_stars = get_cache_entry(session, cache_key_stars, cache_type_stars)
+		if cache_entry_stars:
+			try:
+				cached_stars = json.loads(cache_entry_stars.data)
+				if args.debug:
+					logger.debug(f"Using cached stars data: {len(cached_stars)} lists")
+			except Exception as e:
+				logger.warning(f"Failed to load cached stars data: {e}")
+
+	# If we have both cached, return them
+	if cached_metadata and cached_stars:
+		return {
+			'lists_metadata': cached_metadata,
+			'lists_with_repos': cached_stars
+		}
+
+	if args.nodl:
+		logger.warning("Skipping API call due to --nodl flag")
+		return {
+			'lists_metadata': cached_metadata or [],
+			'lists_with_repos': cached_stars or {}
+		}
+
+	# Get authentication
+	auth = await get_auth_params()
+	if not auth:
+		logger.error('No auth provided for get_lists_and_stars_unified')
+		return {
+			'lists_metadata': cached_metadata or [],
+			'lists_with_repos': cached_stars or {}
+		}
+
+	listurl = f'https://github.com/{auth.username}?tab=stars'
+	headers = {
+		'Authorization': f'Bearer {auth.password}',
+		'X-GitHub-Api-Version': '2022-11-28'
+	}
+
+	if await is_rate_limit_hit(args):
+		logger.warning("Rate limit hit!")
+		await asyncio.sleep(1)
+		return {
+			'lists_metadata': cached_metadata or [],
+			'lists_with_repos': cached_stars or {}
+		}
+
+	# Scrape the GitHub stars page once
+	soup = None
+	async with get_client_session(args) as api_session:
+		if args.debug:
+			logger.debug(f"Fetching unified star list data from {listurl}")
+		async with api_session.get(listurl) as r:
+			if r.status == 200:
+				content = await r.text()
+				soup = BeautifulSoup(content, 'html.parser')
+			else:
+				logger.error(f"Failed to fetch star list: {r.status} {listurl}")
+				return {
+					'lists_metadata': cached_metadata or [],
+					'lists_with_repos': cached_stars or {}
+				}
+
+	git_lists_metadata = []
+	souplist = soup.find_all('a', class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
+
+	for sl in souplist:
+		list_info = {
+			'name': sl.find('span', class_='text-normal').text.strip() if sl.find('span', class_='text-normal') else 'Unknown',
+			'description': sl.find('p', class_='color-fg-muted').text.strip() if sl.find('p', class_='color-fg-muted') else '',
+			'list_url': sl.get('href', ''),
+			'repo_count': sl.find('span', class_='Counter').text.strip() if sl.find('span', class_='Counter') else '0'
+		}
+		git_lists_metadata.append(list_info)
+
+	lists_with_repos = {}
+	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
+
+	if len(listsoup) > 0:
+		try:
+			list_items = listsoup[0].find_all('a', attrs={'class': 'd-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
+
+			for item in list_items:
+				listname = item.find('h3').text if item.find('h3') else 'Unknown'
+				list_link = f"https://github.com{item.attrs['href']}"
+				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''
+
+				try:
+					list_description = item.select('span', class_="Truncate-text color-fg-muted mr-3")[1].text.strip()
+				except IndexError:
+					list_description = ''
+
+				# Get individual list repository links
+				try:
+					list_repos = await get_info_for_list(list_link, headers, session, args)
+				except Exception as e:
+					logger.warning(f'{e} {type(e)} failed to get list info for {listname}')
+					list_repos = []
+
+				lists_with_repos[listname] = {
+					'href': list_link,
+					'count': list_count_info,
+					'description': list_description,
+					'hrefs': list_repos
+				}
+		except (TypeError, IndexError) as e:
+			logger.error(f'Failed to find list items in soup {e} {type(e)}')
+	else:
+		logger.warning("No lists found in soup")
+
+	# Cache both results
+	if git_lists_metadata:
+		set_cache_entry(session, cache_key_metadata, cache_type_metadata, json.dumps(git_lists_metadata))
+
+	if lists_with_repos:
+		set_cache_entry(session, cache_key_stars, cache_type_stars, json.dumps(lists_with_repos))
+
+	session.commit()
+
+	logger.info(f"Fetched unified data: {len(git_lists_metadata)} list metadata entries, {len(lists_with_repos)} lists with repos")
+
+	return {
+		'lists_metadata': git_lists_metadata,
+		'lists_with_repos': lists_with_repos
+	}

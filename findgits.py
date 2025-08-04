@@ -4,12 +4,14 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 import argparse
+from typing import Dict, List
+from collections import defaultdict
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_repo_as_starred
 from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from gitstars import fetch_github_starred_repos, get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
+from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
 from utils import flatten
 from cacheutils import get_cache_entry, get_api_rate_limits
 import json
@@ -84,7 +86,7 @@ async def link_existing_repos_to_stars(session, args):
 		starred_lookup = {repo['full_name']: repo for repo in starred_repos}
 
 		# Get all git lists and their associated repos
-		git_lists_data = await get_git_list_stars(session, args)
+		git_lists_data = await get_lists_and_stars_unified(session, args)
 
 		# Create a mapping of repo URLs to list names
 		repo_to_list_mapping = {}
@@ -159,9 +161,12 @@ async def link_existing_repos_to_stars(session, args):
 		logger.error(f"Traceback: {traceback.format_exc()}")
 		session.rollback()
 
+# Update populate_git_lists to use the unified function
 async def populate_git_lists(session, args):
-	# fetch lists from GitHub
-	list_data = await get_lists(args, session)
+	# Use the unified function instead of separate calls
+	unified_data = await get_lists_and_stars_unified(session, args)
+	list_data = unified_data['lists_metadata']
+
 	if args.debug:
 		logger.debug(f'populate_git_lists: {len(list_data)} lists fetched from GitHub')
 
@@ -218,7 +223,7 @@ async def populate_git_lists(session, args):
 
 	try:
 		logger.info("Pre-populating list stars cache...")
-		git_lists = await get_git_list_stars(session, args)
+		git_lists = await get_lists_and_stars_unified(session, args)
 		logger.info(f"Pre-populated list stars cache with {len(git_lists)} lists")
 
 		# Cache the complete git_lists data with the correct cache key
@@ -231,6 +236,36 @@ async def populate_git_lists(session, args):
 		# Don't let this failure stop the function - it's just a cache optimization
 
 	return list_data
+
+async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
+	try:
+		unified_data = await get_lists_and_stars_unified(session, args)
+		git_lists = unified_data['lists_with_repos']
+
+		if not git_lists:
+			logger.warning("No GitHub lists found")
+			return {}
+
+		# Get starred repos as before
+		starred_repos = await fetch_github_starred_repos(args, session)
+		if not starred_repos:
+			logger.warning("No starred repositories found")
+			return {}
+
+		repo_lookup = {repo['full_name']: repo for repo in starred_repos}
+		grouped_repos = defaultdict(list)
+
+		for list_name, list_data in git_lists.items():
+			for href in list_data['hrefs']:
+				full_name = href.strip('/').split('github.com/')[-1]
+				if full_name in repo_lookup:
+					grouped_repos[list_name].append(repo_lookup[full_name])
+
+		return dict(grouped_repos)
+
+	except Exception as e:
+		logger.error(f"Error getting starred repos by list: {e}")
+		return {}
 
 def get_args():
 	myparse = argparse.ArgumentParser(description="findgits")
@@ -390,7 +425,7 @@ async def main():
 	if args.gitstars:
 		starred_repos = []
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session, args)
+		git_lists = await get_lists_and_stars_unified(session, args)
 		starred_repos = await fetch_github_starred_repos(args, session)
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -407,9 +442,6 @@ async def main():
 
 		# Fetch starred repos ONCE at the beginning
 		starred_repos = await fetch_github_starred_repos(args, session)
-
-		if args.debug:
-			logger.debug(f'get_git_stars done, starred_repos: {len(starred_repos)} starting populate_git_lists')
 
 		list_data = await populate_git_lists(session, args)
 		if args.debug:
@@ -431,7 +463,7 @@ async def main():
 			git_repos = session.query(GitRepo).all()
 
 		if args.debug:
-			logger.debug(f'Git Repos: {len(git_repos)} starting get_git_list_stars')
+			logger.debug(f'Git Repos: {len(git_repos)}')
 
 		# Instead, use the cached data or fetch from cache
 		cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
@@ -439,7 +471,7 @@ async def main():
 			git_lists = json.loads(cache_entry.data)
 		else:
 			# Fallback if cache somehow failed
-			git_lists = await get_git_list_stars(session, args)
+			git_lists = await get_lists_and_stars_unified(session, args)
 
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -514,7 +546,7 @@ async def main():
 
 	if args.scanstars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session, args)
+		git_lists = await get_lists_and_stars_unified(session, args)
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
@@ -525,7 +557,7 @@ async def main():
 
 	if args.create_stars:
 		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session, args)
+		git_lists = await get_lists_and_stars_unified(session, args)
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
