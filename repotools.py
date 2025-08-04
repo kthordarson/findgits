@@ -135,6 +135,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 				logger.debug(f'Found existing GitRepo: {git_repo}')
 			git_repo.last_scan = datetime.now()
 			git_repo.scan_count += 1
+			git_repo.update_config_times()
 
 			# Update with metadata if available
 			if repo_metadata:

@@ -255,6 +255,8 @@ class GitRepo(Base):
 		else:
 			self.github_owner = '[unknown]'
 
+		self.update_config_times()
+
 		# If repo_data is provided (from GitHub API), populate additional fields
 		if repo_data and isinstance(repo_data, dict):
 			self.node_id = repo_data.get('node_id')
@@ -316,6 +318,20 @@ class GitRepo(Base):
 
 	def __repr__(self):
 		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
+
+	def update_config_times(self):
+		""" Update the config_ctime, config_atime, config_mtime based on the local git config file """
+		if not os.path.exists(self.local_path):
+			logger.error(f'Local path {self.local_path} does not exist')
+			return
+		config_path = os.path.join(self.local_path, '.git', 'config')
+		if not os.path.exists(config_path):
+			logger.error(f'Git config file {config_path} does not exist')
+			return
+		stat = os.stat(config_path)
+		self.config_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
+		self.config_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
+		self.config_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
 class CacheEntry(Base):
 	""" A table for storing cache data from GitHub API responses """
