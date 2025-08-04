@@ -121,15 +121,6 @@ class GitFolder(Base):
 	def __repr__(self):
 		return f'<GitFolder {self.id} git_path={self.git_path}>'
 
-	def get_folder_time(self):
-		""" Get stats for this git_path"""
-		if not os.path.exists(self.git_path):  # redundant check, but just in case?
-			self.valid = False
-			logger.error(f'{self} does not exist')
-			return
-		# t0 = datetime.now()
-		self.last_scan = datetime.now()
-
 	def get_folder_stats(self):
 		t0 = datetime.now()
 		if not os.path.exists(self.git_path):  # redundant check, but just in case?
