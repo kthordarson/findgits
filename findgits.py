@@ -5,7 +5,7 @@ import argparse
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder, GitStar, GitList
-from dbstuff import get_engine, db_init, drop_database, check_git_dates
+from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_repo_as_starred
 from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
@@ -24,30 +24,40 @@ def dbcheck(session) -> dict:
 
 async def process_git_folder(git_path, session, args):
 	"""Process a single git folder asynchronously"""
-	# logger.info(f'Processing {git_path}')
 	try:
 		# Always ensure the session is in a valid state
 		if not session.is_active:
 			logger.warning(f'Session is not active, rolling back for {git_path}')
 			session.rollback()
+
 		result = await insert_update_git_folder(git_path, session, args)
 		if result:
-			# After updating/creating GitFolder, check if repo is starred
 			git_repo = session.query(GitRepo).filter(GitRepo.id == result.gitrepo_id).first()
+
+			# Check if this repo is in our starred repos
 			star_entry = session.query(GitStar).filter(GitStar.gitrepo_id == git_repo.id).first()
 			if star_entry:
-				result.is_starred = True
-				result.star_id = star_entry.id
-				# Optionally, link to lists if available
-				list_entry = session.query(GitList).filter(GitList.gitstar_id == star_entry.id).first()
-				if list_entry:
-					result.list_id = list_entry.id
-			else:
-				result.is_starred = False
-				result.star_id = None
-				result.list_id = None
-			session.commit()
+				# Use the mark_repo_as_starred function
+				mark_repo_as_starred(session, git_repo.id)
 
+				# Update GitFolder starred fields if they exist
+				if hasattr(result, 'is_starred'):
+					result.is_starred = True
+				if hasattr(result, 'star_id'):
+					result.star_id = star_entry.id
+				if hasattr(result, 'list_id') and star_entry.gitlist_id:
+					result.list_id = star_entry.gitlist_id
+			else:
+				git_repo.is_starred = False
+				git_repo.starred_at = None
+				if hasattr(result, 'is_starred'):
+					result.is_starred = False
+				if hasattr(result, 'star_id'):
+					result.star_id = None
+				if hasattr(result, 'list_id'):
+					result.list_id = None
+
+			session.commit()
 			return result
 	except Exception as e:
 		logger.error(f'Error processing {git_path}: {e} {type(e)}')

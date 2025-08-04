@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 import pandas as pd
 from datetime import datetime
-from typing import List
+from typing import Optional, List
 from loguru import logger
 import sqlalchemy
 from sqlalchemy import (Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
@@ -73,7 +73,6 @@ class Base(DeclarativeBase):
 class GitFolder(Base):
 	""" A folder containing one git repo """
 	__tablename__ = 'git_path'
-	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
 	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))
 	git_path = Column('git_path', String(255))
@@ -90,11 +89,15 @@ class GitFolder(Base):
 	git_path_mtime = Column('git_path_mtime', DateTime)
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
-	scanned = Column[bool]
+	scanned = Column(Boolean, default=False)  # Fixed this line
 	is_starred = Column(Boolean, default=False)
 	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
 	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
+
+	# Relationships
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
+	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id])
+	list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id])
 
 	def __init__(self, git_path: str, gitrepo_id):
 		self.git_path = str(git_path)
@@ -215,16 +218,20 @@ class GitRepo(Base):
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
 	valid = Column(Boolean, default=True)
-	scanned = Column[bool]
+	scanned = Column(Boolean, default=False)  # Fixed this line
 
-	# NEW: Star tracking fields
+	# NEW: Star tracking fields - REMOVE gitstar_id to eliminate circular reference
 	is_starred = Column('is_starred', Boolean, default=False)
-	gitstar_id = Column('gitstar_id', Integer, ForeignKey('gitstars.id'), nullable=True)
 	starred_at = Column('starred_at', DateTime, nullable=True)
 
-	# Relationships
+	# Relationships - specify foreign_keys explicitly to resolve ambiguity
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
-	star_entry: Mapped["GitStar"] = relationship("GitStar", back_populates="repo", uselist=False)
+	star_entry: Mapped[Optional["GitStar"]] = relationship(
+		"GitStar",
+		back_populates="repo",
+		uselist=False,
+		foreign_keys="GitStar.gitrepo_id"  # Specify which FK to use
+	)
 
 	def __init__(self, git_url, local_path, repo_data=None):
 		# Initialize with minimal information
@@ -342,18 +349,21 @@ class GitStar(Base):
 	id: Mapped[int] = mapped_column(primary_key=True)
 	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
 	starred_at = Column(DateTime)
-	# Add other available info as needed
 	stargazers_count = Column(Integer)
 	description = Column(String(1024))
 	full_name = Column(String(255))
 	html_url = Column(String(255))
 
-	# NEW: Link to lists that contain this starred repo
+	# Link to lists that contain this starred repo
 	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
 
-	# Relationships
-	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="star_entry")
-	git_list: Mapped["GitList"] = relationship("GitList", back_populates="starred_repos")
+	# Relationships - specify foreign_keys explicitly
+	repo: Mapped["GitRepo"] = relationship(
+		"GitRepo",
+		back_populates="star_entry",
+		foreign_keys=[gitrepo_id]
+	)
+	git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
 
 class GitList(Base):
 	"""A starred repo list, containing multiple GitStars"""
@@ -369,8 +379,8 @@ class GitList(Base):
 	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
 
 # Add relationships to GitRepo and GitStar
-GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
-GitStar.lists = relationship("GitList", back_populates="star")
+# GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
+# GitStar.lists = relationship("GitList", back_populates="star")
 
 class RepoCacheExpanded(Base):
 	__tablename__ = 'repo_cache_expanded'
@@ -582,6 +592,33 @@ def check_git_dates(session, create_heatmap=False):
 		# Save or display the heatmap
 		plt.savefig('timestamp_differences_heatmap.png')
 		plt.show()
+
+def mark_repo_as_starred(session, repo_id, list_name=None):
+	"""Mark a repository as starred and optionally link to a list"""
+	git_repo = session.query(GitRepo).filter(GitRepo.id == repo_id).first()
+	if not git_repo:
+		return False
+
+	git_repo.is_starred = True
+	git_repo.starred_at = datetime.now()
+
+	# Create GitStar entry if it doesn't exist
+	git_star = session.query(GitStar).filter(GitStar.gitrepo_id == repo_id).first()
+	if not git_star:
+		git_star = GitStar()
+		git_star.gitrepo_id = repo_id
+		git_star.starred_at = datetime.now()
+		session.add(git_star)
+		session.flush()
+
+	# Link to list if provided
+	if list_name:
+		git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+		if git_list:
+			git_star.gitlist_id = git_list.id
+
+	session.commit()
+	return True
 
 
 if __name__ == '__main__':
