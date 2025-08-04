@@ -316,7 +316,6 @@ def get_args():
 	myparse.add_argument('--db_file', help='sqlitedb filename', default='gitrepo.db', dest='db_file', action='store', metavar='db_file')
 	myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
 	# stars/lists
-	myparse.add_argument('--create_stars', help='add repos from git stars', action='store_true', default=False, dest='create_stars')
 	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
 	# tuning, debug, etc
@@ -566,43 +565,6 @@ async def main():
 		# Make sure all changes are committed
 		session.commit()
 		logger.info(f"Updated {len(git_folders)} folders in database")
-		return
-
-	if args.create_stars:
-		git_repos = session.query(GitRepo).all()
-		git_lists = await get_lists_and_stars_unified(session, args)
-		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
-		# urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
-		lists_with_repos = git_lists.get('lists_with_repos', {})
-		if 'lists_with_repos' in lists_with_repos:
-			# Handle the nested structure
-			actual_lists = lists_with_repos['lists_with_repos']
-		else:
-			# Handle the expected structure
-			actual_lists = lists_with_repos
-
-		# Now extract hrefs from the actual list data
-		urls = []
-		if actual_lists:
-			urls = list(set(flatten([actual_lists[k]['hrefs'] for k in actual_lists if 'hrefs' in actual_lists[k]])))
-		else:
-			logger.warning("No lists with repos found")
-
-		localrepos = [k.github_repo_name for k in git_repos]
-		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
-		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
-		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
-		# Process repos in parallel
-		batch_size = 20
-		for i in range(0, len(notfoundrepos), batch_size):
-			batch = notfoundrepos[i:i+batch_size]
-			tasks = []
-
-			for repo in batch:
-				tasks.append(process_starred_repo(repo, session, args))
-
-			await asyncio.gather(*tasks)
-			session.commit()
 		return
 
 if __name__ == '__main__':
