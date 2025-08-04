@@ -7,7 +7,7 @@ from pathlib import Path
 from loguru import logger
 from dbstuff import GitRepo, GitFolder, RepoInfo, GitStar, GitList, get_dupes
 from utils import valid_git_folder, get_remote_url, ensure_datetime
-from gitstars import get_git_stars, get_git_list_stars
+from gitstars import get_git_stars, get_git_list_stars, fetch_github_starred_repos
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
 
 async def verify_star_list_links(session, args):
@@ -372,7 +372,7 @@ async def populate_repo_data(session, args, starred_repos=None):
 
 	# Use provided starred_repos or fetch if not provided
 	if starred_repos is None:
-		starred_repos = await get_git_stars(args, session)
+		starred_repos = await fetch_github_starred_repos(args, session)
 
 	stats = {
 		"total_db_repos": len(git_repos),

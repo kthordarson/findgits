@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_repo_as_starred
 from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
+from gitstars import fetch_github_starred_repos, get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
 from cacheutils import get_cache_entry, get_api_rate_limits
 import json
@@ -80,7 +80,7 @@ async def link_existing_repos_to_stars(session, args):
 	"""Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
 	try:
 		# Get all starred repos from GitHub
-		starred_repos = await get_git_stars(args, session)
+		starred_repos = await fetch_github_starred_repos(args, session)
 		starred_lookup = {repo['full_name']: repo for repo in starred_repos}
 
 		# Get all git lists and their associated repos
@@ -391,7 +391,7 @@ async def main():
 		starred_repos = []
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_git_list_stars(session, args)
-		starred_repos = await get_git_stars(args, session)
+		starred_repos = await fetch_github_starred_repos(args, session)
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
@@ -406,7 +406,7 @@ async def main():
 			logger.debug(f'Scan path: {scanpath}')
 
 		# Fetch starred repos ONCE at the beginning
-		starred_repos = await get_git_stars(args, session)
+		starred_repos = await fetch_github_starred_repos(args, session)
 
 		if args.debug:
 			logger.debug(f'get_git_stars done, starred_repos: {len(starred_repos)} starting populate_git_lists')
