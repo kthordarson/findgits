@@ -162,6 +162,16 @@ async def populate_git_lists(session, args):
 	list_data = await get_lists(args)
 	if args.debug:
 		logger.debug(f'populate_git_lists: {len(list_data)} lists fetched from GitHub')
+
+	# Cache the list data
+	from cacheutils import set_cache_entry
+	import json
+
+	# Cache the main list data
+	cache_key = "git_lists_metadata"
+	cache_type = "list_metadata"
+	set_cache_entry(session, cache_key, cache_type, json.dumps(list_data))
+
 	for entry in list_data:
 		# Check if list already exists by name or URL
 		db_list = session.query(GitList).filter((GitList.list_name == entry['name']) | (GitList.list_url == entry['list_url'])).first()
@@ -179,10 +189,22 @@ async def populate_git_lists(session, args):
 			if hasattr(GitList, 'repo_count'):
 				db_list.list_count = entry.get('repo_count', '0')
 			session.add(db_list)
+
+		# Cache individual list data for faster retrieval
+		list_cache_key = f"git_list:{entry['name']}"
+		list_cache_type = "individual_list"
+		set_cache_entry(session, list_cache_key, list_cache_type, json.dumps(entry))
+
 	try:
 		logger.info("Pre-populating list stars cache...")
 		git_lists = await get_git_list_stars(session, args)
 		logger.info(f"Pre-populated list stars cache with {len(git_lists)} lists")
+
+		# Cache the complete git_lists data as well
+		git_lists_cache_key = "git_list_stars_complete"
+		git_lists_cache_type = "list_stars"
+		set_cache_entry(session, git_lists_cache_key, git_lists_cache_type, json.dumps(git_lists))
+
 	except Exception as e:
 		logger.warning(f"Failed to pre-populate list stars cache: {e}")
 
