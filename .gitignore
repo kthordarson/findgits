@@ -20,3 +20,4 @@ gitrepo.db-journal
 *.txt
 *.db*
 .idea/**
+.coveragerc

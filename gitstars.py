@@ -350,10 +350,6 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		logger.debug(f"Found {len(souplist)} list elements in HTML")
 
 	for sl in souplist:
-		# Debug the HTML structure
-		if args.debug:
-			logger.debug(f"Processing list element: {sl}")
-
 		# Extract list name
 		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')
 		list_name = name_elem.text.strip() if name_elem else 'Unknown'

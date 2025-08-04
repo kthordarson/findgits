@@ -223,9 +223,6 @@ async def create_repo_to_list_mapping(session, args):
 
 	# Now iterate over the actual list data
 	for list_name, list_data in actual_lists.items():
-		if args.debug:
-			logger.debug(f"Processing list: {list_name}, data type: {type(list_data)}")
-
 		# Ensure list_data is a dictionary
 		if not isinstance(list_data, dict):
 			logger.warning(f"list_data for {list_name} is not a dictionary: {type(list_data)}")
