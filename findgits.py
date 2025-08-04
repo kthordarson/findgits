@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_repo_as_starred
-from repotools import verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
+from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
 
@@ -314,6 +314,11 @@ async def main():
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
 		print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+
+		# PRE-FETCH the repo-to-list mapping ONCE
+		logger.info("Creating repo-to-list mapping...")
+		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
+		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
 
 		fetched_repos = await fetch_starred_repos(args, session)  # Updated call
 		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
