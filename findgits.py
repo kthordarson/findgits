@@ -209,7 +209,7 @@ def get_args():
 	# tuning, debug, etc
 	myparse.add_argument('--scanpath_threads', '-spt', help='scanpath_threads', action='store', dest='scanpath_threads')
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
-	myparse.add_argument('--global-limit', help='global-limit', action='store', default=0, dest='global_limit', type=int)
+	myparse.add_argument('--global_limit', help='global limit', action='store', default=0, dest='global_limit', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
 	myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
