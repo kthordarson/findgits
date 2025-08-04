@@ -217,11 +217,12 @@ async def download_git_stars(args, session):
 					# Create tasks for remaining pages (starting from page 2)
 					tasks = []
 					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests to avoid rate limiting
+					stop_signal = asyncio.Event()
 
 					# Create tasks for pages 2 through max_pages_to_fetch
 					for page_num in range(2, max_pages_to_fetch + 1):
 						# tasks.append(fetch_page(page_num))
-						tasks.append(fetch_page_generic(api_session, apiurl, page_num, headers, semaphore, args, max_pages_to_fetch))
+						tasks.append(fetch_page_generic(api_session, apiurl, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal))
 
 					# Execute all page requests concurrently
 					if tasks:
@@ -703,12 +704,13 @@ async def fetch_starred_repos(args, session):
 
 					# Create tasks for remaining pages (starting from page 2)
 					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
+					stop_signal = asyncio.Event()
 
 					# Create tasks for pages 2 through max_pages_to_fetch
 					tasks = []
 					for page_num in range(2, max_pages_to_fetch + 1):
 						# tasks.append(fetch_page(page_num))
-						tasks.append(fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch))
+						tasks.append(fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal))
 
 					# Execute all page requests concurrently
 					if tasks:
@@ -757,7 +759,7 @@ async def fetch_starred_repos(args, session):
 	logger.info(f"Fetched {len(repos)} starred repositories from GitHub API")
 	return repos
 
-async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore, args, max_pages_to_fetch=None):
+async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore, args, max_pages_to_fetch=None, stop_signal=None):
 	"""
 	Generic function to fetch a single page from GitHub API
 
@@ -769,11 +771,18 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 		semaphore: Asyncio semaphore for rate limiting
 		args: Command line arguments for debug logging
 		max_pages_to_fetch: Total pages being fetched (for logging)
+		stop_signal: Asyncio Event to signal when to stop fetching
 
 	Returns:
 		Tuple of (page_num, page_data)
 	"""
 	async with semaphore:
+		# Check if we should stop (other pages found empty results)
+		if stop_signal and stop_signal.is_set():
+			if args.debug:
+				logger.debug(f"Skipping page {page_num} due to stop signal")
+			return page_num, []
+
 		# Handle different URL formats
 		if '?' in base_url:
 			page_url = f"{base_url}&page={page_num}"
@@ -794,11 +803,16 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 			async with api_session.get(page_url, headers=headers) as page_response:
 				if page_response.status == 200:
 					page_data = await page_response.json()
+
+					# If we get an empty page, signal other tasks to stop
+					if len(page_data) == 0:
+						if stop_signal:
+							stop_signal.set()
+						logger.warning(f"Page {page_num}: got 0 repos - signaling stop")
+						return page_num, []
+
 					if args.debug:
-						if len(page_data) > 0:
-							logger.debug(f"Page {page_num}: got {len(page_data)} repos")
-						else:
-							logger.warning(f"Page {page_num}: got {len(page_data)} repos")
+						logger.debug(f"Page {page_num}: got {len(page_data)} repos")
 					return page_num, page_data
 				elif page_response.status == 403:
 					logger.warning(f"Rate limit hit on page {page_num}")
