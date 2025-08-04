@@ -54,17 +54,6 @@ def valid_git_folder(k: str) -> bool:
 		logger.warning(f'{k} {type(k)} not valid ')
 	return False
 
-def format_bytes(num_bytes):
-	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
-	Args: num_bytes (int): The byte value to format.
-	Returns: str: A string with a formatted byte value and unit prefix.
-	"""
-	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-		if abs(num_bytes) < 1024.0:
-			return f"{num_bytes:.2f} {unit}"
-		num_bytes /= 1024.0
-	return f"{num_bytes:.2f} TB"
-
 def get_remote_url(git_path: str) -> str:
 	"""
 	Get the remote url of a git folder
