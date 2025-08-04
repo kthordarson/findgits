@@ -85,104 +85,104 @@ async def link_existing_repos_to_stars(session, args):
 		starred_repos = await fetch_github_starred_repos(args, session)
 		starred_lookup = {repo['full_name']: repo for repo in starred_repos}
 
+		logger.info(f"Found {len(starred_repos)} starred repos from GitHub API")
+
 		# Get all git lists and their associated repos
 		git_lists_data = await get_lists_and_stars_unified(session, args)
-
-		# Fix: Extract the correct nested data structure
 		lists_with_repos = git_lists_data.get('lists_with_repos', {})
+
 		if isinstance(lists_with_repos, dict) and 'lists_with_repos' in lists_with_repos:
-			# Handle the nested structure
 			actual_lists = lists_with_repos['lists_with_repos']
 		else:
-			# Handle the expected structure
 			actual_lists = lists_with_repos
-
-		# Ensure actual_lists is a dictionary before iterating
-		if not isinstance(actual_lists, dict):
-			logger.warning(f"actual_lists is not a dictionary: {type(actual_lists)}")
-			return
 
 		# Create a mapping of repo URLs to list names
 		repo_to_list_mapping = {}
-		for list_name, list_data in actual_lists.items():
-			# Ensure list_data is a dictionary
-			if not isinstance(list_data, dict):
-				logger.warning(f"list_data for {list_name} is not a dictionary: {type(list_data)}")
-				continue
+		if isinstance(actual_lists, dict):
+			for list_name, list_data in actual_lists.items():
+				if isinstance(list_data, dict):
+					hrefs = list_data.get('hrefs', [])
+					for href in hrefs:
+						# Convert href to full_name format
+						if href.startswith('/'):
+							href = href[1:]
+						if 'github.com/' in href:
+							full_name = href.split('github.com/')[-1]
+						else:
+							full_name = href
+						if full_name.endswith('.git'):
+							full_name = full_name[:-4]
+						repo_to_list_mapping[full_name] = list_name
 
-			hrefs = list_data.get('hrefs', [])
-			for href in hrefs:
-				# Convert href to full_name format
-				if href.startswith('/'):
-					href = href[1:]  # Remove leading slash
-				if 'github.com/' in href:
-					full_name = href.split('github.com/')[-1]
-				else:
-					full_name = href
-
-				# Remove .git suffix if present
-				if full_name.endswith('.git'):
-					full_name = full_name[:-4]
-
-				repo_to_list_mapping[full_name] = list_name
-
-		# Get all existing GitRepo entries
-		all_repos = session.query(GitRepo).all()
-
-		linked_count = 0
+		# Process ALL starred repos, not just existing GitRepo entries
 		star_entries_created = 0
+		star_entries_updated = 0
+		linked_count = 0
 
-		# Process each repository
-		for git_repo in all_repos:
+		for starred_repo in starred_repos:
 			try:
-				# Check if this repo is in starred repos (by various possible matches)
-				repo_key = None
-				if git_repo.full_name and git_repo.full_name in starred_lookup:
-					repo_key = git_repo.full_name
-				elif git_repo.github_repo_name:
-					# Try owner/repo format
-					potential_key = f"{git_repo.github_owner}/{git_repo.github_repo_name}"
-					if potential_key in starred_lookup:
-						repo_key = potential_key
+				full_name = starred_repo.get('full_name')
+				if not full_name:
+					continue
 
-				if repo_key:
-					# Mark as starred
-					git_repo.is_starred = True
-					git_repo.starred_at = datetime.now()
+				# Check if GitRepo exists
+				git_repo = session.query(GitRepo).filter(
+					(GitRepo.full_name == full_name) |
+					(GitRepo.git_url.ilike(f"%{full_name}%")) |
+					(GitRepo.html_url == starred_repo.get('html_url'))
+				).first()
 
-					# Create or update GitStar entry
-					git_star = session.query(GitStar).filter(GitStar.gitrepo_id == git_repo.id).first()
-					if not git_star:
-						git_star = GitStar()
-						git_star.gitrepo_id = git_repo.id
-						git_star.starred_at = datetime.now()
+				# If no GitRepo exists, create one
+				if not git_repo:
+					git_repo = GitRepo(
+						starred_repo.get('html_url', f"https://github.com/{full_name}"),
+						'[notcloned]',
+						starred_repo
+					)
+					session.add(git_repo)
+					session.flush()  # Get the ID
+					logger.debug(f"Created new GitRepo for starred repo: {full_name}")
 
-						# Populate with GitHub data
-						github_data = starred_lookup[repo_key]
-						git_star.stargazers_count = github_data.get('stargazers_count')
-						git_star.description = github_data.get('description')
-						git_star.full_name = github_data.get('full_name')
-						git_star.html_url = github_data.get('html_url')
+				# Mark repo as starred
+				git_repo.is_starred = True
+				git_repo.starred_at = datetime.now()
 
-						session.add(git_star)
-						session.flush()  # Get the ID
-						star_entries_created += 1
+				# Create or update GitStar entry
+				git_star = session.query(GitStar).filter(GitStar.gitrepo_id == git_repo.id).first()
+				if not git_star:
+					git_star = GitStar()
+					git_star.gitrepo_id = git_repo.id
+					git_star.starred_at = datetime.now()
+					git_star.stargazers_count = starred_repo.get('stargazers_count')
+					git_star.description = starred_repo.get('description')
+					git_star.full_name = starred_repo.get('full_name')
+					git_star.html_url = starred_repo.get('html_url')
+					session.add(git_star)
+					session.flush()
+					star_entries_created += 1
+				else:
+					# Update existing GitStar
+					git_star.stargazers_count = starred_repo.get('stargazers_count')
+					git_star.description = starred_repo.get('description')
+					git_star.full_name = starred_repo.get('full_name')
+					git_star.html_url = starred_repo.get('html_url')
+					star_entries_updated += 1
 
-					# Link to list if found in mapping
-					if repo_key in repo_to_list_mapping:
-						list_name = repo_to_list_mapping[repo_key]
-						git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
-						if git_list:
-							git_star.gitlist_id = git_list.id
-							linked_count += 1
-							logger.info(f"Linked {git_repo.full_name} to list {list_name}")
+				# Link to list if found in mapping
+				if full_name in repo_to_list_mapping:
+					list_name = repo_to_list_mapping[full_name]
+					git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+					if git_list:
+						git_star.gitlist_id = git_list.id
+						linked_count += 1
+						logger.debug(f"Linked {full_name} to list {list_name}")
 
 			except Exception as e:
-				logger.error(f"Error processing repo {git_repo.id}: {e}")
+				logger.error(f"Error processing starred repo {starred_repo.get('full_name', 'unknown')}: {e}")
 				continue
 
 		session.commit()
-		logger.info(f"Linked {linked_count} repos to lists, created {star_entries_created} GitStar entries")
+		logger.info(f"GitStar processing complete: Created {star_entries_created}, Updated {star_entries_updated}, Linked to lists {linked_count}")
 
 	except Exception as e:
 		logger.error(f"Error linking existing repos to stars: {e}")
