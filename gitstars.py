@@ -194,7 +194,8 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 				return []
 			first_page_data = await response.json()
 			repos.extend(first_page_data)
-			# Pagination
+
+			# Fix: Better pagination logic
 			last_page_no = 1
 			if 'link' in response.headers:
 				links = response.headers['link'].split(',')
@@ -203,38 +204,73 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 						lasturl = link.split('>')[0].replace('<','')
 						last_page_no = int(lasturl.split('=')[-1])
 						break
-			# If only one page, return
-			if last_page_no == 1 or args.max_pages == 1:
+
+			logger.info(f"First page fetched: {len(first_page_data)} repos. Total pages available: {last_page_no}")
+
+			# If only one page, return early
+			if last_page_no == 1:
 				logger.info(f"Downloaded {len(repos)} starred repos (single page)")
-			else:
-				max_pages_to_fetch = min(last_page_no, args.max_pages) if args.max_pages > 0 else last_page_no
-				if args.global_limit > 0:
-					max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
-				logger.info(f"Fetching pages 2-{max_pages_to_fetch} concurrently")
-				semaphore = asyncio.Semaphore(5)
-				stop_signal = asyncio.Event()
-				tasks = [
-					fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal)
-					for page_num in range(2, max_pages_to_fetch + 1)
-				]
-				page_results = await asyncio.gather(*tasks, return_exceptions=True)
-				successful_pages = []
-				for result in page_results:
-					if isinstance(result, Exception):
-						logger.error(f"Page fetch failed: {result}")
-						continue
-					page_num, page_data = result
-					if page_data:
-						successful_pages.append((page_num, page_data))
-				successful_pages.sort(key=lambda x: x[0])
-				for page_num, page_data in successful_pages:
-					repos.extend(page_data)
+				# Cache and return
+				if repos:
+					set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
+					session.commit()
+				return repos
+
+			# Fix: Calculate max pages properly - remove the args.max_pages limit for starred repos
+			# For starred repos, we want ALL pages unless explicitly limited
+			max_pages_to_fetch = last_page_no
+
+			# Only apply global_limit if it's set and reasonable
+			if hasattr(args, 'global_limit') and args.global_limit > 0:
+				max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
+				logger.info(f"Limiting to {max_pages_to_fetch} pages due to global_limit")
+
+			# Apply max_pages only if it's set and we're not fetching starred repos specifically
+			if hasattr(args, 'max_pages') and args.max_pages > 0 and args.max_pages < last_page_no:
+				logger.warning(f"max_pages ({args.max_pages}) is less than available pages ({last_page_no}). This may limit starred repo fetching.")
+				# For starred repos, we should fetch all pages by default
+				# max_pages_to_fetch = min(args.max_pages, max_pages_to_fetch)
+
+			logger.info(f"Fetching pages 2-{max_pages_to_fetch} concurrently (total repos expected: ~{max_pages_to_fetch * per_page})")
+
+			# Fetch remaining pages
+			semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
+			stop_signal = asyncio.Event()
+
+			tasks = [
+				fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal)
+				for page_num in range(2, max_pages_to_fetch + 1)
+			]
+
+			page_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+			# Process results
+			successful_pages = []
+			for result in page_results:
+				if isinstance(result, Exception):
+					logger.error(f"Page fetch failed: {result}")
+					continue
+				if result is None:
+					continue
+				page_num, page_data = result
+				if page_data:
+					successful_pages.append((page_num, page_data))
+
+			# Sort by page number and add to repos
+			successful_pages.sort(key=lambda x: x[0])
+			for page_num, page_data in successful_pages:
+				repos.extend(page_data)
+				if len(page_data) < per_page:
+					logger.info(f"Page {page_num} returned {len(page_data)} repos (less than {per_page}), likely the last page")
 
 	# Cache results
 	if repos:
 		set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
 		session.commit()
-		logger.info(f"Cached {len(repos)} starred repos in database")
+		logger.info(f"Successfully fetched and cached {len(repos)} starred repos from {len(successful_pages) + 1} pages")
+	else:
+		logger.warning("No starred repos fetched!")
+
 	return repos
 
 async def get_lists_and_stars_unified(session, args) -> dict:
