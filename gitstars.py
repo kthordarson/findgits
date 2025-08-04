@@ -218,29 +218,10 @@ async def download_git_stars(args, session):
 					tasks = []
 					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests to avoid rate limiting
 
-					async def fetch_page(page_num):
-						async with semaphore:
-							page_url = f"{apiurl}?page={page_num}"
-							try:
-								if args.debug:
-									logger.debug(f"Fetching page {page_num} from {page_url}")
-
-								async with api_session.get(page_url, headers=headers) as page_response:
-									if page_response.status == 200:
-										page_data = await page_response.json()
-										if args.debug:
-											logger.debug(f"Page {page_num}: got {len(page_data)} repos")
-										return page_num, page_data
-									else:
-										logger.warning(f"Page {page_num} failed with status {page_response.status}")
-										return page_num, []
-							except Exception as e:
-								logger.error(f"Error fetching page {page_num}: {e}")
-								return page_num, []
-
 					# Create tasks for pages 2 through max_pages_to_fetch
 					for page_num in range(2, max_pages_to_fetch + 1):
-						tasks.append(fetch_page(page_num))
+						# tasks.append(fetch_page(page_num))
+						tasks.append(fetch_page_generic(api_session, apiurl, page_num, headers, semaphore, args, max_pages_to_fetch))
 
 					# Execute all page requests concurrently
 					if tasks:
@@ -723,33 +704,11 @@ async def fetch_starred_repos(args, session):
 					# Create tasks for remaining pages (starting from page 2)
 					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
 
-					async def fetch_page(page_num):
-						async with semaphore:
-							page_url = f"{api_url}?page={page_num}&per_page={per_page}"
-							try:
-								if args.debug:
-									logger.debug(f"Fetching starred repos page {page_num}")
-
-								async with api_session.get(page_url, headers=headers) as page_response:
-									if page_response.status == 200:
-										page_data = await page_response.json()
-										if args.debug:
-											logger.debug(f"Page {page_num}: got {len(page_data)} repos")
-										return page_num, page_data
-									elif page_response.status == 403:
-										logger.warning(f"Rate limit hit on page {page_num}")
-										return page_num, []
-									else:
-										logger.warning(f"Page {page_num} failed with status {page_response.status}")
-										return page_num, []
-							except Exception as e:
-								logger.error(f"Error fetching page {page_num}: {e}")
-								return page_num, []
-
 					# Create tasks for pages 2 through max_pages_to_fetch
 					tasks = []
 					for page_num in range(2, max_pages_to_fetch + 1):
-						tasks.append(fetch_page(page_num))
+						# tasks.append(fetch_page(page_num))
+						tasks.append(fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch))
 
 					# Execute all page requests concurrently
 					if tasks:
@@ -766,6 +725,8 @@ async def fetch_starred_repos(args, session):
 							page_num, page_data = result
 							if page_data:
 								successful_pages.append((page_num, page_data))
+							else:
+								logger.warning(f"Page {page_num} returned no data")
 
 						# Sort by page number to maintain order
 						successful_pages.sort(key=lambda x: x[0])
@@ -795,3 +756,56 @@ async def fetch_starred_repos(args, session):
 
 	logger.info(f"Fetched {len(repos)} starred repositories from GitHub API")
 	return repos
+
+async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore, args, max_pages_to_fetch=None):
+	"""
+	Generic function to fetch a single page from GitHub API
+
+	Args:
+		api_session: The aiohttp session
+		base_url: Base API URL (without page parameter)
+		page_num: Page number to fetch
+		headers: HTTP headers for the request
+		semaphore: Asyncio semaphore for rate limiting
+		args: Command line arguments for debug logging
+		max_pages_to_fetch: Total pages being fetched (for logging)
+
+	Returns:
+		Tuple of (page_num, page_data)
+	"""
+	async with semaphore:
+		# Handle different URL formats
+		if '?' in base_url:
+			page_url = f"{base_url}&page={page_num}"
+		else:
+			page_url = f"{base_url}?page={page_num}"
+
+		# Add per_page parameter for fetch_starred_repos
+		if 'per_page' not in page_url and 'user/starred' in base_url:
+			page_url += "&per_page=100"
+
+		try:
+			if args.debug:
+				if max_pages_to_fetch:
+					logger.debug(f"Fetching page {page_num}/{max_pages_to_fetch} from {page_url}")
+				else:
+					logger.debug(f"Fetching page {page_num} from {page_url}")
+
+			async with api_session.get(page_url, headers=headers) as page_response:
+				if page_response.status == 200:
+					page_data = await page_response.json()
+					if args.debug:
+						if len(page_data) > 0:
+							logger.debug(f"Page {page_num}: got {len(page_data)} repos")
+						else:
+							logger.warning(f"Page {page_num}: got {len(page_data)} repos")
+					return page_num, page_data
+				elif page_response.status == 403:
+					logger.warning(f"Rate limit hit on page {page_num}")
+					return page_num, []
+				else:
+					logger.warning(f"Page {page_num} failed with status {page_response.status}")
+					return page_num, []
+		except Exception as e:
+			logger.error(f"Error fetching page {page_num}: {e}")
+			return page_num, []
