@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from loguru import logger
-from subprocess import Popen, PIPE, TimeoutExpired
+from subprocess import Popen, PIPE
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
 import aiohttp
