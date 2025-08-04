@@ -146,11 +146,11 @@ async def link_existing_repos_to_stars(session, args):
 					if git_list and existing_star.gitlist_id != git_list.id:
 						existing_star.gitlist_id = git_list.id
 						list_linked_count += 1
-						logger.info(f"Linked {full_name} to list '{list_name}'")
+						if args.debug:
+							logger.info(f"Linked {full_name} to list '{list_name}'")
 
 		session.commit()
-		logger.info(f"Linked {linked_count} existing repos to their starred counterparts")
-		logger.info(f"Linked {list_linked_count} starred repos to their respective lists")
+		logger.info(f"Linked {linked_count} existing repos to their starred counterparts, Linked {list_linked_count} starred repos to their respective lists")
 
 	except Exception as e:
 		logger.error(f"Error linking existing repos to stars: {e}")
@@ -160,6 +160,8 @@ async def link_existing_repos_to_stars(session, args):
 async def populate_git_lists(session, args):
 	# fetch lists from GitHub
 	list_data = await get_lists(args)
+	if args.debug:
+		logger.debug(f'populate_git_lists: {len(list_data)} lists fetched from GitHub')
 	for entry in list_data:
 		# Check if list already exists by name or URL
 		db_list = session.query(GitList).filter((GitList.list_name == entry['name']) | (GitList.list_url == entry['list_url'])).first()
@@ -171,11 +173,14 @@ async def populate_git_lists(session, args):
 		else:
 			# Create new entry
 			db_list = GitList(list_name=entry.get('name', ''), list_description=entry.get('description', ''), list_url=entry.get('list_url', ''),)
+			if args.debug:
+				logger.debug(f'Adding new GitList: {db_list.list_name} with URL: {db_list.list_url}')
 			# Optionally add count if you want to store it
 			if hasattr(GitList, 'repo_count'):
 				db_list.list_count = entry.get('repo_count', '0')
 			session.add(db_list)
 	session.commit()
+	return list_data
 
 def get_args():
 	myparse = argparse.ArgumentParser(description="findgits")
@@ -183,7 +188,6 @@ def get_args():
 	# info
 	myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
 	myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
-	myparse.add_argument('--scanpath_threads', '-spt', help='scanpath_threads', action='store', dest='scanpath_threads')
 	myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
 	# db
 	myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
@@ -196,6 +200,7 @@ def get_args():
 	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
 	# tuning, debug, etc
+	myparse.add_argument('--scanpath_threads', '-spt', help='scanpath_threads', action='store', dest='scanpath_threads')
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
@@ -283,9 +288,9 @@ async def main():
 		if args.debug:
 			logger.debug(f'Scan path: {scanpath}')
 
-		await populate_git_lists(session, args)
+		list_data = await populate_git_lists(session, args)
 		if args.debug:
-			logger.debug('Populated git lists from GitHub, starting populate_repo_data')
+			logger.debug(f'Populated git lists from GitHub, got {len(list_data)} ... starting populate_repo_data')
 
 		stats = await populate_repo_data(session, args)
 

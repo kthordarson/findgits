@@ -700,6 +700,8 @@ async def fetch_metadata(repo, session, args):
 				raise e
 			except Exception as e:
 				logger.error(f"Error fetching repository metadata: {e}")
+				# return None
+			if not repo_metadata:
+				logger.warning(f"No cache entry found for {repo_path}")
 				return None
-			# logger.warning(f"No cache entry found for {repo_path}")
 

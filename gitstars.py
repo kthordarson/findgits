@@ -107,7 +107,7 @@ async def get_git_stars(args, session):
 			except Exception as e:
 				logger.error(f"Error loading from cache: {e}")
 		else:
-			logger.warning("No cache entry found in database for starred repos")
+			logger.warning("[get_git_stars] ]o cache entry found in database for starred repos")
 
 		# If we reach here, either no cache or cache failed - download fresh data
 		logger.info("Downloading fresh starred repos data from GitHub API...")
@@ -573,7 +573,7 @@ async def get_info_for_list(link, headers, session, args):
 			except Exception as e:
 				logger.error(f'Failed to parse cached list info: {e}')
 		else:
-			logger.warning(f"No cache entry found for {link} in database")
+			logger.warning(f"[get_info_for_list] No cache entry found for {link} in database")
 	if args.nodl:
 		logger.warning(f"Skipping API call for {link} due to --nodl flag")
 		return []
@@ -626,7 +626,7 @@ async def fetch_starred_repos(args, session):
 			except Exception as e:
 				logger.warning(f"Failed to load cache: {e}")
 		else:
-			logger.warning("No cache entry found in database for starred repos")
+			logger.warning("[fetch_starred_repos] No cache entry found in database for starred repos")
 
 	if args.nodl:
 		logger.warning("Skipping API call due to --nodl flag")
