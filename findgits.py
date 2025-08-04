@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 import traceback
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 import argparse
@@ -198,7 +199,6 @@ async def populate_git_lists(session, args):
 		logger.debug(f'populate_git_lists: {len(list_data)} lists fetched from GitHub')
 
 	# Cache the list data
-	# Cache the main list data
 	cache_key = "git_lists_metadata"
 	cache_type = "list_metadata"
 	set_cache_entry(session, cache_key, cache_type, json.dumps(list_data))
@@ -215,28 +215,35 @@ async def populate_git_lists(session, args):
 		# Check if list already exists by name or URL
 		db_list = session.query(GitList).filter((GitList.list_name == list_name) | (GitList.list_url == entry.get('list_url', ''))).first()
 
+		# Parse repo count from text like "19 repositories" or "1 repository"
+		repo_count = 0
+		try:
+			repo_count_str = entry.get('repo_count', '0')
+			if args.debug:
+				logger.debug(f"Parsing repo count for {list_name}: '{repo_count_str}'")
+
+			# Extract numbers from strings like "1 repository" or "19 repositories"
+			numbers = re.findall(r'\d+', repo_count_str)
+			repo_count = int(numbers[0]) if numbers else 0
+
+			if args.debug:
+				logger.debug(f"Parsed repo count for {list_name}: {repo_count}")
+
+		except (ValueError, AttributeError, IndexError) as e:
+			repo_count = 0
+			logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}: {e}")
+
 		if db_list:
 			# Update existing entry
-			db_list.list_name = list_name  # Update the name in case it was "Unknown" before
+			db_list.list_name = list_name
 			db_list.list_description = entry.get('description', '')
 			db_list.list_url = entry.get('list_url', '')
-			# Fix: Convert repo_count to integer and use correct field name
-			try:
-				repo_count_str = entry.get('repo_count', '0')
-				db_list.repo_count = int(repo_count_str) if repo_count_str.isdigit() else 0
-			except (ValueError, AttributeError):
-				db_list.repo_count = 0
-				logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}")
+			db_list.repo_count = repo_count
+
+			if args.debug:
+				logger.debug(f'Updated GitList: {list_name} with {repo_count} repos')
 		else:
 			# Create new entry
-			# Fix: Convert repo_count to integer
-			try:
-				repo_count_str = entry.get('repo_count', '0')
-				repo_count = int(repo_count_str) if repo_count_str.isdigit() else 0
-			except (ValueError, AttributeError):
-				repo_count = 0
-				logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}")
-
 			db_list = GitList()
 			db_list.list_name = list_name
 			db_list.list_description = entry.get('description', '')
@@ -248,30 +255,20 @@ async def populate_git_lists(session, args):
 				logger.debug(f'Adding new GitList: {list_name} with URL: {db_list.list_url} and {repo_count} repos')
 			session.add(db_list)
 
-		# Cache individual list data for faster retrieval using the corrected name
+		# Cache individual list data
 		list_cache_key = f"git_list:{list_name}"
 		list_cache_type = "individual_list"
-		# Update the entry with the corrected name before caching
 		entry_to_cache = entry.copy()
 		entry_to_cache['name'] = list_name
+		entry_to_cache['parsed_repo_count'] = repo_count
 		set_cache_entry(session, list_cache_key, list_cache_type, json.dumps(entry_to_cache))
 
-	# Commit the database changes first
+	# Commit the database changes
 	session.commit()
 
-	try:
-		logger.info("Pre-populating list stars cache...")
-		git_lists = await get_lists_and_stars_unified(session, args)
-		logger.info(f"Pre-populated list stars cache with {len(git_lists)} lists")
-
-		# Cache the complete git_lists data with the correct cache key
-		git_lists_cache_key = "git_list_stars"
-		git_lists_cache_type = "list_stars"
-		set_cache_entry(session, git_lists_cache_key, git_lists_cache_type, json.dumps(git_lists))
-
-	except Exception as e:
-		logger.warning(f"Failed to pre-populate list stars cache: {e}")
-		# Don't let this failure stop the function - it's just a cache optimization
+	# Log final results
+	total_repos = sum(entry.get('parsed_repo_count', 0) for entry in list_data)
+	logger.info(f"Populated {len(list_data)} lists with {total_repos} total repositories")
 
 	return list_data
 

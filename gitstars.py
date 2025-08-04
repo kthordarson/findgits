@@ -505,17 +505,31 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	git_lists_metadata = []
 	souplist = soup.find_all('a', class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
 
+	if args.debug:
+		logger.debug(f"Found {len(souplist)} list elements in HTML")
+
 	for sl in souplist:
-		# Fix: Update selectors to match the actual HTML structure
+		# Debug the HTML structure
+		if args.debug:
+			logger.debug(f"Processing list element: {sl}")
+
+		# Extract list name
+		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')
+		list_name = name_elem.text.strip() if name_elem else 'Unknown'
+
+		# Extract repo count
+		count_elem = sl.find('div', class_='color-fg-muted text-small no-wrap')
+		repo_count_text = count_elem.text.strip() if count_elem else '0'
+
+		# Debug what we found
+		if args.debug:
+			logger.debug(f"List name: '{list_name}', repo count text: '{repo_count_text}'")
+
 		list_info = {
-			# The list name is in h3 with class "f4 text-bold no-wrap mr-3"
-			'name': sl.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if sl.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown',
-			# There's no description in this structure, so keep it empty
-			'description': '',
-			# The href attribute contains the list URL
+			'name': list_name,
+			'description': '',  # GitHub lists don't have descriptions in this view
 			'list_url': sl.get('href', ''),
-			# The repo count is in div with class "color-fg-muted text-small no-wrap"
-			'repo_count': sl.find('div', class_='color-fg-muted text-small no-wrap').text.strip() if sl.find('div', class_='color-fg-muted text-small no-wrap') else '0'
+			'repo_count': repo_count_text
 		}
 		git_lists_metadata.append(list_info)
 
