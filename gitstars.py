@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import traceback
 import asyncio
 import json
 from loguru import logger
@@ -57,18 +58,15 @@ async def get_info_for_list(link, headers, session, args):
 						if args.debug:
 							logger.debug(f"No more repos found on page {page_num} of {link}.")
 						break
-
 					all_hrefs.extend(page_hrefs)
-					if args.debug:
-						logger.debug(f"Page {page_num}: found {len(page_hrefs)} repos, total: {len(all_hrefs)}")
-
 					# Find next page link
 					next_link = soup.select_one('a.next_page, a[rel=next]')
 					current_url = f"https://github.com{next_link['href']}" if next_link else None
 					page_num += 1
 
 			except Exception as e:
-				logger.error(f"Error scraping {current_url}: {e}")
+				logger.error(f"Error scraping {current_url}: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 				break
 
 	if page_num > 100:
@@ -81,7 +79,8 @@ async def get_info_for_list(link, headers, session, args):
 			session.commit()
 			logger.info(f"Cached {len(all_hrefs)} repo links for {link}")
 		except Exception as e:
-			logger.error(f'Failed to save list info to cache: {e}')
+			logger.error(f'Failed to save list info to cache: {e} {type(e)}')
+			logger.error(f'traceback: {traceback.format_exc()}')
 
 	return all_hrefs
 
@@ -150,7 +149,8 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 					logger.warning(f"Page {page_num} failed with status {page_response.status}")
 					return page_num, []
 		except Exception as e:
-			logger.error(f"Error fetching page {page_num}: {e}")
+			logger.error(f"Error fetching page {page_num}: {e} {type(e)}")
+			logger.error(f'traceback: {traceback.format_exc()}')
 			return page_num, []
 
 async def fetch_github_starred_repos(args, session, cache_key="starred_repos_list", cache_type="starred_repos"):
@@ -167,7 +167,8 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 				logger.info(f"Loaded {len(cached_data)} starred repos from cache")
 				return cached_data
 			except Exception as e:
-				logger.error(f"Failed to parse cache: {e}")
+				logger.error(f"Failed to parse cache: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 
 	if args.nodl:
 		logger.warning("Skipping API call due to --nodl flag")
@@ -277,6 +278,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 					logger.debug(f"Using cached stars data: {len(cached_stars)} lists")
 			except Exception as e:
 				logger.warning(f"Failed to load cached stars data: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 
 	# If we have both cached, return them
 	if cached_metadata and cached_stars:
@@ -364,10 +366,6 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		count_elem = sl.find('div', class_='color-fg-muted text-small no-wrap')
 		repo_count_text = count_elem.text.strip() if count_elem else '0'
 
-		# Debug what we found
-		if args.debug:
-			logger.debug(f"List name: '{list_name}', repo count text: '{repo_count_text}'")
-
 		list_info = {
 			'name': list_name,
 			'description': list_description,
@@ -404,6 +402,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 					list_repos = await get_info_for_list(list_link, headers, session, args)
 				except Exception as e:
 					logger.warning(f'{e} {type(e)} failed to get list info for {listname}')
+					logger.error(f'traceback: {traceback.format_exc()}')
 					list_repos = []
 
 				lists_with_repos[listname] = {

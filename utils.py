@@ -1,4 +1,5 @@
 import os
+import traceback
 from pathlib import Path
 from loguru import logger
 from subprocess import Popen, PIPE
@@ -71,6 +72,7 @@ def get_remote_url(git_path: str) -> str:
 		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 	except Exception as e:
 		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+		logger.warning(f'traceback: {traceback.format_exc()}')
 	return remote_url
 
 def get_git_info(git_path: str) -> dict:
@@ -200,6 +202,7 @@ def get_git_info(git_path: str) -> dict:
 	except Exception as e:
 		git_info['error'] = f"{e} {type(e)}"
 		logger.warning(f'[get_git_info] {e} {type(e)} {git_path=}')
+		logger.error(f'traceback: {traceback.format_exc()}')
 	finally:
 		os.chdir(original_dir)
 

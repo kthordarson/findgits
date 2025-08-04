@@ -31,7 +31,8 @@ async def verify_star_list_links(session, args):
 		}
 
 	except Exception as e:
-		logger.error(f"Error verifying star-list links: {e}")
+		logger.error(f"Error verifying star-list links: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
 		return None
 
 async def insert_update_git_folder(git_folder_path, session, args):
@@ -84,7 +85,8 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			repo_info = RepoInfo(owner, repo_name)
 			repo_metadata = await fetch_metadata(repo_info, session, args)
 		except Exception as e:
-			logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
+			logger.error(f'Failed to fetch metadata for {repo_path}: {e} {type(e)}')
+			logger.error(f'traceback: {traceback.format_exc()}')
 			repo_metadata = None
 
 	try:
@@ -120,6 +122,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 				repo_metadata = None
 			except Exception as e:
 				logger.error(f'Failed to fetch metadata for {repo_path}: {e}')
+				logger.error(f'traceback: {traceback.format_exc()}')
 				repo_metadata = None
 
 		# Try lookup by name if URL lookup failed
@@ -181,7 +184,10 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		return git_folder
 
 	except Exception as e:
-		logger.error(f'Database error: {e} repo_metadata: {repo_metadata}')
+		logger.error(f'Database error: {e} {type(e)} for git_folder_path: {git_folder_path}')
+		logger.error(f'traceback: {traceback.format_exc()}')
+		if repo_metadata:
+			logger.error(f'repo_metadata: {repo_metadata}')
 		logger.error(f'traceback: {traceback.format_exc()}')
 		logger.error(f'tracebackstack: {traceback.print_stack()}')
 		if session.is_active:
@@ -473,8 +479,8 @@ async def populate_repo_data(session, args, starred_repos=None):
 					# Update the entry with all GitHub data
 					update_repo_from_data(db_repo, repo_data)
 					stats["updated"] += 1
-					if args.debug:
-						logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name} scan_count: {db_repo.scan_count} ")
+					# if args.debug:
+					# 	logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name} scan_count: {db_repo.scan_count} ")
 				else:
 					# No matching GitHub data found
 					stats["not_found"] += 1
@@ -485,7 +491,8 @@ async def populate_repo_data(session, args, starred_repos=None):
 					logger.info(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
 
 			except Exception as e:
-				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
+				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 				stats["errors"] += 1
 
 		# Final commit
@@ -493,7 +500,8 @@ async def populate_repo_data(session, args, starred_repos=None):
 		logger.info(f"Finished processing repositories: {stats}")
 
 	except Exception as e:
-		logger.error(f"Error processing repositories: {e}")
+		logger.error(f"Error processing repositories: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
 		stats["errors"] += 1
 		return {"errors": stats["errors"], "message": str(e)}
 
@@ -701,21 +709,27 @@ async def fetch_metadata(repo, session, args):
 				logger.info(f"Using cached metadata for {repo_path} (age: {cache_age:.1f} seconds)")
 				return cached_repo
 		except Exception as e:
-			logger.error(f"Error parsing cached metadata: {e}")
+			logger.error(f"Error parsing cached metadata: {e} {type(e)} for {repo}")
+			logger.error(f'traceback: {traceback.format_exc()}')
 	else:
 		if args.nodl:
 			logger.warning(f"Running in --nodl mode, no API requests will be made for {repo_path}")
 			return None
 		else:
 			# Use update_repo_cache to get metadata
+			repo_metadata = None
 			try:
 				repo_metadata = await update_repo_cache(repo_path, session, args)
 				return repo_metadata
 			except RateLimitExceededError as e:
 				logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
 				raise e
+			except AttributeError as e:
+				logger.warning(f"Error fetching repository metadata: {e} for {repo_path}")
+				logger.warning(f'traceback: {traceback.format_exc()}')
 			except Exception as e:
-				logger.error(f"Error fetching repository metadata: {e}")
+				logger.error(f"Error fetching repository metadata: {e} {type(e)} for {repo_path}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 				# return None
 			if not repo_metadata:
 				logger.warning(f"No cache entry found for {repo_path}")

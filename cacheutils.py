@@ -27,6 +27,7 @@ async def get_api_rate_limits(args):
 		return rate_limits
 	except Exception as e:
 		logger.error(f'fatal {e} {type(e)}')
+		logger.error(f'traceback: {traceback.format_exc()}')
 	finally:
 		rate_limits['rate_limits'] = rates
 		return rate_limits
@@ -83,7 +84,8 @@ async def is_rate_limit_hit(args, threshold_percent=10):
 		return False
 
 	except Exception as e:
-		logger.error(f"Error checking rate limits: {e}")
+		logger.error(f"Error checking rate limits: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
 		# Return True as a precaution when we can't determine limits
 		return True
 
@@ -91,6 +93,10 @@ async def update_repo_cache(repo_name_or_url, session, args):
 	"""
 	Fetch repository data from GitHub API and update the database cache
 	"""
+	if 'BLANK_REPO_DATA' in repo_name_or_url:
+		logger.warning(f"Invalid repository repo_name_or_url: {repo_name_or_url}")
+		return None
+
 	# Normalize repo name
 	repo_name = repo_name_or_url.strip('/').replace('github.com/', '').replace('.git', '')
 	cache_key = f"repo:{repo_name}"
@@ -103,7 +109,8 @@ async def update_repo_cache(repo_name_or_url, session, args):
 				cache_data = json.loads(cache_entry.data)
 				return cache_data[0] if cache_data else None
 			except Exception as e:
-				logger.error(f"Failed to parse cache data: {e}")
+				logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_name_or_url}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 	if args.nodl:
 		logger.warning(f"Skipping API call for {repo_name} due to --nodl flag")
 		return None
@@ -112,11 +119,17 @@ async def update_repo_cache(repo_name_or_url, session, args):
 		logger.error('update_repo_cache: no auth provided')
 		return None
 	api_url = f'https://api.github.com/repos/{repo_name}'
+
 	async with get_client_session(args) as api_session:
 		async with api_session.get(api_url) as r:
 			if r.status == 200:
 				repo_data = await r.json()
-				set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
+				try:
+					set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
+				except Exception as e:
+					logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
+					logger.error(f'traceback: {traceback.format_exc()}')
+					return None
 				session.commit()
 				return repo_data
 			elif r.status in (403, 404, 451):
@@ -136,6 +149,9 @@ def get_cache_entry(session, cache_key, cache_type):
 
 def set_cache_entry(session, cache_key, cache_type, data):
 	"""Set or update a cache entry in the database"""
+	if 'BLANK_REPO_DATA' in data:
+		logger.warning(f"Invalid data for cache entry: {json.loads(data)[0]["name"]} ")
+		# return None
 	entry = get_cache_entry(session, cache_key, cache_type)
 	if entry:
 		entry.data = data
@@ -214,8 +230,9 @@ def set_cache_entry(session, cache_key, cache_type, data):
 					session.commit()
 					logger.info(f"Successfully updated existing cache entry: {cache_key}")
 					return existing_entry
-				except Exception as update_error:
-					logger.error(f"Failed to update existing cache entry: {update_error}")
+				except Exception as e:
+					logger.error(f"Failed to update existing cache entry: {e} {type(e)}")
+					logger.error(f'traceback: {traceback.format_exc()}')
 					session.rollback()
 					return None
 			else:

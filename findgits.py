@@ -67,6 +67,7 @@ async def process_git_folder(git_path, session, args):
 			return result
 	except Exception as e:
 		logger.error(f'Error processing {git_path}: {e} {type(e)}')
+		logger.error(f'traceback: {traceback.format_exc()}')
 		if session.is_active:
 			session.rollback()
 		return None
@@ -77,6 +78,7 @@ async def process_starred_repo(repo, session, args):
 		await insert_update_starred_repo(github_repo=repo, session=session, args=args, create_new=True)
 	except Exception as e:
 		logger.error(f'Error processing {repo}: {e} {type(e)}')
+		logger.error(f'traceback: {traceback.format_exc()}')
 
 async def link_existing_repos_to_stars(session, args):
 	"""Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
@@ -172,17 +174,18 @@ async def link_existing_repos_to_stars(session, args):
 					if git_list:
 						git_star.gitlist_id = git_list.id
 						linked_count += 1
-						logger.debug(f"Linked {full_name} to list {list_name}")
+						# logger.debug(f"Linked {full_name} to list {list_name}")
 
 			except Exception as e:
-				logger.error(f"Error processing starred repo {starred_repo.get('full_name', 'unknown')}: {e}")
+				logger.error(f"Error processing starred repo {starred_repo.get('full_name', 'unknown')}: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 				continue
 
 		session.commit()
 		logger.info(f"GitStar processing complete: Created {star_entries_created}, Updated {star_entries_updated}, Linked to lists {linked_count}")
 
 	except Exception as e:
-		logger.error(f"Error linking existing repos to stars: {e}")
+		logger.error(f"Error linking existing repos to stars: {e} {type(e)}")
 		logger.error(f"Traceback: {traceback.format_exc()}")
 		session.rollback()
 
@@ -216,16 +219,9 @@ async def populate_git_lists(session, args):
 		repo_count = 0
 		try:
 			repo_count_str = entry.get('repo_count', '0')
-			if args.debug:
-				logger.debug(f"Parsing repo count for {list_name}: '{repo_count_str}'")
-
 			# Extract numbers from strings like "1 repository" or "19 repositories"
 			numbers = re.findall(r'\d+', repo_count_str)
 			repo_count = int(numbers[0]) if numbers else 0
-
-			if args.debug:
-				logger.debug(f"Parsed repo count for {list_name}: {repo_count}")
-
 		except (ValueError, AttributeError, IndexError) as e:
 			repo_count = 0
 			logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}: {e}")
@@ -303,7 +299,8 @@ async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 		return dict(grouped_repos)
 
 	except Exception as e:
-		logger.error(f"Error getting starred repos by list: {e}")
+		logger.error(f"Error getting starred repos by list: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
 		return {}
 
 def get_args():
@@ -519,39 +516,21 @@ async def main():
 		if args.debug:
 			logger.debug(f'Git Repos: {len(git_repos)}')
 
-		# Instead, use the cached data or fetch from cache
 		cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
 		if cache_entry:
 			git_lists = json.loads(cache_entry.data)
 		else:
 			# Fallback if cache somehow failed
+			if args.debug:
+				logger.debug("[fallback] Cache entry not found, fetching lists and stars from GitHub")
 			git_lists = await get_lists_and_stars_unified(session, args)
 
-		# urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
-		lists_with_repos = git_lists.get('lists_with_repos', {})
-		if 'lists_with_repos' in lists_with_repos:
-			# Handle the nested structure
-			actual_lists = lists_with_repos['lists_with_repos']
-		else:
-			# Handle the expected structure
-			actual_lists = lists_with_repos
-
-		# Now extract hrefs from the actual list data
-		urls = []
-		if actual_lists:
-			urls = list(set(flatten([actual_lists[k]['hrefs'] for k in actual_lists if 'hrefs' in actual_lists[k]])))
-		else:
-			logger.warning("No lists with repos found")
+		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
 		print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
-
-		# PRE-FETCH the repo-to-list mapping ONCE
-		logger.info("Creating repo-to-list mapping...")
-		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
-		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
 
 		# Process repos in parallel
 		batch_size = 20
@@ -588,6 +567,12 @@ async def main():
 			print(f'Processed {len(git_folders)} git folders')
 		else:
 			logger.error(f'Scan path: {scanpath} is not a valid directory')
+
+		# PRE-FETCH the repo-to-list mapping ONCE
+		logger.info("Creating repo-to-list mapping...")
+		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
+		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
+
 		return
 
 	if args.populate:
