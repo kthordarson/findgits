@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 from dbstuff import GitRepo, GitFolder, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, check_git_dates, mark_repo_as_starred
-from repotools import check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
+from repotools import verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists, get_git_list_stars, get_git_stars, fetch_starred_repos, get_starred_repos_by_list
 from utils import flatten
 
@@ -324,6 +324,10 @@ async def main():
 			await asyncio.gather(*tasks)
 			session.commit()
 		await link_existing_repos_to_stars(session, args)
+
+		verification_results = await verify_star_list_links(session, args)
+		if verification_results:
+			print(f"Star-List Link Verification: {verification_results}")
 
 		scanpath = Path(args.scanpath[0])
 		if scanpath.is_dir():

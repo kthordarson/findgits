@@ -7,8 +7,41 @@ from pathlib import Path
 from loguru import logger
 from dbstuff import GitRepo, GitFolder, RepoInfo, GitStar, GitList, get_dupes
 from utils import valid_git_folder, get_remote, ensure_datetime
-from gitstars import get_git_stars
+from gitstars import get_git_stars, get_git_list_stars
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
+
+async def verify_star_list_links(session, args):
+	"""Verify that GitStar entries are properly linked to GitList entries"""
+	try:
+		# Count total GitStar entries
+		total_stars = session.query(GitStar).count()
+
+		# Count GitStar entries with list links
+		linked_stars = session.query(GitStar).filter(GitStar.gitlist_id.isnot(None)).count()
+
+		# Count GitStar entries without list links
+		unlinked_stars = session.query(GitStar).filter(GitStar.gitlist_id.is_(None)).count()
+
+		logger.info(f"GitStar verification: Total={total_stars}, Linked={linked_stars}, Unlinked={unlinked_stars}")
+
+		# Show some examples of linked entries
+		linked_examples = session.query(GitStar, GitList).join(
+			GitList, GitStar.gitlist_id == GitList.id
+		).limit(5).all()
+
+		logger.info("Sample linked entries:")
+		for star, git_list in linked_examples:
+			logger.info(f"  GitStar {star.id} ({star.full_name}) -> GitList {git_list.id} ({git_list.list_name})")
+
+		return {
+			'total_stars': total_stars,
+			'linked_stars': linked_stars,
+			'unlinked_stars': unlinked_stars
+		}
+
+	except Exception as e:
+		logger.error(f"Error verifying star-list links: {e}")
+		return None
 
 async def insert_update_git_folder(git_folder_path, session, args):
 	"""
