@@ -322,7 +322,6 @@ def get_args():
 	myparse.add_argument('--populate', help='gitstars populate', action='store_true', default=False, dest='populate')
 	myparse.add_argument('--fetch_stars', help='fetch_stars', action='store_true', default=False, dest='fetch_stars')
 	# tuning, debug, etc
-	myparse.add_argument('--scanpath_threads', '-spt', help='scanpath_threads', action='store', dest='scanpath_threads')
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
 	myparse.add_argument('--global_limit', help='global limit', action='store', default=0, dest='global_limit', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
