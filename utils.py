@@ -26,8 +26,9 @@ async def get_client_session(args):
 			'Accept': 'application/vnd.github+json',
 			'Authorization': f'Bearer {auth.password}',
 			'X-GitHub-Api-Version': '2022-11-28'}
-
-		async with aiohttp.ClientSession(headers=headers) as session:
+		timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
+		connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, ttl_dns_cache=300, use_dns_cache=True, keepalive_timeout=30, enable_cleanup_closed=True)
+		async with aiohttp.ClientSession(headers=headers, timeout=timeout, connector=connector) as session:
 			try:
 				yield session
 			finally:
@@ -83,193 +84,6 @@ def get_remote_url(git_path: str) -> str:
 		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 	return remote_url
 
-def git_fsck_check(git_path: str) -> dict:
-	"""
-	Run git fsck --full to check for repository errors
-	Parameters: git_path: str - path to git folder
-	Returns: dict - fsck results with status and errors
-	"""
-	original_dir = os.getcwd()
-	fsck_result = {
-		'fsck_status': None,
-		'fsck_errors': [],
-		'is_corrupted': False
-	}
-
-	if git_path == '[notcloned]':
-		fsck_result['fsck_status'] = 'not_applicable'
-		return fsck_result
-
-	try:
-		os.chdir(git_path)
-
-		# Run git fsck --full to check for repository errors
-		fsck_cmd = ['git', 'fsck', '--full']
-		fsck_out, fsck_err = Popen(fsck_cmd, stdout=PIPE, stderr=PIPE).communicate()
-
-		if fsck_err:
-			fsck_errors = [k.strip() for k in fsck_err.decode('utf8').split('\n') if k.strip()]
-			fsck_result['fsck_errors'] = fsck_errors
-			fsck_result['fsck_status'] = 'errors_found'
-			fsck_result['is_corrupted'] = True
-			logger.warning(f'git fsck errors in {git_path}: {fsck_errors}')
-		else:
-			fsck_result['fsck_status'] = 'clean'
-			if fsck_out.decode('utf8').strip():
-				# Sometimes fsck outputs warnings to stdout
-				fsck_output = [k.strip() for k in fsck_out.decode('utf8').split('\n') if k.strip()]
-				if fsck_output:
-					fsck_result['fsck_errors'] = fsck_output
-					fsck_result['fsck_status'] = 'warnings_found'
-					logger.info(f'git fsck warnings in {git_path}: {fsck_output}')
-
-	except Exception as fsck_e:
-		fsck_result['fsck_status'] = 'fsck_failed'
-		fsck_result['fsck_errors'] = [f"fsck command failed: {fsck_e}"]
-		logger.warning(f'git fsck command failed in {git_path}: {fsck_e}')
-	finally:
-		os.chdir(original_dir)
-
-	return fsck_result
-
-def git_recovery_pull(git_path: str) -> dict:
-	"""
-	Attempt to recover a corrupted git repository using git pull
-	Parameters: git_path: str - path to git folder
-	Returns: dict - recovery results
-	"""
-	original_dir = os.getcwd()
-	recovery_result = {
-		'recovery_attempted': False,
-		'recovery_successful': False,
-		'recovery_method': 'git_pull',
-		'recovery_steps': [],
-		'final_status': None,
-		'error_message': None
-	}
-
-	try:
-		os.chdir(git_path)
-		recovery_result['recovery_attempted'] = True
-
-		logger.info(f"Attempting git recovery using pull for {git_path}")
-
-		# Step 1: Check if remote is available
-		remote_cmd = ['git', 'remote', '-v']
-		remote_out, remote_err = Popen(remote_cmd, stdout=PIPE, stderr=PIPE).communicate()
-
-		if remote_err or not remote_out:
-			recovery_result['error_message'] = 'No remote found or remote command failed'
-			recovery_result['final_status'] = 'no_remote'
-			return recovery_result
-
-		recovery_result['recovery_steps'].append('remote_check_passed')
-
-		# Check if remote requires authentication (https URLs typically do)
-		remote_url = remote_out.decode('utf8').strip()
-		if 'https://github.com' in remote_url and not any(cred in remote_url for cred in ['@', 'token']):
-			recovery_result['error_message'] = 'Remote requires authentication, aborting recovery'
-			recovery_result['final_status'] = 'auth_required'
-			logger.warning(f"Remote requires authentication for {git_path}, skipping recovery")
-			return recovery_result
-
-		# Step 2: Try to fetch from remote first with timeout
-		logger.info(f"Fetching from remote for {git_path}")
-		fetch_cmd = ['git', 'fetch', 'origin']
-		try:
-			fetch_process = Popen(fetch_cmd, stdout=PIPE, stderr=PIPE)
-			fetch_out, fetch_err = fetch_process.communicate(timeout=30)  # 30 second timeout
-		except TimeoutExpired:
-			fetch_process.kill()
-			recovery_result['error_message'] = 'Fetch timed out (likely authentication prompt)'
-			recovery_result['final_status'] = 'fetch_timeout'
-			logger.warning(f"Fetch timed out for {git_path}, likely authentication required")
-			return recovery_result
-
-		if fetch_err:
-			fetch_error = fetch_err.decode('utf8').lower()
-			# Check for authentication-related errors
-			if any(auth_keyword in fetch_error for auth_keyword in ['username', 'password', 'authentication', 'credentials', 'token']):
-				recovery_result['error_message'] = 'Authentication required for fetch'
-				recovery_result['final_status'] = 'auth_required'
-				logger.warning(f"Authentication required for fetch in {git_path}, aborting recovery")
-				return recovery_result
-
-			logger.warning(f"Fetch failed for {git_path}: {fetch_error}")
-			recovery_result['recovery_steps'].append('fetch_failed')
-			recovery_result['error_message'] = f"Fetch failed: {fetch_error}"
-			recovery_result['final_status'] = 'fetch_failed'
-			return recovery_result
-		else:
-			recovery_result['recovery_steps'].append('fetch_successful')
-
-		# Step 3: Get current branch or try to determine default branch
-		branch_cmd = ['git', 'branch', '--show-current']
-		branch_out, branch_err = Popen(branch_cmd, stdout=PIPE, stderr=PIPE).communicate()
-
-		current_branch = branch_out.decode('utf8').strip()
-		if not current_branch:
-			# Try to get default branch from remote
-			default_branch_cmd = ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD']
-			default_out, default_err = Popen(default_branch_cmd, stdout=PIPE, stderr=PIPE).communicate()
-
-			if default_out:
-				current_branch = default_out.decode('utf8').strip().split('/')[-1]
-			else:
-				# Fallback to common branch names
-				for branch_name in ['main', 'master', 'develop']:
-					check_branch_cmd = ['git', 'show-ref', '--verify', '--quiet', f'refs/remotes/origin/{branch_name}']
-					check_out, check_err = Popen(check_branch_cmd, stdout=PIPE, stderr=PIPE).communicate()
-					if not check_err:
-						current_branch = branch_name
-						break
-
-		if not current_branch:
-			recovery_result['error_message'] = 'Could not determine branch to pull from'
-			recovery_result['final_status'] = 'no_branch_found'
-			return recovery_result
-
-		recovery_result['recovery_steps'].append(f'branch_determined:{current_branch}')
-
-		# Step 4: Try to reset to remote branch
-		logger.info(f"Resetting to origin/{current_branch} for {git_path}")
-		reset_cmd = ['git', 'reset', '--hard', f'origin/{current_branch}']
-		reset_out, reset_err = Popen(reset_cmd, stdout=PIPE, stderr=PIPE).communicate()
-
-		if reset_err:
-			logger.warning(f"Reset failed for {git_path}: {reset_err.decode('utf8')}")
-			recovery_result['recovery_steps'].append('reset_failed')
-			recovery_result['error_message'] = f"Reset failed: {reset_err.decode('utf8')}"
-			recovery_result['final_status'] = 'reset_failed'
-			return recovery_result
-		else:
-			recovery_result['recovery_steps'].append('reset_successful')
-
-		# Step 5: Verify recovery by running fsck again
-		verification_result = git_fsck_check(git_path)
-		if verification_result['fsck_status'] == 'clean':
-			recovery_result['recovery_successful'] = True
-			recovery_result['final_status'] = 'recovered_clean'
-			logger.info(f"Successfully recovered git repository: {git_path}")
-		elif verification_result['fsck_status'] == 'warnings_found':
-			recovery_result['recovery_successful'] = True
-			recovery_result['final_status'] = 'recovered_with_warnings'
-			logger.info(f"Recovered git repository with warnings: {git_path}")
-		else:
-			recovery_result['final_status'] = 'recovery_incomplete'
-			recovery_result['error_message'] = 'Repository still has errors after recovery attempt'
-
-		recovery_result['recovery_steps'].append(f'verification:{verification_result["fsck_status"]}')
-
-	except Exception as e:
-		recovery_result['error_message'] = f"Recovery exception: {e}"
-		recovery_result['final_status'] = 'recovery_exception'
-		logger.error(f"Git recovery failed for {git_path}: {e}")
-	finally:
-		os.chdir(original_dir)
-
-	return recovery_result
-
 def get_git_info(git_path: str) -> dict:
 	"""
 	Get git branch information from a git folder
@@ -283,138 +97,116 @@ def get_git_info(git_path: str) -> dict:
 		'remote_branches': [],
 		'tracking_info': {},
 		'error': None,
-		'fsck_status': None,
-		'fsck_errors': [],
-		'recovery_attempted': False,
-		'recovery_result': None
 	}
 	if git_path == '[notcloned]':
 		return git_info
 	try:
 		os.chdir(git_path)
 
-		# First run git fsck to check for repository errors
-		fsck_result = git_fsck_check(git_path)
-		git_info.update(fsck_result)
+		cmdstr = ['git', '--no-pager', 'branch', '-a', '-l', '--no-color', '-vv']
+		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 
-		# If repository is corrupted, attempt recovery
-		if fsck_result['is_corrupted']:
-			recovery_result = git_recovery_pull(git_path)
-			git_info['recovery_attempted'] = recovery_result['recovery_attempted']
-			git_info['recovery_result'] = recovery_result
+		if err:
+			git_info['error'] = err.decode('utf8').strip()
+			logger.warning(f'git branch error in {git_path}: {git_info["error"]}')
+			return git_info
 
-			# Update fsck status after recovery
-			if recovery_result['recovery_successful']:
-				# Re-run fsck to get updated status
-				updated_fsck = git_fsck_check(git_path)
-				git_info.update(updated_fsck)
+		branch_lines = [k.strip() for k in out.decode('utf8').split('\n') if k.strip()]
 
-		# Continue with branch information only if repository is in good state
-		if git_info['fsck_status'] in ['clean', 'warnings_found', 'recovered_clean', 'recovered_with_warnings']:
-			cmdstr = ['git', '--no-pager', 'branch', '-a', '-l', '--no-color', '-vv']
-			out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+		for line in branch_lines:
+			if not line:
+				continue
 
-			if err:
-				git_info['error'] = err.decode('utf8').strip()
-				logger.warning(f'git branch error in {git_path}: {git_info["error"]}')
-				return git_info
+			# Check if this is the current branch (starts with *)
+			is_current = line.startswith('*')
+			if is_current:
+				line = line[1:].strip()  # Remove the *
 
-			branch_lines = [k.strip() for k in out.decode('utf8').split('\n') if k.strip()]
+			# Split the line into components
+			parts = line.split()
+			if len(parts) < 2:
+				continue
 
-			for line in branch_lines:
-				if not line:
-					continue
+			branch_name = parts[0]
+			commit_hash = parts[1]
 
-				# Check if this is the current branch (starts with *)
-				is_current = line.startswith('*')
-				if is_current:
-					line = line[1:].strip()  # Remove the *
+			# Extract tracking info (e.g., [ahead 1], [behind 11])
+			tracking_info = None
+			if '[' in line and ']' in line:
+				start_bracket = line.find('[')
+				end_bracket = line.find(']')
+				tracking_info = line[start_bracket+1:end_bracket]
 
-				# Split the line into components
-				parts = line.split()
-				if len(parts) < 2:
-					continue
-
-				branch_name = parts[0]
-				commit_hash = parts[1]
-
-				# Extract tracking info (e.g., [ahead 1], [behind 11])
-				tracking_info = None
-				if '[' in line and ']' in line:
-					start_bracket = line.find('[')
-					end_bracket = line.find(']')
-					tracking_info = line[start_bracket+1:end_bracket]
-
-				# Parse different branch types
-				if branch_name.startswith('remotes/'):
-					# Remote branch
-					if '->' in line:
-						# This is a symbolic ref like "remotes/origin/HEAD -> origin/master"
-						target = line.split('->')[-1].strip()
-						git_info['remote_branches'].append({
-							'name': branch_name,
-							'commit': commit_hash,
-							'type': 'symbolic_ref',
-							'target': target,
-							'tracking': tracking_info
-						})
-					else:
-						# Regular remote branch
-						git_info['remote_branches'].append({
-							'name': branch_name,
-							'commit': commit_hash,
-							'type': 'remote',
-							'tracking': tracking_info
-						})
-				else:
-					# Local branch
-					branch_info = {
+			# Parse different branch types
+			if branch_name.startswith('remotes/'):
+				# Remote branch
+				if '->' in line:
+					# This is a symbolic ref like "remotes/origin/HEAD -> origin/master"
+					target = line.split('->')[-1].strip()
+					git_info['remote_branches'].append({
 						'name': branch_name,
 						'commit': commit_hash,
-						'is_current': is_current,
+						'type': 'symbolic_ref',
+						'target': target,
 						'tracking': tracking_info
-					}
+					})
+				else:
+					# Regular remote branch
+					git_info['remote_branches'].append({
+						'name': branch_name,
+						'commit': commit_hash,
+						'type': 'remote',
+						'tracking': tracking_info
+					})
+			else:
+				# Local branch
+				branch_info = {
+					'name': branch_name,
+					'commit': commit_hash,
+					'is_current': is_current,
+					'tracking': tracking_info
+				}
 
-					git_info['local_branches'].append(branch_info)
+				git_info['local_branches'].append(branch_info)
 
-					if is_current:
-						git_info['current_branch'] = branch_name
+				if is_current:
+					git_info['current_branch'] = branch_name
 
-					# Store tracking info in separate dict for easy lookup
-					if tracking_info:
-						git_info['tracking_info'][branch_name] = tracking_info
+				# Store tracking info in separate dict for easy lookup
+				if tracking_info:
+					git_info['tracking_info'][branch_name] = tracking_info
 
-			# Additional parsing for commit messages (everything after commit hash and tracking info)
-			for line in branch_lines:
-				if not line or line.startswith('*'):
-					line = line[1:].strip() if line.startswith('*') else line
+		# Additional parsing for commit messages (everything after commit hash and tracking info)
+		for line in branch_lines:
+			if not line or line.startswith('*'):
+				line = line[1:].strip() if line.startswith('*') else line
 
-				parts = line.split()
-				if len(parts) >= 3:
-					branch_name = parts[0]
-					# Find commit message (after hash and optional tracking info)
-					line_parts = line.split()
-					if len(line_parts) > 2:
-						# Skip branch name and commit hash
-						remaining = ' '.join(line_parts[2:])
-						# Remove tracking info if present
-						if '[' in remaining and ']' in remaining:
-							bracket_end = remaining.find(']') + 1
-							commit_msg = remaining[bracket_end:].strip()
-						else:
-							commit_msg = remaining
+			parts = line.split()
+			if len(parts) >= 3:
+				branch_name = parts[0]
+				# Find commit message (after hash and optional tracking info)
+				line_parts = line.split()
+				if len(line_parts) > 2:
+					# Skip branch name and commit hash
+					remaining = ' '.join(line_parts[2:])
+					# Remove tracking info if present
+					if '[' in remaining and ']' in remaining:
+						bracket_end = remaining.find(']') + 1
+						commit_msg = remaining[bracket_end:].strip()
+					else:
+						commit_msg = remaining
 
-						# Add commit message to the appropriate branch
-						if branch_name.startswith('remotes/'):
-							for remote_branch in git_info['remote_branches']:
-								if remote_branch['name'] == branch_name:
-									remote_branch['commit_message'] = commit_msg
-									break
-						else:
-							for local_branch in git_info['local_branches']:
-								if local_branch['name'] == branch_name:
-									local_branch['commit_message'] = commit_msg
-									break
+					# Add commit message to the appropriate branch
+					if branch_name.startswith('remotes/'):
+						for remote_branch in git_info['remote_branches']:
+							if remote_branch['name'] == branch_name:
+								remote_branch['commit_message'] = commit_msg
+								break
+					else:
+						for local_branch in git_info['local_branches']:
+							if local_branch['name'] == branch_name:
+								local_branch['commit_message'] = commit_msg
+								break
 
 	except Exception as e:
 		git_info['error'] = f"{e} {type(e)}"
