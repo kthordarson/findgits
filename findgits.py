@@ -305,7 +305,7 @@ async def main():
 				from datetime import datetime
 				reset_time = datetime.fromtimestamp(reset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
-				print(f"\n📊 Overall Rate Limit:")
+				print("\n📊 Overall Rate Limit:")
 				print(f"   Limit:     {limit:,}")
 				print(f"   Used:      {used:,}")
 				print(f"   Remaining: {remaining:,}")
@@ -325,7 +325,7 @@ async def main():
 			# Resource-specific limits
 			resources = rate_limits.get('rate_limits', {}).get('resources', {})
 			if resources:
-				print(f"\n📋 Resource-Specific Limits:")
+				print("\n📋 Resource-Specific Limits:")
 				print("-" * 50)
 
 				# Sort by usage percentage for better visibility
