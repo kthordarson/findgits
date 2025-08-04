@@ -217,25 +217,42 @@ async def populate_git_lists(session, args):
 				list_name = url_parts[-1]
 
 		# Check if list already exists by name or URL
-		db_list = session.query(GitList).filter((GitList.list_name == list_name) | (GitList.list_url == entry.get('list_url', ''))).first()
+		db_list = session.query(GitList).filter(
+			(GitList.list_name == list_name) |
+			(GitList.list_url == entry.get('list_url', ''))
+		).first()
+
 		if db_list:
 			# Update existing entry
 			db_list.list_name = list_name  # Update the name in case it was "Unknown" before
 			db_list.list_description = entry.get('description', '')
-			db_list.repo_count = entry.get('repo_count', '0')
 			db_list.list_url = entry.get('list_url', '')
+			# Fix: Convert repo_count to integer and use correct field name
+			try:
+				repo_count_str = entry.get('repo_count', '0')
+				db_list.repo_count = int(repo_count_str) if repo_count_str.isdigit() else 0
+			except (ValueError, AttributeError):
+				db_list.repo_count = 0
+				logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}")
 		else:
 			# Create new entry
-			db_list = GitList(
-				list_name=list_name,
-				list_description=entry.get('description', ''),
-				list_url=entry.get('list_url', '')
-			)
+			# Fix: Convert repo_count to integer
+			try:
+				repo_count_str = entry.get('repo_count', '0')
+				repo_count = int(repo_count_str) if repo_count_str.isdigit() else 0
+			except (ValueError, AttributeError):
+				repo_count = 0
+				logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}")
+
+			db_list = GitList()
+			db_list.list_name = list_name
+			db_list.list_description = entry.get('description', '')
+			db_list.list_url = entry.get('list_url', '')
+			db_list.repo_count = repo_count
+			db_list.created_at = datetime.now()
+
 			if args.debug:
-				logger.debug(f'Adding new GitList: {list_name} with URL: {db_list.list_url}')
-			# Optionally add count if you want to store it
-			if hasattr(GitList, 'repo_count'):
-				db_list.list_count = entry.get('repo_count', '0')
+				logger.debug(f'Adding new GitList: {list_name} with URL: {db_list.list_url} and {repo_count} repos')
 			session.add(db_list)
 
 		# Cache individual list data for faster retrieval using the corrected name

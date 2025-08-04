@@ -25,7 +25,8 @@ async def get_info_for_list(link, headers, session, args):
 		if cache_entry := get_cache_entry(session, cache_key, cache_type):
 			try:
 				cached_data = json.loads(cache_entry.data)
-				logger.debug(f"Loaded list info from cache for {link}")
+				if args.debug:
+					logger.debug(f"Loaded list info from cache for {link}")
 				return cached_data
 			except json.JSONDecodeError as e:
 				logger.error(f'Failed to parse cached list info: {e}')
@@ -58,11 +59,13 @@ async def get_info_for_list(link, headers, session, args):
 					page_hrefs = [link['href'] for link in repo_links if 'href' in link.attrs]
 
 					if not page_hrefs:
-						logger.debug(f"No more repos found on page {page_num} of {link}.")
+						if args.debug:
+							logger.debug(f"No more repos found on page {page_num} of {link}.")
 						break
 
 					all_hrefs.extend(page_hrefs)
-					logger.debug(f"Page {page_num}: found {len(page_hrefs)} repos, total: {len(all_hrefs)}")
+					if args.debug:
+						logger.debug(f"Page {page_num}: found {len(page_hrefs)} repos, total: {len(all_hrefs)}")
 
 					# Find next page link
 					next_link = soup.select_one('a.next_page, a[rel=next]')
@@ -487,7 +490,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				content = await r.text()
 				soup = BeautifulSoup(content, 'html.parser')
 			elif r.status == 406:
-				logger.error(f"GitHub returned 406 Not Acceptable - check your headers. Using cached data if available.")
+				logger.error("GitHub returned 406 Not Acceptable - check your headers. Using cached data if available.")
 				return {
 					'lists_metadata': cached_metadata or [],
 					'lists_with_repos': cached_stars or {}
