@@ -325,6 +325,12 @@ def get_args():
 	if args.disable_cache:
 		args.use_cache = False
 		logger.info('Cache disabled')
+	if args.debug:
+		logger.info('Debug mode enabled')
+		args.checkdates = True
+		args.dbinfo = True
+		args.list_by_group = True
+		args.check_rate_limits = True
 	return args
 
 def get_session(args):
@@ -343,111 +349,6 @@ async def main():
 		drop_database(engine)
 		logger.info('Database dropped')
 		session.close()
-		return
-
-	if args.check_rate_limits:
-		rate_limits = await get_api_rate_limits(args)
-		if rate_limits:
-			print("\n🔍 GitHub API Rate Limits Status")
-			print("=" * 50)
-
-			if rate_limits.get('limit_hit'):
-				print("⚠️  RATE LIMIT HIT!")
-			else:
-				print("✅ Rate limits OK")
-
-			# Main rate limit info
-			rate_info = rate_limits.get('rate_limits', {}).get('rate', {})
-			if rate_info:
-				limit = rate_info.get('limit', 0)
-				used = rate_info.get('used', 0)
-				remaining = rate_info.get('remaining', 0)
-				reset_timestamp = rate_info.get('reset', 0)
-
-				# Convert timestamp to readable time
-				from datetime import datetime
-				reset_time = datetime.fromtimestamp(reset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-
-				print("\n📊 Overall Rate Limit:")
-				print(f"   Limit:     {limit:,}")
-				print(f"   Used:      {used:,}")
-				print(f"   Remaining: {remaining:,}")
-				print(f"   Resets at: {reset_time}")
-
-				# Calculate percentage used
-				if limit > 0:
-					percentage_used = (used / limit) * 100
-					print(f"   Usage:     {percentage_used:.1f}%")
-
-					# Visual progress bar
-					bar_length = 30
-					filled_length = int(bar_length * used // limit)
-					bar = '█' * filled_length + '░' * (bar_length - filled_length)
-					print(f"   Progress:  [{bar}]")
-
-			# Resource-specific limits
-			resources = rate_limits.get('rate_limits', {}).get('resources', {})
-			if resources:
-				print("\n📋 Resource-Specific Limits:")
-				print("-" * 50)
-
-				# Sort by usage percentage for better visibility
-				resource_data = []
-				for resource, data in resources.items():
-					limit = data.get('limit', 0)
-					used = data.get('used', 0)
-					remaining = data.get('remaining', 0)
-					if limit > 0:
-						usage_pct = (used / limit) * 100
-					else:
-						usage_pct = 0
-					resource_data.append((resource, limit, used, remaining, usage_pct))
-
-				# Sort by usage percentage (highest first)
-				resource_data.sort(key=lambda x: x[4], reverse=True)
-
-				for resource, limit, used, remaining, usage_pct in resource_data:
-					if used > 0 or limit < 5000:  # Show resources that are used or have lower limits
-						status = "⚠️ " if usage_pct > 80 else "🟡" if usage_pct > 50 else "🟢"
-						print(f"{status} {resource:25} {used:4d}/{limit:4d} ({usage_pct:5.1f}%) - {remaining:4d} remaining")
-		else:
-			print("❌ No API rate limits found or unable to fetch.")
-		session.close()
-		return
-
-	if args.checkdates:
-		check_git_dates(session)
-
-	if args.dbinfo:
-		git_folders = session.query(GitFolder).count()
-		git_repos = session.query(GitRepo).count()
-		dupes = check_update_dupes(session)
-		chk = dbcheck(session)
-		print(f'dbcheck: {chk}')
-		print(f'Git Folders: {git_folders} Git Repos: {git_repos} Dupes: {dupes['dupe_repos']} ')
-		return
-
-	if args.list_by_group:
-		grouped_repos = await get_starred_repos_by_list(session, args)
-		total_repos = sum(len(repos) for repos in grouped_repos.values())
-		print(f"\nFound {len(grouped_repos)} lists with {total_repos} total repositories:\n")
-		for list_name, repos in grouped_repos.items():
-			print(f"\n{list_name} ({len(repos)} repos):")
-			print("-" * (len(list_name) + 10))
-			for repo in repos:
-				stars = repo.get('stargazers_count', 0)
-				# lang = repo.get('language', 'Unknown')
-				if repo.get('language'):
-					lang = repo.get('language', 'Unknown')[:15].ljust(15)  # Ensure fixed width
-				else:
-					lang = 'Unknown'.ljust(15)
-				if repo.get('description'):
-					desc = repo.get('description', 'No description')
-				else:
-					desc = 'No description'
-				if len(desc) > 60:
-					desc = desc[:57] + "..."
-				print(f"⭐ {stars:7d} | {lang:15} | {repo['full_name']:40} | {desc}")
 		return
 
 	if args.scanpath:
@@ -537,7 +438,109 @@ async def main():
 		logger.info("Creating repo-to-list mapping...")
 		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
 		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
-		return
+
+	if args.check_rate_limits:
+		rate_limits = await get_api_rate_limits(args)
+		if rate_limits:
+			print("\n🔍 GitHub API Rate Limits Status")
+			print("=" * 50)
+
+			if rate_limits.get('limit_hit'):
+				print("⚠️  RATE LIMIT HIT!")
+			else:
+				print("✅ Rate limits OK")
+
+			# Main rate limit info
+			rate_info = rate_limits.get('rate_limits', {}).get('rate', {})
+			if rate_info:
+				limit = rate_info.get('limit', 0)
+				used = rate_info.get('used', 0)
+				remaining = rate_info.get('remaining', 0)
+				reset_timestamp = rate_info.get('reset', 0)
+
+				# Convert timestamp to readable time
+				from datetime import datetime
+				reset_time = datetime.fromtimestamp(reset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+				print("\n📊 Overall Rate Limit:")
+				print(f"   Limit:     {limit:,}")
+				print(f"   Used:      {used:,}")
+				print(f"   Remaining: {remaining:,}")
+				print(f"   Resets at: {reset_time}")
+
+				# Calculate percentage used
+				if limit > 0:
+					percentage_used = (used / limit) * 100
+					print(f"   Usage:     {percentage_used:.1f}%")
+
+					# Visual progress bar
+					bar_length = 30
+					filled_length = int(bar_length * used // limit)
+					bar = '█' * filled_length + '░' * (bar_length - filled_length)
+					print(f"   Progress:  [{bar}]")
+
+			# Resource-specific limits
+			resources = rate_limits.get('rate_limits', {}).get('resources', {})
+			if resources:
+				print("\n📋 Resource-Specific Limits:")
+				print("-" * 50)
+
+				# Sort by usage percentage for better visibility
+				resource_data = []
+				for resource, data in resources.items():
+					limit = data.get('limit', 0)
+					used = data.get('used', 0)
+					remaining = data.get('remaining', 0)
+					if limit > 0:
+						usage_pct = (used / limit) * 100
+					else:
+						usage_pct = 0
+					resource_data.append((resource, limit, used, remaining, usage_pct))
+
+				# Sort by usage percentage (highest first)
+				resource_data.sort(key=lambda x: x[4], reverse=True)
+
+				for resource, limit, used, remaining, usage_pct in resource_data:
+					if used > 0 or limit < 5000:  # Show resources that are used or have lower limits
+						status = "⚠️ " if usage_pct > 80 else "🟡" if usage_pct > 50 else "🟢"
+						print(f"{status} {resource:25} {used:4d}/{limit:4d} ({usage_pct:5.1f}%) - {remaining:4d} remaining")
+		else:
+			print("❌ No API rate limits found or unable to fetch.")
+		session.close()
+
+	if args.checkdates:
+		check_git_dates(session)
+
+	if args.dbinfo:
+		git_folders = session.query(GitFolder).count()
+		git_repos = session.query(GitRepo).count()
+		dupes = check_update_dupes(session)
+		chk = dbcheck(session)
+		print('=========')
+		print(f'Git Folders: {git_folders} Git Repos: {git_repos} Dupes: {dupes['dupe_repos']} dbcheck: {chk}')
+		print('=========')
+
+	if args.list_by_group:
+		grouped_repos = await get_starred_repos_by_list(session, args)
+		total_repos = sum(len(repos) for repos in grouped_repos.values())
+		print(f"\nFound {len(grouped_repos)} lists with {total_repos} total repositories:\n")
+		for list_name, repos in grouped_repos.items():
+			print(f"\n{list_name} ({len(repos)} repos):")
+			print("-" * (len(list_name) + 10))
+			for repo in repos:
+				stars = repo.get('stargazers_count', 0)
+				# lang = repo.get('language', 'Unknown')
+				if repo.get('language'):
+					lang = repo.get('language', 'Unknown')[:15].ljust(15)  # Ensure fixed width
+				else:
+					lang = 'Unknown'.ljust(15)
+				if repo.get('description'):
+					desc = repo.get('description', 'No description')
+				else:
+					desc = 'No description'
+				if len(desc) > 60:
+					desc = desc[:57] + "..."
+				print(f"⭐ {stars:7d} | {lang:15} | {repo['full_name']:40} | {desc}")
 
 if __name__ == '__main__':
 	asyncio.run(main())

@@ -580,6 +580,7 @@ def check_git_dates(session, create_heatmap=False):
 	df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / (60 * 60 * 24)
 
 	# Display the differences
+	print(f'Differences in timestamps for {len(df)} git paths:')
 	print(df[['git_path', 'mtime_to_ctime', 'atime_to_mtime', 'mtime_to_updated_at', 'mtime_to_pushed_at', 'created_at_to_pushed_at']].head())
 
 	# Compute correlation matrix for timestamps
@@ -588,6 +589,7 @@ def check_git_dates(session, create_heatmap=False):
 
 	# Group by a simplified path (e.g., extract project name) and analyze
 	df['project'] = df['git_path'].str.split('/').str[-1]
+	print('Average timestamps grouped by project:')
 	print(df.groupby('project')[timestamp_columns].mean())
 
 	if create_heatmap:
