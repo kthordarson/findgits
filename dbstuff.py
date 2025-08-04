@@ -340,9 +340,6 @@ class GitRepo(Base):
 			elif 'name' in remote_branch:
 				if remote_branch.get('type') == 'remote':
 					self.remote = remote_branch['name']
-			# if remote_branch['name'].startswith('origin/'):
-				# We have origin remote, extract the remote URL using get_remote_url
-				# self.remote = remote_branch['remote']
 
 class CacheEntry(Base):
 	""" A table for storing cache data from GitHub API responses """

@@ -94,8 +94,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 	Fetch repository data from GitHub API and update the database cache
 	"""
 	if 'BLANK_REPO_DATA' in repo_name_or_url:
-		logger.warning(f"Invalid repository repo_name_or_url: {repo_name_or_url}")
-		return None
+		logger.warning(f"BLANK_REPO_DATA repo_name_or_url: {repo_name_or_url}")
 
 	# Normalize repo name
 	repo_name = repo_name_or_url.strip('/').replace('github.com/', '').replace('.git', '')

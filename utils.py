@@ -61,19 +61,25 @@ def get_remote_url(git_path: str) -> str:
 	Parameters: git_path: str - path to git folder
 	Returns: str - remote url
 	"""
-	os.chdir(git_path)
-	cmdstr = ['git', 'remote', '-v']
-	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
-	remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
 	remote_url = '[no remote]'
 	try:
-		remote_url = remote_out[0].split()[1]
-	except IndexError as e:
-		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+		os.chdir(git_path)
+		cmdstr = ['git', 'remote', '-v']
+		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+		if out:
+			remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+			try:
+				remote_url = remote_out[0].split()[1]
+			except IndexError as e:
+				logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+			except Exception as e:
+				logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+				logger.warning(f'traceback: {traceback.format_exc()}')
 	except Exception as e:
-		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+		logger.warning(f'[gr] fatal {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 		logger.warning(f'traceback: {traceback.format_exc()}')
-	return remote_url
+	finally:
+		return remote_url
 
 def get_git_info(git_path: str) -> dict:
 	"""

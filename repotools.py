@@ -131,6 +131,8 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 		# Check if folder already exists in database
 		git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
+		if 'BLANK_REPO_DATA' in remote_url or 'BLANK_REPO_DATA' in git_folder_path or 'BLANK_REPO_DATA' in repo_name:
+			logger.warning(f"BLANK_REPO_DATA found in remote_url: {remote_url} or git_folder_path: {git_folder_path} or repo_name: {repo_name}")
 
 		# If no repo exists, create a new one with safeguards
 		if not git_repo:
@@ -148,15 +150,20 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 				# Populate with metadata if available
 				if repo_metadata:
+					if 'BLANK_REPO_DATA' in repo_metadata:
+						logger.warning(f"BLANK_REPO_DATA found in repo_metadata for {repo_name} repo_metadata: {repo_metadata}")
 					git_repo = populate_from_metadata(git_repo, repo_metadata)
-
 				session.add(git_repo)
 				session.flush()  # Get the ID without committing
-				logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name}')
+				if 'BLANK_REPO_DATA' in git_repo.git_url or 'BLANK_REPO_DATA' in git_repo.github_repo_name:
+					logger.warning(f"BLANK_REPO_DATA found in git_repo.git_url: {git_repo.git_url} or git_repo.github_repo_name: {git_repo.github_repo_name}")
+					session.rollback()
+					return None
+				else:
+					logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name}')
+
 		else:
 			# Update existing repo
-			if args.debug:
-				logger.debug(f'Found existing GitRepo: {git_repo.github_repo_name} full_name: {git_repo.full_name}')
 			git_repo.last_scan = datetime.now()
 			git_repo.scan_count += 1
 			git_repo.update_config_times()
