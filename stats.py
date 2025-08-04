@@ -200,16 +200,6 @@ def show_starred_repo_stats(session):
         for i, (list_name, count) in enumerate(top_lists, 1):
             print(f"   {i}. {list_name}: {count:,} repos")
 
-async def show_db_info(session, args):
-    """Show database information and statistics"""
-    git_folders = session.query(GitFolder).count()
-    git_repos = session.query(GitRepo).count()
-    dupes = check_update_dupes(session)
-    chk = dbcheck(session)
-    print('=========')
-    print(f'Git Folders: {git_folders} Git Repos: {git_repos} Dupes: {dupes["dupe_repos"]} dbcheck: {chk}')
-    print('=========')
-
 async def show_list_by_group(session, args):
     """Show starred repos grouped by list"""
     grouped_repos = await get_starred_repos_by_list(session, args)

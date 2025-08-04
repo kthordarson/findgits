@@ -22,7 +22,6 @@ from stats import (
     check_git_dates,
     get_starred_repos_by_list,
     show_starred_repo_stats,
-    show_db_info,
     show_list_by_group,
     show_rate_limits
 )
@@ -419,9 +418,6 @@ async def main():
 
     if args.checkdates:
         check_git_dates(session)
-
-    if args.dbinfo:
-        await show_db_info(session, args)
 
     if args.list_by_group:
         await show_list_by_group(session, args)
