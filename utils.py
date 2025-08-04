@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from loguru import logger
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, TimeoutExpired
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
 import aiohttp
@@ -165,14 +165,41 @@ def git_recovery_pull(git_path: str) -> dict:
 
 		recovery_result['recovery_steps'].append('remote_check_passed')
 
-		# Step 2: Try to fetch from remote first
+		# Check if remote requires authentication (https URLs typically do)
+		remote_url = remote_out.decode('utf8').strip()
+		if 'https://github.com' in remote_url and not any(cred in remote_url for cred in ['@', 'token']):
+			recovery_result['error_message'] = 'Remote requires authentication, aborting recovery'
+			recovery_result['final_status'] = 'auth_required'
+			logger.warning(f"Remote requires authentication for {git_path}, skipping recovery")
+			return recovery_result
+
+		# Step 2: Try to fetch from remote first with timeout
 		logger.info(f"Fetching from remote for {git_path}")
 		fetch_cmd = ['git', 'fetch', 'origin']
-		fetch_out, fetch_err = Popen(fetch_cmd, stdout=PIPE, stderr=PIPE).communicate()
+		try:
+			fetch_process = Popen(fetch_cmd, stdout=PIPE, stderr=PIPE)
+			fetch_out, fetch_err = fetch_process.communicate(timeout=30)  # 30 second timeout
+		except TimeoutExpired:
+			fetch_process.kill()
+			recovery_result['error_message'] = 'Fetch timed out (likely authentication prompt)'
+			recovery_result['final_status'] = 'fetch_timeout'
+			logger.warning(f"Fetch timed out for {git_path}, likely authentication required")
+			return recovery_result
 
 		if fetch_err:
-			logger.warning(f"Fetch failed for {git_path}: {fetch_err.decode('utf8')}")
+			fetch_error = fetch_err.decode('utf8').lower()
+			# Check for authentication-related errors
+			if any(auth_keyword in fetch_error for auth_keyword in ['username', 'password', 'authentication', 'credentials', 'token']):
+				recovery_result['error_message'] = 'Authentication required for fetch'
+				recovery_result['final_status'] = 'auth_required'
+				logger.warning(f"Authentication required for fetch in {git_path}, aborting recovery")
+				return recovery_result
+
+			logger.warning(f"Fetch failed for {git_path}: {fetch_error}")
 			recovery_result['recovery_steps'].append('fetch_failed')
+			recovery_result['error_message'] = f"Fetch failed: {fetch_error}"
+			recovery_result['final_status'] = 'fetch_failed'
+			return recovery_result
 		else:
 			recovery_result['recovery_steps'].append('fetch_successful')
 
@@ -212,23 +239,13 @@ def git_recovery_pull(git_path: str) -> dict:
 		if reset_err:
 			logger.warning(f"Reset failed for {git_path}: {reset_err.decode('utf8')}")
 			recovery_result['recovery_steps'].append('reset_failed')
-
-			# Step 5: If reset fails, try pull with allow-unrelated-histories
-			logger.info(f"Trying pull with allow-unrelated-histories for {git_path}")
-			pull_cmd = ['git', 'pull', 'origin', current_branch, '--allow-unrelated-histories', '--strategy=ours']
-			pull_out, pull_err = Popen(pull_cmd, stdout=PIPE, stderr=PIPE).communicate()
-
-			if pull_err:
-				recovery_result['error_message'] = f"Pull failed: {pull_err.decode('utf8')}"
-				recovery_result['final_status'] = 'pull_failed'
-				recovery_result['recovery_steps'].append('pull_failed')
-				return recovery_result
-			else:
-				recovery_result['recovery_steps'].append('pull_successful')
+			recovery_result['error_message'] = f"Reset failed: {reset_err.decode('utf8')}"
+			recovery_result['final_status'] = 'reset_failed'
+			return recovery_result
 		else:
 			recovery_result['recovery_steps'].append('reset_successful')
 
-		# Step 6: Verify recovery by running fsck again
+		# Step 5: Verify recovery by running fsck again
 		verification_result = git_fsck_check(git_path)
 		if verification_result['fsck_status'] == 'clean':
 			recovery_result['recovery_successful'] = True
