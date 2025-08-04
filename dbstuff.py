@@ -344,8 +344,17 @@ class GitRepo(Base):
 
 	def update_local_git_info(self):
 		git_info = get_git_info(self.local_path)
-		self.branch = git_info.get('branch')
-		self.remote = git_info.get('remote')
+		self.branch = git_info.get('current_branch')
+		for remote_branch in git_info['remote_branches']:
+			if 'target' in remote_branch:
+				if remote_branch.get('target') == 'origin/master':
+					self.remote = remote_branch['name']
+			elif 'name' in remote_branch:
+				if remote_branch.get('type') == 'remote':
+					self.remote = remote_branch['name']
+			# if remote_branch['name'].startswith('origin/'):
+				# We have origin remote, extract the remote URL using get_remote_url
+				# self.remote = remote_branch['remote']
 
 class CacheEntry(Base):
 	""" A table for storing cache data from GitHub API responses """
