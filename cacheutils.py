@@ -119,7 +119,7 @@ async def update_repo_cache(repo_name_or_url, session, args):
 				set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
 				session.commit()
 				return repo_data
-			elif r.status in (404, 451):
+			elif r.status in (403, 404, 451):
 				logger.warning(f"Repository error {r.status}: {api_url}")
 				default_repo_data = BLANK_REPO_DATA.copy()
 				default_repo_data['name'] = repo_name

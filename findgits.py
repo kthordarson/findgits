@@ -127,10 +127,7 @@ async def link_existing_repos_to_stars(session, args):
 
 				# Check if GitRepo exists
 				git_repo = session.query(GitRepo).filter(
-					(GitRepo.full_name == full_name) |
-					(GitRepo.git_url.ilike(f"%{full_name}%")) |
-					(GitRepo.html_url == starred_repo.get('html_url'))
-				).first()
+					(GitRepo.full_name == full_name) | (GitRepo.git_url.ilike(f"%{full_name}%")) | (GitRepo.html_url == starred_repo.get('html_url'))).first()
 
 				# If no GitRepo exists, create one
 				if not git_repo:

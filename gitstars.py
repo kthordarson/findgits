@@ -353,7 +353,13 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		# Extract list name
 		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')
 		list_name = name_elem.text.strip() if name_elem else 'Unknown'
-
+		try:
+			list_description_elem = sl.find('span', class_='Truncate-text color-fg-muted mr-3')
+			list_description = list_description_elem.text.strip() if list_description_elem else ''
+		except AttributeError as e:
+			if args.debug:
+				logger.warning(f"Failed to extract description for list '{list_name}': {e}")
+			list_description = ''
 		# Extract repo count
 		count_elem = sl.find('div', class_='color-fg-muted text-small no-wrap')
 		repo_count_text = count_elem.text.strip() if count_elem else '0'
@@ -364,7 +370,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 		list_info = {
 			'name': list_name,
-			'description': '',  # GitHub lists don't have descriptions in this view
+			'description': list_description,
 			'list_url': sl.get('href', ''),
 			'repo_count': repo_count_text
 		}
@@ -384,7 +390,14 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''
 
 				# There's no description in this structure
-				list_description = ''
+				try:
+					list_description_elem = item.find('span', class_='Truncate-text color-fg-muted mr-3')
+					list_description = list_description_elem.text.strip() if list_description_elem else ''
+				except AttributeError as e:
+					if args.debug:
+						logger.warning(f"Failed to extract description for list '{list_name}': {e}")
+					list_description = ''
+				# list_description = ''
 
 				# Get individual list repository links
 				try:
