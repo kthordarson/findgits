@@ -338,6 +338,8 @@ async def main():
 			tasks = []
 
 			for repo in batch:
+				if '20142995/pocsuite3' in repo:
+					logger.warning(f'problematic repo: {repo}')
 				tasks.append(process_starred_repo(repo, session, args))
 
 			await asyncio.gather(*tasks)

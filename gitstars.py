@@ -556,51 +556,128 @@ async def get_git_list_stars(session, args) -> dict:
 
 async def get_info_for_list(link, headers, session, args):
 	"""
-	Get info for a list using database cache
+	Get info for a list using database cache with pagination support
 	"""
 	cache_key = f"list_info:{link.split('/')[-1]}"
 	cache_type = "list_info"
 
-	soup = None
-
+	# Try cache first
 	if args.use_cache:
 		cache_entry = get_cache_entry(session, cache_key, cache_type)
 		if cache_entry:
 			try:
-				soup = BeautifulSoup(cache_entry.data, 'html.parser')
+				cached_data = json.loads(cache_entry.data)
+				if args.debug:
+					logger.debug(f"Loaded list info from database cache for {link}")
+				return cached_data
 			except Exception as e:
 				logger.error(f'Failed to parse cached list info: {e}')
 		else:
 			logger.warning(f"[get_info_for_list] No cache entry found for {link} in database")
+
 	if args.nodl:
 		logger.warning(f"Skipping API call for {link} due to --nodl flag")
 		return []
-	if not soup:
-		if await is_rate_limit_hit(args):
-			logger.warning("Rate limit hit!")
-			await asyncio.sleep(1)
-			return None
 
-		# async with aiohttp.ClientSession() as api_session:
-		async with get_client_session(args) as api_session:
+	all_hrefs = []
+	current_url = link
+	page_num = 1
+
+	if await is_rate_limit_hit(args):
+		logger.warning("Rate limit hit!")
+		await asyncio.sleep(1)
+		return []
+
+	async with get_client_session(args) as api_session:
+		while current_url:
 			if args.debug:
-				logger.debug(f"Fetching list info from {link}")
-			async with api_session.get(link) as r:
-				content = await r.content.read()
-				soup = BeautifulSoup(content, 'html.parser')
-				try:
-					# Save to database cache
-					set_cache_entry(session, cache_key, cache_type, str(soup))
-					session.commit()
-					logger.info(f"Saved list info to database cache for {link}")
-				except Exception as e:
-					logger.error(f'Failed to save list info: {e} {type(e)}')
+				logger.debug(f"Fetching list info from {current_url} (page {page_num})")
 
-	soupdata = soup.select_one('div', attrs={"id":"user-list-repositories","class":"my-3"})
-	listdata = soupdata.find_all('div', class_="col-12 d-block width-full py-4 border-bottom color-border-muted")
-	list_hrefs = [k.find('div', class_='d-inline-block mb-1').find('a').attrs['href'] for k in listdata]
+			try:
+				async with api_session.get(current_url, headers=headers) as r:
+					if r.status != 200:
+						logger.error(f"Failed to fetch page {page_num} of {link}: {r.status}")
+						break
 
-	return list_hrefs
+					content = await r.content.read()
+					soup = BeautifulSoup(content, 'html.parser')
+
+					# Extract repository links from current page
+					soupdata = soup.select_one('div', attrs={"id":"user-list-repositories","class":"my-3"})
+					if not soupdata:
+						logger.warning(f"No repository container found on page {page_num} of {link}")
+						break
+
+					listdata = soupdata.find_all('div', class_="col-12 d-block width-full py-4 border-bottom color-border-muted")
+					if not listdata:
+						logger.warning(f"No repositories found on page {page_num} of {link}")
+						break
+
+					# Extract hrefs from current page
+					page_hrefs = []
+					for repo_div in listdata:
+						try:
+							href_element = repo_div.find('div', class_='d-inline-block mb-1').find('a')
+							if href_element and 'href' in href_element.attrs:
+								page_hrefs.append(href_element.attrs['href'])
+						except (AttributeError, TypeError) as e:
+							logger.warning(f"Failed to extract href from repository div: {e}")
+							continue
+
+					all_hrefs.extend(page_hrefs)
+
+					if args.debug:
+						logger.debug(f"Page {page_num}: found {len(page_hrefs)} repos, total: {len(all_hrefs)}")
+
+					# Check for next page
+					next_url = None
+					pagination = soup.find('div', class_='paginate-container')
+					if pagination:
+						next_link = pagination.find('a', class_='next_page')
+						if next_link and 'href' in next_link.attrs:
+							next_url = f"https://github.com{next_link['href']}"
+							if args.debug:
+								logger.debug(f"Found next page: {next_url}")
+
+					# Alternative pagination check - look for numbered pagination
+					if not next_url:
+						pagination_links = soup.find_all('a', attrs={'rel': 'next'})
+						if pagination_links:
+							next_url = f"https://github.com{pagination_links[0]['href']}"
+							if args.debug:
+								logger.debug(f"Found next page via rel=next: {next_url}")
+
+					# If no pagination found or we've reached the end, break
+					if not next_url or len(page_hrefs) == 0:
+						if args.debug:
+							logger.debug(f"No more pages found for {link}")
+						break
+
+					current_url = next_url
+					page_num += 1
+
+					# Safety check to prevent infinite loops
+					if page_num > 100:  # Reasonable limit
+						logger.warning(f"Reached maximum page limit (100) for {link}")
+						break
+
+			except Exception as e:
+				logger.error(f"Error fetching page {page_num} of {link}: {e}")
+				break
+
+	# Cache the complete results
+	if all_hrefs:
+		try:
+			set_cache_entry(session, cache_key, cache_type, json.dumps(all_hrefs))
+			session.commit()
+			logger.info(f"Saved list info to database cache for {link} ({len(all_hrefs)} repos)")
+		except Exception as e:
+			logger.error(f'Failed to save list info: {e} {type(e)}')
+
+	if args.debug:
+		logger.debug(f"Total repositories found in {link}: {len(all_hrefs)}")
+
+	return all_hrefs
 
 async def fetch_starred_repos(args, session):
 	"""

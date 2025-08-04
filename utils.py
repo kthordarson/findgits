@@ -83,6 +83,136 @@ def get_remote_url(git_path: str) -> str:
 		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 	return remote_url
 
+def get_git_info(git_path: str) -> dict:
+	"""
+	Get git branch information from a git folder
+	Parameters: git_path: str - path to git folder
+	Returns: dict - git branch information including current branch, local branches, and remotes
+	"""
+	original_dir = os.getcwd()
+	git_info = {
+		'current_branch': None,
+		'local_branches': [],
+		'remote_branches': [],
+		'tracking_info': {},
+		'error': None
+	}
+
+	try:
+		os.chdir(git_path)
+		cmdstr = ['git', 'branch', '-v', '-a', '-l']
+		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+
+		if err:
+			git_info['error'] = err.decode('utf8').strip()
+			logger.warning(f'git branch error in {git_path}: {git_info["error"]}')
+			return git_info
+
+		branch_lines = [k.strip() for k in out.decode('utf8').split('\n') if k.strip()]
+
+		for line in branch_lines:
+			if not line:
+				continue
+
+			# Check if this is the current branch (starts with *)
+			is_current = line.startswith('*')
+			if is_current:
+				line = line[1:].strip()  # Remove the *
+
+			# Split the line into components
+			parts = line.split()
+			if len(parts) < 2:
+				continue
+
+			branch_name = parts[0]
+			commit_hash = parts[1]
+
+			# Extract tracking info (e.g., [ahead 1], [behind 11])
+			tracking_info = None
+			if '[' in line and ']' in line:
+				start_bracket = line.find('[')
+				end_bracket = line.find(']')
+				tracking_info = line[start_bracket+1:end_bracket]
+
+			# Parse different branch types
+			if branch_name.startswith('remotes/'):
+				# Remote branch
+				if '->' in line:
+					# This is a symbolic ref like "remotes/origin/HEAD -> origin/master"
+					target = line.split('->')[-1].strip()
+					git_info['remote_branches'].append({
+						'name': branch_name,
+						'commit': commit_hash,
+						'type': 'symbolic_ref',
+						'target': target,
+						'tracking': tracking_info
+					})
+				else:
+					# Regular remote branch
+					git_info['remote_branches'].append({
+						'name': branch_name,
+						'commit': commit_hash,
+						'type': 'remote',
+						'tracking': tracking_info
+					})
+			else:
+				# Local branch
+				branch_info = {
+					'name': branch_name,
+					'commit': commit_hash,
+					'is_current': is_current,
+					'tracking': tracking_info
+				}
+
+				git_info['local_branches'].append(branch_info)
+
+				if is_current:
+					git_info['current_branch'] = branch_name
+
+				# Store tracking info in separate dict for easy lookup
+				if tracking_info:
+					git_info['tracking_info'][branch_name] = tracking_info
+
+		# Additional parsing for commit messages (everything after commit hash and tracking info)
+		for line in branch_lines:
+			if not line or line.startswith('*'):
+				line = line[1:].strip() if line.startswith('*') else line
+
+			parts = line.split()
+			if len(parts) >= 3:
+				branch_name = parts[0]
+				# Find commit message (after hash and optional tracking info)
+				line_parts = line.split()
+				if len(line_parts) > 2:
+					# Skip branch name and commit hash
+					remaining = ' '.join(line_parts[2:])
+					# Remove tracking info if present
+					if '[' in remaining and ']' in remaining:
+						bracket_end = remaining.find(']') + 1
+						commit_msg = remaining[bracket_end:].strip()
+					else:
+						commit_msg = remaining
+
+					# Add commit message to the appropriate branch
+					if branch_name.startswith('remotes/'):
+						for remote_branch in git_info['remote_branches']:
+							if remote_branch['name'] == branch_name:
+								remote_branch['commit_message'] = commit_msg
+								break
+					else:
+						for local_branch in git_info['local_branches']:
+							if local_branch['name'] == branch_name:
+								local_branch['commit_message'] = commit_msg
+								break
+
+	except Exception as e:
+		git_info['error'] = f"{e} {type(e)}"
+		logger.warning(f'[get_git_info] {e} {type(e)} {git_path=}')
+	finally:
+		os.chdir(original_dir)
+
+	return git_info
+
 def get_directory_size(directory: str) -> int:
 	# directory = Path(directory)
 	total = 0
