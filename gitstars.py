@@ -93,7 +93,6 @@ async def get_git_stars(args, session):
 	cache_type = "starred_repos"
 
 	jsonbuffer = []
-	do_download = False
 
 	# Try to load from cache first if use_cache is enabled
 	if args.use_cache:
@@ -102,24 +101,46 @@ async def get_git_stars(args, session):
 			try:
 				jsonbuffer = json.loads(cache_entry.data)
 				logger.info(f"Loaded {len(jsonbuffer)} starred repos from database cache")
+				return jsonbuffer  # Return cached data if successful
 			except json.JSONDecodeError as e:
 				logger.error(f"Invalid JSON in cache entry: {e}")
-				do_download = True
 			except Exception as e:
 				logger.error(f"Error loading from cache: {e}")
-				do_download = True
-			finally:
-				if len(jsonbuffer) == 0:
-					logger.warning("No cache entry found in database for starred repos")
-				return jsonbuffer
 		else:
 			logger.warning("No cache entry found in database for starred repos")
-			git_starred_repos = await download_git_stars(args, session)
-			logger.info(f"Fetched {len(git_starred_repos)} starred repos from GitHub API.")
-			return git_starred_repos
+
+		# If we reach here, either no cache or cache failed - download fresh data
+		logger.info("Downloading fresh starred repos data from GitHub API...")
+		git_starred_repos = await download_git_stars(args, session)
+
+		# Store the downloaded data in the database cache
+		if git_starred_repos:
+			try:
+				cache_obj = json.dumps(git_starred_repos)
+				set_cache_entry(session, cache_key, cache_type, cache_obj)
+				session.commit()
+				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache")
+			except Exception as e:
+				logger.error(f"Failed to store data in cache: {e}")
+
+		return git_starred_repos
 	else:
-		logger.info("[todofix] Cache not used, will download starred repos...")
-	return jsonbuffer
+		# Cache not enabled - download directly and optionally store
+		logger.info("Cache not enabled, downloading starred repos from GitHub API...")
+		git_starred_repos = await download_git_stars(args, session)
+
+		# Even if cache is disabled, we might want to store for future use
+		# Comment out the next block if you don't want to store when cache is disabled
+		if git_starred_repos:
+			try:
+				cache_obj = json.dumps(git_starred_repos)
+				set_cache_entry(session, cache_key, cache_type, cache_obj)
+				session.commit()
+				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache (cache disabled but stored anyway)")
+			except Exception as e:
+				logger.error(f"Failed to store data in cache: {e}")
+
+		return git_starred_repos
 
 async def download_git_stars(args, session):
 	# If we get here, we need to fetch from the API
