@@ -7,6 +7,15 @@ from requests.auth import HTTPBasicAuth
 import aiohttp
 from contextlib import asynccontextmanager
 
+async def get_auth_params():
+	"""Get authentication parameters from environment variables."""
+	username = os.getenv("GITHUB_USERNAME", '')
+	token = os.getenv("FINDGITSTOKEN", '')
+	if not username or not token:
+		logger.error("GITHUB_USERNAME or FINDGITSTOKEN environment variables are not set.")
+		return None, None
+	return HTTPBasicAuth(username, token)
+
 @asynccontextmanager
 async def get_client_session(args):
 	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
