@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import asyncio
+from datetime import datetime
 from pathlib import Path
 import argparse
 from loguru import logger
@@ -68,9 +69,54 @@ async def process_git_folder(git_path, session, args):
 async def process_starred_repo(repo, session, args):
 	"""Process a single starred repo asynchronously"""
 	try:
-		await insert_update_starred_repo(repo, session, args)
+		await insert_update_starred_repo(github_repo=repo, session=session, args=args, create_new=True)
 	except Exception as e:
 		logger.error(f'Error processing {repo}: {e} {type(e)}')
+
+async def link_existing_repos_to_stars(session, args):
+	"""Link existing GitRepo entries to their GitStar counterparts"""
+	try:
+		# Get all starred repos from GitHub
+		starred_repos = await get_git_stars(args, session)
+		starred_lookup = {repo['full_name']: repo for repo in starred_repos}
+
+		# Get all local repos
+		local_repos = session.query(GitRepo).all()
+
+		linked_count = 0
+		for local_repo in local_repos:
+			# Check if this local repo is in the starred list
+			full_name = local_repo.full_name or f"{local_repo.github_owner}/{local_repo.github_repo_name}"
+
+			if full_name in starred_lookup:
+				starred_data = starred_lookup[full_name]
+
+				# Check if GitStar entry already exists
+				existing_star = session.query(GitStar).filter(GitStar.gitrepo_id == local_repo.id).first()
+				if not existing_star:
+					# Create GitStar entry
+					git_star = GitStar()
+					git_star.gitrepo_id = local_repo.id
+					git_star.starred_at = datetime.now()
+					git_star.stargazers_count = starred_data.get('stargazers_count')
+					git_star.description = starred_data.get('description')
+					git_star.full_name = starred_data.get('full_name')
+					git_star.html_url = starred_data.get('html_url')
+
+					session.add(git_star)
+
+					# Mark the repo as starred
+					local_repo.is_starred = True
+					local_repo.starred_at = datetime.now()
+
+					linked_count += 1
+
+		session.commit()
+		logger.info(f"Linked {linked_count} existing repos to their starred counterparts")
+
+	except Exception as e:
+		logger.error(f"Error linking existing repos to stars: {e}")
+		session.rollback()
 
 async def populate_git_lists(session, args):
 	# fetch lists from GitHub
@@ -194,6 +240,52 @@ async def main():
 
 	if args.scanpath:
 		await populate_git_lists(session, args)
+
+		stats = await populate_repo_data(session, args)
+		print(f"GitHub Stars Processing Stats:{stats}")
+
+		git_repos = session.query(GitRepo).all()
+		git_lists = await get_git_list_stars(session, args)
+		starred_repos = await get_git_stars(args, session)  # Updated call
+		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		localrepos = [k.github_repo_name for k in git_repos]
+		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
+		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
+		print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+
+		fetched_repos = await fetch_starred_repos(args, session)  # Updated call
+		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API')
+
+		git_repos = session.query(GitRepo).all()
+		git_lists = await get_git_list_stars(session, args)
+		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
+		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		localrepos = [k.github_repo_name for k in git_repos]
+		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
+		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
+		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+
+		git_repos = session.query(GitRepo).all()
+		git_lists = await get_git_list_stars(session, args)
+		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
+		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		localrepos = [k.github_repo_name for k in git_repos]
+		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
+		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
+		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+		# Process repos in parallel
+		batch_size = 20
+		for i in range(0, len(notfoundrepos), batch_size):
+			batch = notfoundrepos[i:i+batch_size]
+			tasks = []
+
+			for repo in batch:
+				tasks.append(process_starred_repo(repo, session, args))
+
+			await asyncio.gather(*tasks)
+			session.commit()
+		await link_existing_repos_to_stars(session, args)
+
 		scanpath = Path(args.scanpath[0])
 		if scanpath.is_dir():
 			# Find git folders

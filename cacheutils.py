@@ -4,6 +4,7 @@ import traceback
 import aiohttp
 import json
 import os
+import sqlite3
 from loguru import logger
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
@@ -274,11 +275,14 @@ def set_cache_entry(session, cache_key, cache_type, data):
 					continue  # Skip None entries
 				expanded = session.query(RepoCacheExpanded).filter_by(repo_id=repo_json.get("id")).first()
 				if expanded:
-					# Update existing record with proper datetime conversion
+					# Update existing record with proper handling of None values
 					for k, v in repo_json.items():
 						if hasattr(expanded, k):
+							# Skip updating fields that would be None for unavailable repos
+							if k == 'id' and v is None:
+								continue  # Don't update primary key with None
 							# Convert datetime strings to datetime objects for specific fields
-							if k in ['created_at', 'updated_at', 'pushed_at'] and isinstance(v, str):
+							elif k in ['created_at', 'updated_at', 'pushed_at'] and isinstance(v, str):
 								v = ensure_datetime(v)
 							# Handle topics conversion
 							elif k == 'topics' and isinstance(v, list):
@@ -298,8 +302,12 @@ def set_cache_entry(session, cache_key, cache_type, data):
 								continue
 							setattr(expanded, k, v)
 				else:
-					expanded = RepoCacheExpanded(repo_json)
-					session.add(expanded)
+					# Only create new records for repos that have valid IDs
+					if repo_json.get("id") is not None:
+						expanded = RepoCacheExpanded(repo_json)
+						session.add(expanded)
+					else:
+						logger.warning(f"Skipping RepoCacheExpanded creation for repo with no ID: {repo_json.get('full_name')}")
 		except Exception as e:
 			logger.error(f"Failed to expand repo_data cache: {e} {type(e)}")
 			logger.error(f"Data: {data}")
@@ -310,6 +318,10 @@ def set_cache_entry(session, cache_key, cache_type, data):
 
 	try:
 		session.commit()
+	except sqlite3.IntegrityError as e:
+		logger.error(f"IntegrityError while committing cache entry: {e}")
+		session.rollback()
+		return None
 	except Exception as e:
 		logger.error(f"Failed to commit cache entry: {e}")
 		logger.error(f"Traceback: {traceback.format_exc()}")

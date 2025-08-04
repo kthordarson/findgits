@@ -125,11 +125,11 @@ async def download_git_stars(args, session):
 	# If we get here, we need to fetch from the API
 	jsonbuffer = []
 	if args.nodl:
-		logger.warning('get_git_stars: Skipping API call due to --nodl flag')
+		logger.warning('Skipping API call due to --nodl flag')
 		return jsonbuffer
 	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
 	if not auth:
-		logger.error('get_git_stars: no auth provided')
+		logger.error('no auth provided')
 		return None
 
 	apiurl = 'https://api.github.com/user/starred'

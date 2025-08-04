@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 async def get_client_session(args):
 	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
 	if not auth:
-		logger.error('get_git_stars: no auth provided')
+		logger.error('no auth provided')
 	if auth:
 		headers = {
 			'Accept': 'application/vnd.github+json',

@@ -27,7 +27,8 @@ async def insert_update_git_folder(git_folder_path, session, args):
 	remote_url = get_remote(git_folder_path).lower().strip()
 	if not remote_url or remote_url == '[no remote]':
 		remote_url = f"file://{git_folder_path}"  # Use local path as fallback URL
-		logger.warning(f'Could not determine remote URL for {git_folder_path} remote_url set to {remote_url}')
+		logger.warning(f'Could not determine remote URL for {git_folder_path}  ... skipping')
+		return None
 
 	# Extract repo name and owner from URL for GitHub API lookup
 	repo_name = None
@@ -199,8 +200,11 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			session.add(git_repo)
 			session.flush()  # Get the ID
 			logger.info(f'Created new GitRepo: {git_repo}')
+		else:
+			logger.warning(f'Skipping creation of new GitRepo for {remote_url} as create_new is False')
+			return None
 	else:
-		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}')
+		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}. repo_data: {type(repo_data)}')
 		if repo_data:
 			update_repo_from_data(git_repo, repo_data)
 
@@ -230,6 +234,8 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			if git_list:
 				git_star.gitlist_id = git_list.id
 				git_repo.gitstar_id = git_star.id
+	else:
+		logger.warning(f'No GitRepo found for remote_url: {remote_url}')
 
 	if create_new:
 		session.commit()
