@@ -88,10 +88,30 @@ async def link_existing_repos_to_stars(session, args):
 		# Get all git lists and their associated repos
 		git_lists_data = await get_lists_and_stars_unified(session, args)
 
+		# Fix: Extract the correct nested data structure
+		lists_with_repos = git_lists_data.get('lists_with_repos', {})
+		if isinstance(lists_with_repos, dict) and 'lists_with_repos' in lists_with_repos:
+			# Handle the nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle the expected structure
+			actual_lists = lists_with_repos
+
+		# Ensure actual_lists is a dictionary before iterating
+		if not isinstance(actual_lists, dict):
+			logger.warning(f"actual_lists is not a dictionary: {type(actual_lists)}")
+			return
+
 		# Create a mapping of repo URLs to list names
 		repo_to_list_mapping = {}
-		for list_name, list_data in git_lists_data.items():
-			for href in list_data.get('hrefs', []):
+		for list_name, list_data in actual_lists.items():
+			# Ensure list_data is a dictionary
+			if not isinstance(list_data, dict):
+				logger.warning(f"list_data for {list_name} is not a dictionary: {type(list_data)}")
+				continue
+
+			hrefs = list_data.get('hrefs', [])
+			for href in hrefs:
 				# Convert href to full_name format
 				if href.startswith('/'):
 					href = href[1:]  # Remove leading slash
@@ -106,55 +126,63 @@ async def link_existing_repos_to_stars(session, args):
 
 				repo_to_list_mapping[full_name] = list_name
 
-		# Get all local repos
-		local_repos = session.query(GitRepo).all()
+		# Get all existing GitRepo entries
+		all_repos = session.query(GitRepo).all()
 
 		linked_count = 0
-		list_linked_count = 0
+		star_entries_created = 0
 
-		for local_repo in local_repos:
-			# Check if this local repo is in the starred list
-			full_name = local_repo.full_name or f"{local_repo.github_owner}/{local_repo.github_repo_name}"
+		# Process each repository
+		for git_repo in all_repos:
+			try:
+				# Check if this repo is in starred repos (by various possible matches)
+				repo_key = None
+				if git_repo.full_name and git_repo.full_name in starred_lookup:
+					repo_key = git_repo.full_name
+				elif git_repo.github_repo_name:
+					# Try owner/repo format
+					potential_key = f"{git_repo.github_owner}/{git_repo.github_repo_name}"
+					if potential_key in starred_lookup:
+						repo_key = potential_key
 
-			if full_name in starred_lookup:
-				starred_data = starred_lookup[full_name]
+				if repo_key:
+					# Mark as starred
+					git_repo.is_starred = True
+					git_repo.starred_at = datetime.now()
 
-				# Check if GitStar entry already exists
-				existing_star = session.query(GitStar).filter(GitStar.gitrepo_id == local_repo.id).first()
-				if not existing_star:
-					# Create GitStar entry
-					git_star = GitStar()
-					git_star.gitrepo_id = local_repo.id
-					git_star.starred_at = datetime.now()
-					git_star.stargazers_count = starred_data.get('stargazers_count')
-					git_star.description = starred_data.get('description')
-					git_star.full_name = starred_data.get('full_name')
-					git_star.html_url = starred_data.get('html_url')
+					# Create or update GitStar entry
+					git_star = session.query(GitStar).filter(GitStar.gitrepo_id == git_repo.id).first()
+					if not git_star:
+						git_star = GitStar()
+						git_star.gitrepo_id = git_repo.id
+						git_star.starred_at = datetime.now()
 
-					session.add(git_star)
-					session.flush()  # Get the ID
-					existing_star = git_star
+						# Populate with GitHub data
+						github_data = starred_lookup[repo_key]
+						git_star.stargazers_count = github_data.get('stargazers_count')
+						git_star.description = github_data.get('description')
+						git_star.full_name = github_data.get('full_name')
+						git_star.html_url = github_data.get('html_url')
 
-					# Mark the repo as starred
-					local_repo.is_starred = True
-					local_repo.starred_at = datetime.now()
+						session.add(git_star)
+						session.flush()  # Get the ID
+						star_entries_created += 1
 
-					linked_count += 1
+					# Link to list if found in mapping
+					if repo_key in repo_to_list_mapping:
+						list_name = repo_to_list_mapping[repo_key]
+						git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+						if git_list:
+							git_star.gitlist_id = git_list.id
+							linked_count += 1
+							logger.info(f"Linked {git_repo.full_name} to list {list_name}")
 
-				# Now link to appropriate list if found
-				if full_name in repo_to_list_mapping:
-					list_name = repo_to_list_mapping[full_name]
-
-					# Find the GitList entry
-					git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
-					if git_list and existing_star.gitlist_id != git_list.id:
-						existing_star.gitlist_id = git_list.id
-						list_linked_count += 1
-						if args.debug:
-							logger.info(f"Linked {full_name} to list '{list_name}'")
+			except Exception as e:
+				logger.error(f"Error processing repo {git_repo.id}: {e}")
+				continue
 
 		session.commit()
-		logger.info(f"Linked {linked_count} existing repos to their starred counterparts, Linked {list_linked_count} starred repos to their respective lists")
+		logger.info(f"Linked {linked_count} repos to lists, created {star_entries_created} GitStar entries")
 
 	except Exception as e:
 		logger.error(f"Error linking existing repos to stars: {e}")
@@ -240,7 +268,14 @@ async def populate_git_lists(session, args):
 async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 	try:
 		unified_data = await get_lists_and_stars_unified(session, args)
-		git_lists = unified_data['lists_with_repos']
+		# git_lists = unified_data['lists_with_repos']
+		git_lists = unified_data.get('lists_with_repos', {})
+		if 'lists_with_repos' in git_lists:
+			git_lists = git_lists['lists_with_repos']
+
+		if not git_lists:
+			logger.warning("No GitHub lists found")
+			return {}
 
 		if not git_lists:
 			logger.warning("No GitHub lists found")
@@ -427,7 +462,22 @@ async def main():
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_lists_and_stars_unified(session, args)
 		starred_repos = await fetch_github_starred_repos(args, session)
-		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		# urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		lists_with_repos = git_lists.get('lists_with_repos', {})
+		if 'lists_with_repos' in lists_with_repos:
+			# Handle the nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle the expected structure
+			actual_lists = lists_with_repos
+
+		# Now extract hrefs from the actual list data
+		urls = []
+		if actual_lists:
+			urls = list(set(flatten([actual_lists[k]['hrefs'] for k in actual_lists if 'hrefs' in actual_lists[k]])))
+		else:
+			logger.warning("No lists with repos found")
+
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
@@ -473,7 +523,22 @@ async def main():
 			# Fallback if cache somehow failed
 			git_lists = await get_lists_and_stars_unified(session, args)
 
-		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		# urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		lists_with_repos = git_lists.get('lists_with_repos', {})
+		if 'lists_with_repos' in lists_with_repos:
+			# Handle the nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle the expected structure
+			actual_lists = lists_with_repos
+
+		# Now extract hrefs from the actual list data
+		urls = []
+		if actual_lists:
+			urls = list(set(flatten([actual_lists[k]['hrefs'] for k in actual_lists if 'hrefs' in actual_lists[k]])))
+		else:
+			logger.warning("No lists with repos found")
+
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
@@ -548,7 +613,22 @@ async def main():
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_lists_and_stars_unified(session, args)
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
-		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		# urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		lists_with_repos = git_lists.get('lists_with_repos', {})
+		if 'lists_with_repos' in lists_with_repos:
+			# Handle the nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle the expected structure
+			actual_lists = lists_with_repos
+
+		# Now extract hrefs from the actual list data
+		urls = []
+		if actual_lists:
+			urls = list(set(flatten([actual_lists[k]['hrefs'] for k in actual_lists if 'hrefs' in actual_lists[k]])))
+		else:
+			logger.warning("No lists with repos found")
+
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
@@ -559,7 +639,22 @@ async def main():
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_lists_and_stars_unified(session, args)
 		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
-		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		# urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+		lists_with_repos = git_lists.get('lists_with_repos', {})
+		if 'lists_with_repos' in lists_with_repos:
+			# Handle the nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle the expected structure
+			actual_lists = lists_with_repos
+
+		# Now extract hrefs from the actual list data
+		urls = []
+		if actual_lists:
+			urls = list(set(flatten([actual_lists[k]['hrefs'] for k in actual_lists if 'hrefs' in actual_lists[k]])))
+		else:
+			logger.warning("No lists with repos found")
+
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
 		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]

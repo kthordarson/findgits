@@ -193,11 +193,53 @@ async def create_repo_to_list_mapping(session, args):
 	git_lists_data = await get_lists_and_stars_unified(session, args)
 	repo_to_list_mapping = {}
 
-	for list_name, list_data in git_lists_data.items():
-		for href in list_data.get('hrefs', []):
+	# Debug the structure
+	if args.debug:
+		logger.debug(f"git_lists_data keys: {git_lists_data.keys()}")
+		logger.debug(f"git_lists_data structure: {type(git_lists_data)}")
+
+	# Extract the correct data structure
+	lists_with_repos = git_lists_data.get('lists_with_repos', {})
+
+	# Handle the nested structure more carefully
+	if isinstance(lists_with_repos, dict):
+		if 'lists_with_repos' in lists_with_repos:
+			# Handle double-nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle single-level structure
+			actual_lists = lists_with_repos
+	else:
+		logger.warning(f"Unexpected lists_with_repos type: {type(lists_with_repos)}")
+		return repo_to_list_mapping
+
+	if args.debug:
+		logger.debug(f"actual_lists type: {type(actual_lists)}, keys: {actual_lists.keys() if isinstance(actual_lists, dict) else 'N/A'}")
+
+	# Ensure actual_lists is a dictionary before iterating
+	if not isinstance(actual_lists, dict):
+		logger.warning(f"actual_lists is not a dictionary: {type(actual_lists)}")
+		return repo_to_list_mapping
+
+	# Now iterate over the actual list data
+	for list_name, list_data in actual_lists.items():
+		if args.debug:
+			logger.debug(f"Processing list: {list_name}, data type: {type(list_data)}")
+
+		# Ensure list_data is a dictionary
+		if not isinstance(list_data, dict):
+			logger.warning(f"list_data for {list_name} is not a dictionary: {type(list_data)}")
+			continue
+
+		hrefs = list_data.get('hrefs', [])
+		if args.debug:
+			logger.debug(f"List {list_name} has {len(hrefs)} hrefs")
+
+		for href in hrefs:
 			href_clean = href.strip('/').split('github.com/')[-1].rstrip('.git')
 			repo_to_list_mapping[href_clean] = list_name
 
+	logger.info(f"Created repo-to-list mapping with {len(repo_to_list_mapping)} entries")
 	return repo_to_list_mapping
 
 async def insert_update_starred_repo(github_repo, session, args, create_new=False, list_name=None):

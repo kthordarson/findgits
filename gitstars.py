@@ -266,8 +266,6 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 	async with semaphore:
 		# Check if we should stop (other pages found empty results)
 		if stop_signal and stop_signal.is_set():
-			if args.debug:
-				logger.warning(f"Skipping page {page_num} due to stop signal")
 			return page_num, []
 
 		# Handle different URL formats
@@ -405,20 +403,6 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 async def get_lists_and_stars_unified(session, args) -> dict:
 	"""
 	Unified function that gets both list metadata and repository links from GitHub stars page.
-
-	Returns:
-		dict: Combined data structure with both list metadata and repo links:
-		{
-			'lists_metadata': [list of list info dicts],
-			'lists_with_repos': {
-				'list_name': {
-					'href': 'list_url',
-					'count': 'repo_count',
-					'description': 'description',
-					'hrefs': [list of repo hrefs]
-				}
-			}
-		}
 	"""
 	cache_key_metadata = "git_lists_metadata"
 	cache_key_stars = "git_list_stars"
@@ -448,7 +432,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				if args.debug:
 					logger.debug(f"Using cached stars data: {len(cached_stars)} lists")
 			except Exception as e:
-				logger.warning(f"Failed to load cached stars data: {e}")
+				logger.warning(f"Failed to load cached stars data: {e} {type(e)}")
 
 	# If we have both cached, return them
 	if cached_metadata and cached_stars:
@@ -474,9 +458,15 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		}
 
 	listurl = f'https://github.com/{auth.username}?tab=stars'
+
+	# Fix: Use proper web scraping headers instead of API headers
 	headers = {
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
+		'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+		'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+		'Accept-Language': 'en-US,en;q=0.5',
+		'Accept-Encoding': 'gzip, deflate',
+		'Connection': 'keep-alive',
+		'Upgrade-Insecure-Requests': '1',
 	}
 
 	if await is_rate_limit_hit(args):
@@ -492,10 +482,16 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	async with get_client_session(args) as api_session:
 		if args.debug:
 			logger.debug(f"Fetching unified star list data from {listurl}")
-		async with api_session.get(listurl) as r:
+		async with api_session.get(listurl, headers=headers) as r:
 			if r.status == 200:
 				content = await r.text()
 				soup = BeautifulSoup(content, 'html.parser')
+			elif r.status == 406:
+				logger.error(f"GitHub returned 406 Not Acceptable - check your headers. Using cached data if available.")
+				return {
+					'lists_metadata': cached_metadata or [],
+					'lists_with_repos': cached_stars or {}
+				}
 			else:
 				logger.error(f"Failed to fetch star list: {r.status} {listurl}")
 				return {
