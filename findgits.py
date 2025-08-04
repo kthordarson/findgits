@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import traceback
 import asyncio
 from datetime import datetime
 from pathlib import Path
@@ -74,16 +75,39 @@ async def process_starred_repo(repo, session, args):
 		logger.error(f'Error processing {repo}: {e} {type(e)}')
 
 async def link_existing_repos_to_stars(session, args):
-	"""Link existing GitRepo entries to their GitStar counterparts"""
+	"""Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
 	try:
 		# Get all starred repos from GitHub
 		starred_repos = await get_git_stars(args, session)
 		starred_lookup = {repo['full_name']: repo for repo in starred_repos}
 
+		# Get all git lists and their associated repos
+		git_lists_data = await get_git_list_stars(session, args)
+
+		# Create a mapping of repo URLs to list names
+		repo_to_list_mapping = {}
+		for list_name, list_data in git_lists_data.items():
+			for href in list_data.get('hrefs', []):
+				# Convert href to full_name format
+				if href.startswith('/'):
+					href = href[1:]  # Remove leading slash
+				if 'github.com/' in href:
+					full_name = href.split('github.com/')[-1]
+				else:
+					full_name = href
+
+				# Remove .git suffix if present
+				if full_name.endswith('.git'):
+					full_name = full_name[:-4]
+
+				repo_to_list_mapping[full_name] = list_name
+
 		# Get all local repos
 		local_repos = session.query(GitRepo).all()
 
 		linked_count = 0
+		list_linked_count = 0
+
 		for local_repo in local_repos:
 			# Check if this local repo is in the starred list
 			full_name = local_repo.full_name or f"{local_repo.github_owner}/{local_repo.github_repo_name}"
@@ -104,6 +128,8 @@ async def link_existing_repos_to_stars(session, args):
 					git_star.html_url = starred_data.get('html_url')
 
 					session.add(git_star)
+					session.flush()  # Get the ID
+					existing_star = git_star
 
 					# Mark the repo as starred
 					local_repo.is_starred = True
@@ -111,11 +137,24 @@ async def link_existing_repos_to_stars(session, args):
 
 					linked_count += 1
 
+				# Now link to appropriate list if found
+				if full_name in repo_to_list_mapping:
+					list_name = repo_to_list_mapping[full_name]
+
+					# Find the GitList entry
+					git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+					if git_list and existing_star.gitlist_id != git_list.id:
+						existing_star.gitlist_id = git_list.id
+						list_linked_count += 1
+						logger.info(f"Linked {full_name} to list '{list_name}'")
+
 		session.commit()
 		logger.info(f"Linked {linked_count} existing repos to their starred counterparts")
+		logger.info(f"Linked {list_linked_count} starred repos to their respective lists")
 
 	except Exception as e:
 		logger.error(f"Error linking existing repos to stars: {e}")
+		logger.error(f"Traceback: {traceback.format_exc()}")
 		session.rollback()
 
 async def populate_git_lists(session, args):
