@@ -1,14 +1,9 @@
 #!/usr/bin/python3
 import asyncio
-import aiohttp
 import json
-import os
 from loguru import logger
-from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import datetime
-from typing import Dict, List
-from collections import defaultdict
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
 from utils import get_client_session, get_auth_params
 

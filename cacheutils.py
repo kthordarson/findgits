@@ -1,12 +1,9 @@
 #!/usr/bin/python3
-import asyncio
 import traceback
 import aiohttp
 import json
-import os
 import sqlite3
 from loguru import logger
-from requests.auth import HTTPBasicAuth
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA, RepoCacheExpanded
 from utils import get_client_session, ensure_datetime, get_auth_params
