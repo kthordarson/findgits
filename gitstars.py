@@ -186,7 +186,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 		return []
 
 	async with get_client_session(args) as api_session:
-		# Fetch first page
+		# Fetch first page to determine total pages
 		first_page_url = f"{api_url}?page=1&per_page={per_page}"
 		async with api_session.get(first_page_url, headers=headers) as response:
 			if response.status != 200:
@@ -195,14 +195,20 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 			first_page_data = await response.json()
 			repos.extend(first_page_data)
 
-			# Fix: Better pagination logic
+			# Parse Link header to get last page number
 			last_page_no = 1
 			if 'link' in response.headers:
 				links = response.headers['link'].split(',')
 				for link in links:
-					if 'last' in link:
-						lasturl = link.split('>')[0].replace('<','')
-						last_page_no = int(lasturl.split('=')[-1])
+					if 'rel="last"' in link:
+						# Extract URL from <url>
+						url_part = link.split('>')[0].replace('<', '').strip()
+						# Extract page number from URL
+						if 'page=' in url_part:
+							try:
+								last_page_no = int(url_part.split('page=')[1].split('&')[0])
+							except (ValueError, IndexError):
+								logger.warning(f"Could not parse last page from link header: {link}")
 						break
 
 			logger.info(f"First page fetched: {len(first_page_data)} repos. Total pages available: {last_page_no}")
@@ -210,30 +216,28 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 			# If only one page, return early
 			if last_page_no == 1:
 				logger.info(f"Downloaded {len(repos)} starred repos (single page)")
-				# Cache and return
 				if repos:
 					set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
 					session.commit()
 				return repos
 
-			# Fix: Calculate max pages properly - remove the args.max_pages limit for starred repos
-			# For starred repos, we want ALL pages unless explicitly limited
+			# Calculate how many pages to fetch
 			max_pages_to_fetch = last_page_no
 
-			# Only apply global_limit if it's set and reasonable
+			# Apply global_limit if set (but don't limit starred repos by default)
 			if hasattr(args, 'global_limit') and args.global_limit > 0:
-				max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
-				logger.info(f"Limiting to {max_pages_to_fetch} pages due to global_limit")
+				# Convert global_limit from number of repos to number of pages
+				pages_needed = (args.global_limit + per_page - 1) // per_page  # Round up
+				max_pages_to_fetch = min(pages_needed, max_pages_to_fetch)
+				logger.info(f"Limiting to {max_pages_to_fetch} pages due to global_limit ({args.global_limit} repos)")
 
-			# Apply max_pages only if it's set and we're not fetching starred repos specifically
+			# Don't apply max_pages limit to starred repos - we want all of them
 			if hasattr(args, 'max_pages') and args.max_pages > 0 and args.max_pages < last_page_no:
-				logger.warning(f"max_pages ({args.max_pages}) is less than available pages ({last_page_no}). This may limit starred repo fetching.")
-				# For starred repos, we should fetch all pages by default
-				# max_pages_to_fetch = min(args.max_pages, max_pages_to_fetch)
+				logger.warning(f"max_pages ({args.max_pages}) is set but will be ignored for starred repos to ensure all {last_page_no * per_page} repos are fetched")
 
-			logger.info(f"Fetching pages 2-{max_pages_to_fetch} concurrently (total repos expected: ~{max_pages_to_fetch * per_page})")
+			logger.info(f"Fetching pages 2-{max_pages_to_fetch} concurrently (expecting ~{max_pages_to_fetch * per_page} total repos)")
 
-			# Fetch remaining pages
+			# Fetch remaining pages concurrently
 			semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
 			stop_signal = asyncio.Event()
 
@@ -246,15 +250,21 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 
 			# Process results
 			successful_pages = []
+			failed_pages = 0
 			for result in page_results:
 				if isinstance(result, Exception):
 					logger.error(f"Page fetch failed: {result}")
+					failed_pages += 1
 					continue
 				if result is None:
+					failed_pages += 1
 					continue
 				page_num, page_data = result
 				if page_data:
 					successful_pages.append((page_num, page_data))
+				else:
+					# Empty page - we've reached the end
+					logger.info(f"Page {page_num} returned no data - reached end of starred repos")
 
 			# Sort by page number and add to repos
 			successful_pages.sort(key=lambda x: x[0])
@@ -263,11 +273,14 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 				if len(page_data) < per_page:
 					logger.info(f"Page {page_num} returned {len(page_data)} repos (less than {per_page}), likely the last page")
 
+			if failed_pages > 0:
+				logger.warning(f"{failed_pages} pages failed to fetch")
+
 	# Cache results
 	if repos:
 		set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
 		session.commit()
-		logger.info(f"Successfully fetched and cached {len(repos)} starred repos from {len(successful_pages) + 1} pages")
+		logger.info(f"Successfully fetched and cached {len(repos)} starred repos from {len(successful_pages) + 1} total pages (including first page)")
 	else:
 		logger.warning("No starred repos fetched!")
 
