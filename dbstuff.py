@@ -332,7 +332,6 @@ class GitRepo(Base):
 	def update_config_times(self):
 		""" Update the config_ctime, config_atime, config_mtime based on the local git config file """
 		if self.local_path == '[notcloned]':
-			logger.warning(f'GitRepo {self.github_repo_name} has no local path set, skipping config time update')
 			self.config_ctime = None
 			self.config_atime = None
 			self.config_mtime = None

@@ -9,19 +9,13 @@ from loguru import logger
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA, RepoCacheExpanded
-from utils import get_client_session, ensure_datetime
+from utils import get_client_session, ensure_datetime, get_auth_params
 
 class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
 	pass
 
 async def get_api_rate_limits(args):
-	# auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
-	# headers = {
-	# 		'Accept': 'application/vnd.github+json',
-	# 		'Authorization': f'Bearer {auth.password}',
-	# 		'X-GitHub-Api-Version': '2022-11-28'
-	# 	}
 	rate_limits = {'limit_hit':False, 'rate_limits': {}}
 	try:
 		# async with aiohttp.ClientSession() as api_session:
@@ -134,25 +128,17 @@ async def update_repo_cache(repo_name_or_url, session, args):
 				return cache_data[0]
 			except Exception as e:
 				logger.error(f"Failed to parse cache data: {e}")
-		else:
-			logger.warning(f"No cache entry found for {repo_name} in database")
-			# Continue with empty cache_data
 	if args.nodl:
 		logger.warning(f"Skipping API call for {repo_name} due to --nodl flag, returning cached data if available {type(cache_data)} {len(cache_data) if cache_data else 0}")
 		if args.debug:
 			logger.debug(f"repo: {repo_name} cache_entry: {cache_entry}")
 		return cache_data[0]
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	auth = await get_auth_params()
 	if not auth:
 		logger.error('update_repo_cache: no auth provided')
 		return None
 
 	api_url = f'https://api.github.com/repos/{repo_name}'
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
 
 	if await is_rate_limit_hit(args):
 		logger.warning(f"Rate limit hit for repository {repo_name}, returning cached data if available")

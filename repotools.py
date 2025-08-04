@@ -88,7 +88,6 @@ async def insert_update_git_folder(git_folder_path, session, args):
 	repo_metadata = None
 	if owner and repo_name:
 		repo_path = f"{owner}/{repo_name}"
-		# logger.info(f'Fetching metadata for {repo_path}')
 		try:
 			# Create a simple object with the required attributes
 			repo_info = RepoInfo(owner, repo_name)
@@ -123,9 +122,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		# Try to fetch metadata one more time if needed
 		if not repo_metadata and owner and repo_name:
 			repo_path = f"{owner}/{repo_name}"
-			# logger.info(f'Fetching metadata for {repo_path}')
 			try:
-				# Important: Pass the session parameter
 				repo_metadata = await update_repo_cache(repo_path, session, args)
 			except RateLimitExceededError as e:
 				logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
@@ -147,7 +144,6 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			git_repo = session.query(GitRepo).filter((GitRepo.git_url.ilike(f"%{repo_name}%")) | (GitRepo.github_repo_name == repo_name)).first()
 
 			if not git_repo:
-				logger.info(f'Creating new GitRepo for {remote_url}')
 				git_repo = GitRepo(remote_url, git_folder_path)
 				git_repo.github_repo_name = repo_name
 				git_repo.github_owner = owner
@@ -161,7 +157,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 				session.add(git_repo)
 				session.flush()  # Get the ID without committing
-				logger.info(f'Created new GitRepo: {git_repo}')
+				logger.info(f'Created new GitRepo: {git_repo} url: {remote_url}')
 		else:
 			# Update existing repo
 			if args.debug:

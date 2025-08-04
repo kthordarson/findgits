@@ -10,7 +10,7 @@ import datetime
 from typing import Dict, List
 from collections import defaultdict
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
-from utils import get_client_session
+from utils import get_client_session, get_auth_params
 
 async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 	"""
@@ -149,7 +149,7 @@ async def download_git_stars(args, session):
 		logger.warning('Skipping API call due to --nodl flag')
 		return jsonbuffer
 
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	auth = await get_auth_params()
 	if not auth:
 		logger.error('no auth provided')
 		return None
@@ -275,7 +275,7 @@ async def download_git_stars_v1(args, session):
 	if args.nodl:
 		logger.warning('Skipping API call due to --nodl flag')
 		return jsonbuffer
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	auth = await get_auth_params()
 	if not auth:
 		logger.error('no auth provided')
 		return None
@@ -475,7 +475,7 @@ async def get_git_list_stars(session, args) -> dict:
 	cache_key = "git_list_stars"
 	cache_type = "list_stars"
 
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	auth = await get_auth_params()
 	if not auth:
 		logger.error('get_git_list_stars: no auth provided')
 		return {}
@@ -504,7 +504,6 @@ async def get_git_list_stars(session, args) -> dict:
 			await asyncio.sleep(1)
 			return None
 
-		# async with get_client_session() as api_session:
 		async with aiohttp.ClientSession() as api_session:
 			if args.debug:
 				logger.debug(f"Fetching star list from {listurl}")
@@ -634,7 +633,7 @@ async def fetch_starred_repos(args, session):
 		return []
 
 	# Get authentication
-	auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+	auth = await get_auth_params()
 	if not auth:
 		logger.error("No GitHub authentication available")
 		return []
