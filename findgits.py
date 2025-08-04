@@ -278,14 +278,37 @@ async def main():
 		return
 
 	if args.scanpath:
+		scanpath = Path(args.scanpath[0])
+
+		if args.debug:
+			logger.debug(f'Scan path: {scanpath}')
+
 		await populate_git_lists(session, args)
+		if args.debug:
+			logger.debug('Populated git lists from GitHub, starting populate_repo_data')
 
 		stats = await populate_repo_data(session, args)
-		print(f"GitHub Stars Processing Stats:{stats}")
+
+		if args.debug:
+			logger.debug(f'populate_repo_data done stats: {stats}')
+
+		print(f"GitHub Stars Processing Stats: total_db_repos: {stats.get('total_db_repos')} total_starred_repos: {stats.get('total_starred_repos')}")
 
 		git_repos = session.query(GitRepo).all()
+
+		if args.debug:
+			logger.debug(f'Git Repos: {len(git_repos)} starting get_git_list_stars')
+
 		git_lists = await get_git_list_stars(session, args)
+
+		if args.debug:
+			logger.debug(f'get_git_list_stars done, git_lists: {len(git_lists)} starting get_git_stars')
+
 		starred_repos = await get_git_stars(args, session)  # Updated call
+
+		if args.debug:
+			logger.debug(f'get_git_stars done, starred_repos: {len(starred_repos)} starting fetch_starred_repos')
+
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
@@ -293,25 +316,7 @@ async def main():
 		print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 
 		fetched_repos = await fetch_starred_repos(args, session)  # Updated call
-		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API')
-
-		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session, args)
-		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
-		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
-		localrepos = [k.github_repo_name for k in git_repos]
-		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
-		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
-		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
-
-		git_repos = session.query(GitRepo).all()
-		git_lists = await get_git_list_stars(session, args)
-		# git_list_count = sum([len(git_lists[k]['hrefs']) for k in git_lists])
-		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
-		localrepos = [k.github_repo_name for k in git_repos]
-		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
-		foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
-		print(f'urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 		# Process repos in parallel
 		batch_size = 20
 		for i in range(0, len(notfoundrepos), batch_size):
@@ -329,7 +334,6 @@ async def main():
 		if verification_results:
 			print(f"Star-List Link Verification: {verification_results}")
 
-		scanpath = Path(args.scanpath[0])
 		if scanpath.is_dir():
 			# Find git folders
 			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir() and '.cargo' not in str(k) and 'developmenttest' not in str(k)]

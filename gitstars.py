@@ -202,7 +202,7 @@ async def download_git_stars(args, session):
 							page_url = f"{apiurl}?page={page_num}"
 							try:
 								if args.debug:
-									logger.debug(f"Fetching page {page_num}")
+									logger.debug(f"Fetching page {page_num} from {page_url}")
 
 								async with api_session.get(page_url, headers=headers) as page_response:
 									if page_response.status == 200:
@@ -243,8 +243,6 @@ async def download_git_stars(args, session):
 						# Add all page data to buffer
 						for page_num, page_data in successful_pages:
 							jsonbuffer.extend(page_data)
-							if args.debug:
-								logger.debug(f"Added page {page_num} data, total repos: {len(jsonbuffer)}")
 
 						logger.info(f"Concurrent download completed. Total repos: {len(jsonbuffer)}")
 
@@ -680,35 +678,27 @@ async def fetch_starred_repos(args, session):
 				first_page_data = await response.json()
 				repos = list(first_page_data)  # Start with first page data
 
-				# Determine total pages from Link header or response size
-				total_pages = 1
+				# Determine total pages from Link header - same logic as download_git_stars
+				last_page_no = 1
 				if 'link' in response.headers:
 					links = response.headers['link'].split(',')
 					for link in links:
 						if 'last' in link:
-							last_url = link.split('>')[0].replace('<','')
-							try:
-								total_pages = int(last_url.split('page=')[-1].split('&')[0])
-							except (ValueError, IndexError):
-								# If we can't parse, estimate from first page
-								if len(first_page_data) == per_page:
-									total_pages = 10  # Conservative estimate
-								break
+							lasturl = link.split('>')[0].replace('<','')
+							last_page_no = int(lasturl.split('=')[-1])
 							break
-				elif len(first_page_data) == per_page:
-					# No link header but full page, estimate more pages exist
-					total_pages = 10  # Conservative estimate
 
-				# Apply max_pages limit
-				if args.max_pages > 0:
-					total_pages = min(total_pages, args.max_pages)
-
-				logger.info(f"Fetched page 1, found {len(first_page_data)} repos. Total pages to fetch: {total_pages}")
-
-				# If only one page, return early
-				if total_pages == 1 or len(first_page_data) < per_page:
-					logger.info(f"Single page download completed. Total repos: {len(repos)}")
+				# If only one page or max_pages is 1, return early
+				if last_page_no == 1 or args.max_pages == 1:
+					logger.info(f"Downloaded {len(repos)} starred repos (single page)")
 				else:
+					# Determine how many pages to fetch
+					max_pages_to_fetch = last_page_no
+					if args.max_pages > 0:
+						max_pages_to_fetch = min(args.max_pages, last_page_no)
+
+					logger.info(f"Found {last_page_no} total pages, fetching pages 2-{max_pages_to_fetch} concurrently")
+
 					# Create tasks for remaining pages (starting from page 2)
 					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
 
@@ -735,9 +725,9 @@ async def fetch_starred_repos(args, session):
 								logger.error(f"Error fetching page {page_num}: {e}")
 								return page_num, []
 
-					# Create tasks for pages 2 through total_pages
+					# Create tasks for pages 2 through max_pages_to_fetch
 					tasks = []
-					for page_num in range(2, total_pages + 1):
+					for page_num in range(2, max_pages_to_fetch + 1):
 						tasks.append(fetch_page(page_num))
 
 					# Execute all page requests concurrently

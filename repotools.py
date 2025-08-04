@@ -236,7 +236,7 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			git_repo = GitRepo(remote_url, git_folder_path, repo_data)
 			session.add(git_repo)
 			session.flush()  # Get the ID
-			logger.info(f'Created new GitRepo: {git_repo}')
+			logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name}')
 		else:
 			logger.warning(f'Skipping creation of new GitRepo for {remote_url} as create_new is False')
 			return None

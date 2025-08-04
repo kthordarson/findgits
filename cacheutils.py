@@ -241,10 +241,13 @@ async def update_repo_cache(repo_name_or_url, session, args):
 					logger.error(f"Failed to fetch repository data: {r.status} {await r.text()} api_url: {api_url}")
 					return None
 	except RateLimitExceededError as e:
-		logger.warning(f"Rate limit exceeded while fetching repository {repo_name}: {e}")
+		logger.warning(f"Rate limit exceeded while fetching repository {repo_name}: {e} api_url: {api_url}")
+		return None
+	except aiohttp.client_exceptions.ClientConnectorError as e:
+		logger.error(f"Rate limit exceeded while fetching repository {repo_name}: {e} api_url: {api_url}")
 		return None
 	except Exception as e:
-		logger.error(f"Error fetching repository data: {e} {type(e)}")
+		logger.error(f"Error fetching repository data: {e} {type(e)} api_url: {api_url}")
 		logger.error(f'traceback: {traceback.format_exc()}')
 		logger.error(f'tracebackstack: {traceback.print_stack()}')
 		return None
