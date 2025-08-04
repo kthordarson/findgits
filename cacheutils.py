@@ -79,7 +79,8 @@ async def is_rate_limit_hit(args, threshold_percent=10):
 			if remaining <= threshold_value:
 				logger.warning(f"Rate limit approaching for {resource_name}: {remaining}/{limit} remaining, resets at {datetime.fromtimestamp(reset_time)}")
 				return True
-
+		if args.debug:
+			logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
 		# No limits hit
 		return False
 
