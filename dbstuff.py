@@ -96,8 +96,18 @@ class GitFolder(Base):
 
 	# Relationships
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
-	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id])
-	list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id])
+	# star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id])
+	# list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id])
+	star_entry: Mapped[Optional["GitStar"]] = relationship(
+		"GitStar",
+		foreign_keys=[star_id],
+		overlaps="git_list"  # Avoid relationship conflicts
+	)
+	list_entry: Mapped[Optional["GitList"]] = relationship(
+		"GitList",
+		foreign_keys=[list_id],
+		overlaps="starred_repos"  # Avoid relationship conflicts
+	)
 
 	def __init__(self, git_path: str, gitrepo_id):
 		self.git_path = str(git_path)
@@ -321,6 +331,12 @@ class GitRepo(Base):
 
 	def update_config_times(self):
 		""" Update the config_ctime, config_atime, config_mtime based on the local git config file """
+		if self.local_path == '[notcloned]':
+			logger.warning(f'GitRepo {self.github_repo_name} has no local path set, skipping config time update')
+			self.config_ctime = None
+			self.config_atime = None
+			self.config_mtime = None
+			return
 		if not os.path.exists(self.local_path):
 			logger.error(f'Local path {self.local_path} does not exist')
 			return
@@ -379,7 +395,8 @@ class GitStar(Base):
 		back_populates="star_entry",
 		foreign_keys=[gitrepo_id]
 	)
-	git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
+	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
+	git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos", foreign_keys=[gitlist_id])
 
 class GitList(Base):
 	"""A starred repo list, containing multiple GitStars"""
@@ -392,7 +409,8 @@ class GitList(Base):
 	created_at = Column('created_at', DateTime, default=datetime.now)
 
 	# Relationships - one list can contain many starred repos
-	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
+	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
+	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="GitStar.gitlist_id")
 
 # Add relationships to GitRepo and GitStar
 # GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
