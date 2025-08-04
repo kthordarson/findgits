@@ -371,9 +371,12 @@ async def populate_repo_data(session, args):
 	Returns:
 		dict: Summary statistics about the operation
 	"""
-
-	# Use the existing git_repos variable
-	git_repos = session.query(GitRepo).all()
+	if args.global_limit > 0:
+		logger.warning(f'Global limit set to {args.global_limit}, this will limit the number of repositories processed.')
+		git_repos = session.query(GitRepo).limit(args.global_limit).all()
+	else:
+		# Use the existing git_repos variable
+		git_repos = session.query(GitRepo).all()
 
 	# Fetch starred repositories from GitHub API
 	starred_repos = await get_git_stars(args, session)

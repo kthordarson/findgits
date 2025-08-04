@@ -209,6 +209,7 @@ def get_args():
 	# tuning, debug, etc
 	myparse.add_argument('--scanpath_threads', '-spt', help='scanpath_threads', action='store', dest='scanpath_threads')
 	myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
+	myparse.add_argument('--global-limit', help='global-limit', action='store', default=0, dest='global_limit', type=int)
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
 	myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
@@ -276,7 +277,7 @@ async def main():
 		starred_repos = []
 		git_repos = session.query(GitRepo).all()
 		git_lists = await get_git_list_stars(session, args)
-		starred_repos = await get_git_stars(args, session)  # Updated call
+		starred_repos = await get_git_stars(args, session)
 		urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
 		localrepos = [k.github_repo_name for k in git_repos]
 		notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
@@ -285,7 +286,7 @@ async def main():
 		return
 
 	if args.fetch_stars:
-		fetched_repos = await fetch_starred_repos(args, session)  # Updated call
+		fetched_repos = await fetch_starred_repos(args, session)
 		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API')
 		return
 
@@ -295,7 +296,7 @@ async def main():
 		if args.debug:
 			logger.debug(f'Scan path: {scanpath}')
 
-		starred_repos = await get_git_stars(args, session)  # Updated call
+		starred_repos = await get_git_stars(args, session)
 
 		if args.debug:
 			logger.debug(f'get_git_stars done, starred_repos: {len(starred_repos)} starting populate_git_lists')
@@ -310,8 +311,11 @@ async def main():
 			logger.debug(f'populate_repo_data done stats: {stats}')
 
 		print(f"GitHub Stars Processing Stats: total_db_repos: {stats.get('total_db_repos')} total_starred_repos: {stats.get('total_starred_repos')}")
-
-		git_repos = session.query(GitRepo).all()
+		if args.global_limit > 0:
+			logger.warning(f'Global limit set to {args.global_limit}, this will limit the number of repositories processed.')
+			git_repos = session.query(GitRepo).limit(args.global_limit).all()
+		else:
+			git_repos = session.query(GitRepo).all()
 
 		if args.debug:
 			logger.debug(f'Git Repos: {len(git_repos)} starting get_git_list_stars')
@@ -329,7 +333,7 @@ async def main():
 		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
 		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
 
-		fetched_repos = await fetch_starred_repos(args, session)  # Updated call
+		fetched_repos = await fetch_starred_repos(args, session)
 		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 		# Process repos in parallel
 		batch_size = 20
@@ -353,6 +357,9 @@ async def main():
 		if scanpath.is_dir():
 			# Find git folders
 			git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir() and '.cargo' not in str(k) and 'developmenttest' not in str(k)]
+			if args.global_limit > 0:
+				git_folders = git_folders[:args.global_limit]
+				logger.warning(f'Global limit set to {args.global_limit}, processing only first {len(git_folders)} git folders')
 			print(f'Scan path: {scanpath} found {len(git_folders)} git folders')
 			tasks = set()
 			for git_folder in git_folders:

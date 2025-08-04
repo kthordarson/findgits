@@ -122,7 +122,10 @@ async def get_git_stars(args, session):
 				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache")
 			except Exception as e:
 				logger.error(f"Failed to store data in cache: {e}")
-
+		if args.global_limit > 0:
+			# Limit the number of repos returned based on global limit
+			git_starred_repos = git_starred_repos[:args.global_limit]
+			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
 		return git_starred_repos
 	else:
 		# Cache not enabled - download directly and optionally store
@@ -140,6 +143,10 @@ async def get_git_stars(args, session):
 			except Exception as e:
 				logger.error(f"Failed to store data in cache: {e}")
 
+		if args.global_limit > 0:
+			# Limit the number of repos returned based on global limit
+			git_starred_repos = git_starred_repos[:args.global_limit]
+			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
 		return git_starred_repos
 
 async def download_git_stars(args, session):
@@ -211,6 +218,9 @@ async def download_git_stars(args, session):
 					max_pages_to_fetch = last_page_no
 					if args.max_pages > 0:
 						max_pages_to_fetch = min(args.max_pages, last_page_no)
+					if args.global_limit > 0:
+						max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
+						logger.warning(f'Global limit set to {args.global_limit}, adjusting max pages to fetch: {max_pages_to_fetch}')
 
 					logger.info(f"Found {last_page_no} total pages, fetching pages 2-{max_pages_to_fetch} concurrently")
 
@@ -772,7 +782,9 @@ async def fetch_starred_repos(args, session):
 					max_pages_to_fetch = last_page_no
 					if args.max_pages > 0:
 						max_pages_to_fetch = min(args.max_pages, last_page_no)
-
+					if args.global_limit > 0:
+						max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
+						logger.warning(f'Global limit set to {args.global_limit}, adjusting max pages to fetch: {max_pages_to_fetch}')
 					logger.info(f"Found {last_page_no} total pages, fetching pages 2-{max_pages_to_fetch} concurrently")
 
 					# Create tasks for remaining pages (starting from page 2)
