@@ -230,7 +230,6 @@ class GitRepo(Base):
 	valid = Column(Boolean, default=True)
 	scanned = Column(Boolean, default=False)  # Fixed this line
 
-	# NEW: Star tracking fields - REMOVE gitstar_id to eliminate circular reference
 	is_starred = Column('is_starred', Boolean, default=False)
 	starred_at = Column('starred_at', DateTime, nullable=True)
 
@@ -379,14 +378,13 @@ class GitStar(Base):
 	__tablename__ = 'gitstars'
 	id: Mapped[int] = mapped_column(primary_key=True)
 	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
+	# Link to lists that contain this starred repo
+	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
 	starred_at = Column(DateTime)
 	stargazers_count = Column(Integer)
 	description = Column(String(1024))
 	full_name = Column(String(255))
 	html_url = Column(String(255))
-
-	# Link to lists that contain this starred repo
-	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
 
 	# Relationships - specify foreign_keys explicitly
 	repo: Mapped["GitRepo"] = relationship(

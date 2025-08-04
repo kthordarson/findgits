@@ -568,8 +568,6 @@ async def get_info_for_list(link, headers, session, args):
 		if cache_entry:
 			try:
 				soup = BeautifulSoup(cache_entry.data, 'html.parser')
-				if args.debug:
-					logger.debug(f"Loaded list info from database cache for {link}")
 			except Exception as e:
 				logger.error(f'Failed to parse cached list info: {e}')
 		else:
@@ -590,7 +588,6 @@ async def get_info_for_list(link, headers, session, args):
 			async with api_session.get(link) as r:
 				content = await r.content.read()
 				soup = BeautifulSoup(content, 'html.parser')
-
 				try:
 					# Save to database cache
 					set_cache_entry(session, cache_key, cache_type, str(soup))

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from loguru import logger
 from dbstuff import GitRepo, GitFolder, RepoInfo, GitStar, GitList, get_dupes
-from utils import valid_git_folder, get_remote, ensure_datetime
+from utils import valid_git_folder, get_remote_url, ensure_datetime
 from gitstars import get_git_stars, get_git_list_stars
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
 
@@ -57,7 +57,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		git_folder_path = git_folder_path[:-1]
 
 	# Get remote URL and normalize it
-	remote_url = get_remote(git_folder_path).lower().strip()
+	remote_url = get_remote_url(git_folder_path).lower().strip()
 	if not remote_url or remote_url == '[no remote]':
 		remote_url = f"file://{git_folder_path}"  # Use local path as fallback URL
 		logger.warning(f'Could not determine remote URL for {git_folder_path}  ... skipping')

@@ -64,7 +64,7 @@ def format_bytes(num_bytes):
 		num_bytes /= 1024.0
 	return f"{num_bytes:.2f} TB"
 
-def get_remote(git_path: str) -> str:
+def get_remote_url(git_path: str) -> str:
 	"""
 	Get the remote url of a git folder
 	Parameters: git_path: str - path to git folder
