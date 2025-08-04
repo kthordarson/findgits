@@ -328,11 +328,6 @@ async def main():
 		print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 		return
 
-	if args.fetch_stars:
-		fetched_repos = await fetch_starred_repos(args, session)
-		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API')
-		return
-
 	if args.scanpath:
 		scanpath = Path(args.scanpath[0])
 
@@ -386,8 +381,6 @@ async def main():
 		repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
 		logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
 
-		fetched_repos = await fetch_starred_repos(args, session)
-		print(f'Fetched {len(fetched_repos)} ( {type(fetched_repos)} ) starred repos from GitHub API urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 		# Process repos in parallel
 		batch_size = 20
 		for i in range(0, len(notfoundrepos), batch_size):

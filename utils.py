@@ -101,7 +101,7 @@ def get_git_info(git_path: str) -> dict:
 		return git_info
 	try:
 		os.chdir(git_path)
-		cmdstr = ['git', 'branch', '-v', '-a', '-l']
+		cmdstr = ['git', 'branch', '-a', '-l', '-v', '--no-color']
 		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
 
 		if err:
