@@ -7,8 +7,8 @@ import os
 from loguru import logger
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-from dbstuff import CacheEntry, BLANK_REPO_DATA
-from utils import get_client_session
+from dbstuff import CacheEntry, BLANK_REPO_DATA, RepoCacheExpanded
+from utils import get_client_session, ensure_datetime
 
 class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
@@ -256,15 +256,63 @@ def set_cache_entry(session, cache_key, cache_type, data):
 	"""Set or update a cache entry in the database"""
 	entry = get_cache_entry(session, cache_key, cache_type)
 	if entry:
-		# Update existing entry
 		entry.data = data
 		entry.timestamp = datetime.now()
 		entry.last_scan = datetime.now()
 	else:
-		# Create new entry
 		entry = CacheEntry(cache_key, cache_type, data)
-		entry.last_scan = datetime.now()
 		session.add(entry)
 
-	# The caller is responsible for committing the session
+	# If cache_type is repo_data, expand JSON and store in RepoCacheExpanded
+	if cache_type == "repo_data":
+		try:
+			repos = json.loads(data)
+			if isinstance(repos, dict):
+				repos = [repos]
+			for repo_json in repos:
+				if repo_json is None:
+					continue  # Skip None entries
+				expanded = session.query(RepoCacheExpanded).filter_by(repo_id=repo_json.get("id")).first()
+				if expanded:
+					# Update existing record with proper datetime conversion
+					for k, v in repo_json.items():
+						if hasattr(expanded, k):
+							# Convert datetime strings to datetime objects for specific fields
+							if k in ['created_at', 'updated_at', 'pushed_at'] and isinstance(v, str):
+								v = ensure_datetime(v)
+							# Handle topics conversion
+							elif k == 'topics' and isinstance(v, list):
+								v = ",".join(v)
+							# Handle nested owner fields
+							elif k == 'owner' and isinstance(v, dict):
+								expanded.owner_login = v.get('login')
+								expanded.owner_id = v.get('id')
+								expanded.owner_node_id = v.get('node_id')
+								expanded.owner_avatar_url = v.get('avatar_url')
+								continue
+							# Handle license fields
+							elif k == 'license' and isinstance(v, dict):
+								expanded.license_key = v.get('key')
+								expanded.license_name = v.get('name')
+								expanded.license_url = v.get('url')
+								continue
+							setattr(expanded, k, v)
+				else:
+					expanded = RepoCacheExpanded(repo_json)
+					session.add(expanded)
+		except Exception as e:
+			logger.error(f"Failed to expand repo_data cache: {e} {type(e)}")
+			logger.error(f"Data: {data}")
+			logger.error(f"Traceback: {traceback.format_exc()}")
+			# Roll back the session to recover from the error
+			session.rollback()
+			return None
+
+	try:
+		session.commit()
+	except Exception as e:
+		logger.error(f"Failed to commit cache entry: {e}")
+		session.rollback()
+		return None
+
 	return entry
