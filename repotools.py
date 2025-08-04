@@ -199,6 +199,17 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			session.rollback()
 		return None
 
+async def create_repo_to_list_mapping(session, args):
+	"""Create a mapping of repo URLs to list names - fetch once and reuse"""
+	git_lists_data = await get_git_list_stars(session, args)
+	repo_to_list_mapping = {}
+
+	for list_name, list_data in git_lists_data.items():
+		for href in list_data.get('hrefs', []):
+			href_clean = href.strip('/').split('github.com/')[-1].rstrip('.git')
+			repo_to_list_mapping[href_clean] = list_name
+
+	return repo_to_list_mapping
 
 async def insert_update_starred_repo(github_repo, session, args, create_new=False, list_name=None):
 	"""
