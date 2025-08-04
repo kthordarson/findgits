@@ -1,13 +1,8 @@
 from __future__ import annotations
-import aiohttp
-import asyncio
-import aiofiles
 import os
-import json
-from configparser import ConfigParser
+import pandas as pd
 from datetime import datetime
-from pathlib import Path
-from typing import List
+from typing import Optional, List
 from loguru import logger
 import sqlalchemy
 from sqlalchemy import (Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
@@ -16,38 +11,72 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import Session
-from utils import valid_git_folder, get_remote, flatten
-from gitstars import get_git_stars, get_git_list_stars, update_repo_cache, get_auth_param, CACHE_DIR
-import requests
-# from git_tasks import get_git_show
+import seaborn as sns
+import matplotlib.pyplot as plt
+from itertools import combinations
 
-# Base = declarative_base()
+from utils import ensure_datetime, get_git_info
+from utils import get_directory_size, get_subfilecount, get_subdircount
+
+# find dupes
+# sqlite3 gitrepo.db 'select gitrepo.github_repo_name, count(git_path.git_path) as count,gitrepo.git_url from gitrepo inner join git_path on gitrepo.id=git_path.gitrepo_id group by github_repo_name order by count ' -table
+
+BLANK_REPO_DATA = {
+	"id": None,
+	"node_id": None,
+	"name": 'BLANK_REPO_DATA',
+	"full_name": 'BLANK_REPO_DATA',
+	"owner": {"login": 'BLANK_REPO_DATA'},
+	"private": False,
+	"html_url": "https://github.com/",
+	"description": "Repository BLANK_REPO_DATA",
+	"fork": False,
+	"url": 'BLANK_REPO_DATA',
+	"created_at": None,
+	"updated_at": None,
+	"pushed_at": None,
+	"git_url": "git://github.com/BLANK_REPO_DATA.git",
+	"ssh_url": "git@github.com:BLANK_REPO_DATA.git",
+	"clone_url": "https://github.com/BLANK_REPO_DATA.git",
+	"svn_url": "https://github.com/BLANK_REPO_DATA",
+	"homepage": None,
+	"size": 0,
+	"stargazers_count": 0,
+	"watchers_count": 0,
+	"language": None,
+	"forks_count": 0,
+	"forks": 0,
+	"open_issues_count": 0,
+	"open_issues": 0,
+	"watchers": 0,
+	"default_branch": "main",
+	"temp_clone_token": None,
+	"network_count": 0,
+	"subscribers_count": 0,
+	"archived": False,
+	"disabled": False,
+	"license": None,
+	"topics": [],
+	"visibility": "unknown",
+	"error_code": -1,
+	"_unavailable": True}  # Flag to indicate this is default data
 
 class MissingConfigException(Exception):
 	pass
 
-
 class MissingGitFolderException(Exception):
 	pass
-
 
 class Base(DeclarativeBase):
 	pass
 
-
-# GPP folders that contain more than one git repo
-# --addpath to GPP to db
-# todo: if a subfolder of a GPP contains other git repos, make those a GPP and add to db
-#       example: GPP folder ~/development2 has one called games, which should be a GPP
-
-
 class GitFolder(Base):
 	""" A folder containing one git repo """
 	__tablename__ = 'git_path'
-	# __table_args__ = (ForeignKeyConstraint(['gitrepo_id']))
 	id: Mapped[int] = mapped_column(primary_key=True)
-	# gitrepo_id = Column('gitrepo_id', Integer)  # id of gitrepo found in this folder
-	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))  # Change this line
+	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))
+	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
+	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
 	git_path = Column('git_path', String(255))
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
@@ -60,11 +89,25 @@ class GitFolder(Base):
 	git_path_ctime = Column('git_path_ctime', DateTime)
 	git_path_atime = Column('git_path_atime', DateTime)
 	git_path_mtime = Column('git_path_mtime', DateTime)
-	dupe_flag = Column('dupe_flag', Boolean)
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
-	scanned = Column[bool]
+	scanned = Column(Boolean, default=False)  # Fixed this line
+	is_starred = Column(Boolean, default=False)
+
+	# Relationships
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
+	# star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id])
+	# list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id])
+	star_entry: Mapped[Optional["GitStar"]] = relationship(
+		"GitStar",
+		foreign_keys=[star_id],
+		overlaps="git_list"  # Avoid relationship conflicts
+	)
+	list_entry: Mapped[Optional["GitList"]] = relationship(
+		"GitList",
+		foreign_keys=[list_id],
+		overlaps="starred_repos"  # Avoid relationship conflicts
+	)
 
 	def __init__(self, git_path: str, gitrepo_id):
 		self.git_path = str(git_path)
@@ -73,14 +116,12 @@ class GitFolder(Base):
 		self.last_scan = self.first_scan
 		self.scan_time = 0.0
 		self.scan_count = 0
-		self.dupe_flag = False
 		self.dupe_count = 0
 		self.is_parent = False
 		self.folder_size = 0
 		self.file_count = 0
 		self.subdir_count = 0
 		self.scanned = False
-		self.get_folder_time()
 		self.get_folder_stats()
 
 	def __repr__(self):
@@ -90,16 +131,17 @@ class GitFolder(Base):
 		""" Get stats for this git_path"""
 		if not os.path.exists(self.git_path):  # redundant check, but just in case?
 			self.valid = False
-			raise MissingGitFolderException(f'{self} does not exist')
+			logger.error(f'{self} does not exist')
+			return
 		# t0 = datetime.now()
 		self.last_scan = datetime.now()
-		stat = os.stat(self.git_path)
-		self.git_path_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
-		self.git_path_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
-		self.git_path_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
 	def get_folder_stats(self):
 		t0 = datetime.now()
+		if not os.path.exists(self.git_path):  # redundant check, but just in case?
+			self.valid = False
+			logger.error(f'{self} does not exist')
+			return
 		self.folder_size = get_directory_size(self.git_path)
 		self.file_count = get_subfilecount(self.git_path)
 		self.subdir_count = get_subdircount(self.git_path)
@@ -107,11 +149,16 @@ class GitFolder(Base):
 		self.last_scan = datetime.now()
 		self.scanned = True
 		self.scan_count += 1
+		stat = os.stat(self.git_path)
+		self.git_path_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
+		self.git_path_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
+		self.git_path_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
 # todo: make this better, should only be linked to one git_path
 class GitRepo(Base):
 	""" A git repo, linked to one or more git_paths """
 	__tablename__ = 'gitrepo'
+
 	id: Mapped[int] = mapped_column(primary_key=True)
 
 	# Basic repository information
@@ -172,19 +219,23 @@ class GitRepo(Base):
 	pushed_at = Column('pushed_at', DateTime)
 
 	# Our internal tracking fields
-	dupe_flag = Column('dupe_flag', Boolean)
 	dupe_count = Column('dupe_count', BigInteger)
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_count = Column('scan_count', Integer)
+	error_code = Column('error_code', Integer)
 	config_ctime = Column('config_ctime', DateTime)
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
 	valid = Column(Boolean, default=True)
-	scanned = Column[bool]
+	scanned = Column(Boolean, default=False)  # Fixed this line
 
-	# Relationships
+	is_starred = Column('is_starred', Boolean, default=False)
+	starred_at = Column('starred_at', DateTime, nullable=True)
+
+	# Relationships - specify foreign_keys explicitly to resolve ambiguity
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
+	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", back_populates="repo", uselist=False, foreign_keys="GitStar.gitrepo_id")
 
 	def __init__(self, git_url, local_path, repo_data=None):
 		# Initialize with minimal information
@@ -193,7 +244,6 @@ class GitRepo(Base):
 		self.first_scan = datetime.now()
 		self.last_scan = self.first_scan
 		self.scan_count = 0
-		self.dupe_flag = False
 		self.scanned = False
 
 		# Extract repository name from URL
@@ -209,9 +259,11 @@ class GitRepo(Base):
 		else:
 			self.github_owner = '[unknown]'
 
+		self.update_config_times()
+		self.update_local_git_info()
+
 		# If repo_data is provided (from GitHub API), populate additional fields
 		if repo_data and isinstance(repo_data, dict):
-			logger.debug(f'got repo_data for {self} from GitHub API')
 			self.node_id = repo_data.get('node_id')
 			self.full_name = repo_data.get('full_name')
 			self.private = repo_data.get('private')
@@ -272,6 +324,216 @@ class GitRepo(Base):
 	def __repr__(self):
 		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
 
+	def update_config_times(self):
+		""" Update the config_ctime, config_atime, config_mtime based on the local git config file """
+		if self.local_path == '[notcloned]':
+			self.config_ctime = None
+			self.config_atime = None
+			self.config_mtime = None
+			return
+		if not os.path.exists(self.local_path):
+			logger.error(f'Local path {self.local_path} does not exist')
+			return
+		config_path = os.path.join(self.local_path, '.git', 'config')
+		if not os.path.exists(config_path):
+			logger.error(f'Git config file {config_path} does not exist')
+			return
+		stat = os.stat(config_path)
+		self.config_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
+		self.config_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
+		self.config_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
+
+	def update_local_git_info(self):
+		git_info = get_git_info(self.local_path)
+		self.branch = git_info.get('current_branch')
+		for remote_branch in git_info['remote_branches']:
+			if 'target' in remote_branch:
+				if remote_branch.get('target') == 'origin/master':
+					self.remote = remote_branch['name']
+				if remote_branch.get('target') == 'origin/main':
+					self.remote = remote_branch['name']
+			elif 'name' in remote_branch:
+				if remote_branch.get('type') == 'remote':
+					self.remote = remote_branch['name']
+			# if remote_branch['name'].startswith('origin/'):
+				# We have origin remote, extract the remote URL using get_remote_url
+				# self.remote = remote_branch['remote']
+
+class CacheEntry(Base):
+	""" A table for storing cache data from GitHub API responses """
+	__tablename__ = 'cache_entries'
+
+	id: Mapped[int] = mapped_column(primary_key=True)
+	cache_key = Column('cache_key', String(255), unique=True)  # Unique identifier for this cache entry
+	cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
+	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)
+	timestamp = Column('timestamp', DateTime)  # When this entry was created/updated
+	last_scan = Column('last_scan', DateTime)  # When this entry was last scanned
+
+	def __init__(self, cache_key, cache_type, data):
+		self.cache_key = cache_key
+		self.cache_type = cache_type
+		self.data = data
+		self.timestamp = datetime.now()
+		self.last_scan = datetime.now()
+
+	def __repr__(self):
+		return f'<CacheEntry {self.id} key={self.cache_key} type={self.cache_type}>'
+
+class RepoInfo:
+	def __init__(self, owner, name):
+		self.github_owner = owner
+		self.github_repo_name = name
+
+class GitStar(Base):
+	"""A starred repo, linked to a GitRepo"""
+	__tablename__ = 'gitstars'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
+	# Link to lists that contain this starred repo
+	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
+	starred_at = Column(DateTime)
+	stargazers_count = Column(Integer)
+	description = Column(String(1024))
+	full_name = Column(String(255))
+	html_url = Column(String(255))
+
+	# Relationships - specify foreign_keys explicitly
+	repo: Mapped["GitRepo"] = relationship(
+		"GitRepo",
+		back_populates="star_entry",
+		foreign_keys=[gitrepo_id]
+	)
+	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
+	git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos", foreign_keys=[gitlist_id])
+
+class GitList(Base):
+	"""A starred repo list, containing multiple GitStars"""
+	__tablename__ = 'gitlists'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	list_name = Column(String(255))
+	list_description = Column(String(1024))
+	list_url = Column(String(255))
+	repo_count = Column(Integer, default=0)
+	created_at = Column('created_at', DateTime, default=datetime.now)
+
+	# Relationships - one list can contain many starred repos
+	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
+	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="GitStar.gitlist_id")
+
+# Add relationships to GitRepo and GitStar
+# GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
+# GitStar.lists = relationship("GitList", back_populates="star")
+
+class RepoCacheExpanded(Base):
+	__tablename__ = 'repo_cache_expanded'
+	id: Mapped[int] = mapped_column(primary_key=True)
+	repo_id = Column(BigInteger, unique=True)
+	node_id = Column(String(255))
+	name = Column(String(255))
+	full_name = Column(String(255))
+	private = Column(Boolean)
+	owner_login = Column(String(255))
+	owner_id = Column(BigInteger)
+	owner_node_id = Column(String(255))
+	owner_avatar_url = Column(String(255))
+	html_url = Column(String(255))
+	description = Column(String(1024))
+	fork = Column(Boolean)
+	url = Column(String(255))
+	created_at = Column(DateTime)
+	updated_at = Column(DateTime)
+	pushed_at = Column(DateTime)
+	git_url = Column(String(255))
+	ssh_url = Column(String(255))
+	clone_url = Column(String(255))
+	svn_url = Column(String(255))
+	homepage = Column(String(255))
+	size = Column(BigInteger)
+	stargazers_count = Column(Integer)
+	watchers_count = Column(Integer)
+	language = Column(String(100))
+	has_issues = Column(Boolean)
+	has_projects = Column(Boolean)
+	has_downloads = Column(Boolean)
+	has_wiki = Column(Boolean)
+	has_pages = Column(Boolean)
+	has_discussions = Column(Boolean)
+	forks_count = Column(Integer)
+	archived = Column(Boolean)
+	disabled = Column(Boolean)
+	open_issues_count = Column(Integer)
+	license_key = Column(String(100))
+	license_name = Column(String(255))
+	license_url = Column(String(255))
+	allow_forking = Column(Boolean)
+	is_template = Column(Boolean)
+	web_commit_signoff_required = Column(Boolean)
+	topics = Column(String(1024))
+	visibility = Column(String(50))
+	forks = Column(Integer)
+	open_issues = Column(Integer)
+	watchers = Column(Integer)
+	default_branch = Column(String(100))
+	network_count = Column(Integer)
+	subscribers_count = Column(Integer)
+	# Add more fields as needed
+
+	def __init__(self, repo_json):
+		self.repo_id = repo_json.get("id")
+		self.node_id = repo_json.get("node_id")
+		self.name = repo_json.get("name")
+		self.full_name = repo_json.get("full_name")
+		self.private = repo_json.get("private")
+		owner = repo_json.get("owner", {})
+		self.owner_login = owner.get("login")
+		self.owner_id = owner.get("id")
+		self.owner_node_id = owner.get("node_id")
+		self.owner_avatar_url = owner.get("avatar_url")
+		self.html_url = repo_json.get("html_url")
+		self.description = repo_json.get("description")
+		self.fork = repo_json.get("fork")
+		self.url = repo_json.get("url")
+		self.created_at = ensure_datetime(repo_json.get("created_at"))
+		self.updated_at = ensure_datetime(repo_json.get("updated_at"))
+		self.pushed_at = ensure_datetime(repo_json.get("pushed_at"))
+		self.git_url = repo_json.get("git_url")
+		self.ssh_url = repo_json.get("ssh_url")
+		self.clone_url = repo_json.get("clone_url")
+		self.svn_url = repo_json.get("svn_url")
+		self.homepage = repo_json.get("homepage")
+		self.size = repo_json.get("size")
+		self.stargazers_count = repo_json.get("stargazers_count")
+		self.watchers_count = repo_json.get("watchers_count")
+		self.language = repo_json.get("language")
+		self.has_issues = repo_json.get("has_issues")
+		self.has_projects = repo_json.get("has_projects")
+		self.has_downloads = repo_json.get("has_downloads")
+		self.has_wiki = repo_json.get("has_wiki")
+		self.has_pages = repo_json.get("has_pages")
+		self.has_discussions = repo_json.get("has_discussions")
+		self.forks_count = repo_json.get("forks_count")
+		self.archived = repo_json.get("archived")
+		self.disabled = repo_json.get("disabled")
+		self.open_issues_count = repo_json.get("open_issues_count")
+		self.allow_forking = repo_json.get("allow_forking")
+		self.is_template = repo_json.get("is_template")
+		self.web_commit_signoff_required = repo_json.get("web_commit_signoff_required")
+		self.topics = ",".join(repo_json.get("topics", []))
+		self.visibility = repo_json.get("visibility")
+		self.forks = repo_json.get("forks")
+		self.open_issues = repo_json.get("open_issues")
+		self.watchers = repo_json.get("watchers")
+		self.default_branch = repo_json.get("default_branch")
+		self.network_count = repo_json.get("network_count")
+		self.subscribers_count = repo_json.get("subscribers_count")
+
+		license = repo_json.get("license") or {}
+		self.license_key = license.get("key")
+		self.license_name = license.get("name")
+		self.license_url = license.get("url")
+
+
 def db_init(engine: sqlalchemy.Engine) -> None:
 	Base.metadata.create_all(bind=engine)
 
@@ -306,56 +568,9 @@ def get_engine(args) -> sqlalchemy.Engine:
 		dburl = f"postgresql://{dbuser}:{dbpass}@{dbhost}/{dbname}"
 		return create_engine(dburl)
 	elif args.dbmode == 'sqlite':
-		return create_engine(f'sqlite:///{args.dbsqlitefile}', echo=False, connect_args={'check_same_thread': False})
+		return create_engine(f'sqlite:///{args.db_file}', echo=False, connect_args={'check_same_thread': False})
 	else:
 		raise TypeError(f'[db] unknown dbtype {args} ')
-
-def get_directory_size(directory: str) -> int:
-	# directory = Path(directory)
-	total = 0
-	try:
-		for entry in os.scandir(directory):
-			if entry.is_symlink():
-				break
-			if entry.is_file():
-				try:
-					total += entry.stat().st_size
-				except FileNotFoundError as e:
-					logger.warning(f'[err] {e} dir:{directory} ')
-					continue
-			elif entry.is_dir():
-				try:
-					total += get_directory_size(entry.path)
-				except FileNotFoundError as e:
-					logger.warning(f'[err] {e} dir:{directory} ')
-	except NotADirectoryError as e:
-		logger.warning(f'[err] {e} dir:{directory} ')
-		return os.path.getsize(directory)
-	# except (PermissionError, FileNotFoundError) as e:
-	# 	logger.warning(f'[err] {e} {type(e)} dir:{directory} ')
-	# 	return 0
-	# logger.debug(f'[*] get_directory_size {directory} {total} bytes')
-	return total
-
-
-def get_subfilecount(directory: str) -> int:
-	directory = Path(directory)
-	try:
-		filecount = len([k for k in directory.glob('**/*') if k.is_file()])
-	except PermissionError as e:
-		logger.warning(f'[err] {e} d:{directory}')
-		return 0
-	return filecount
-
-
-def get_subdircount(directory: str) -> int:
-	directory = Path(directory)
-	dc = 0
-	try:
-		dc = len([k for k in directory.glob('**/*') if k.is_dir()])
-	except (PermissionError, FileNotFoundError) as e:
-		logger.warning(f'[err] {e} d:{directory}')
-	return dc
 
 def get_dupes(session: Session) -> list:
 	"""
@@ -369,950 +584,85 @@ def get_dupes(session: Session) -> list:
 	dupes = session.execute(sql).all()
 	return dupes
 
-async def insert_update_git_folder(git_folder_path, session):
-	"""
-	Insert a new GitFolder or update an existing one in the database
+def check_git_dates(session, create_heatmap=False):
+	df = pd.DataFrame(session.execute(text('select git_path.git_path, git_path.git_path_ctime, git_path.git_path_atime, git_path.git_path_mtime, gitrepo.created_at, gitrepo.updated_at, gitrepo.pushed_at from git_path inner join gitrepo on git_path.gitrepo_id=gitrepo.id ')).tuples())
+	# Convert timestamp columns to datetime if not already
+	timestamp_columns = ['git_path_ctime', 'git_path_atime', 'git_path_mtime', 'created_at', 'updated_at', 'pushed_at']
+	for col in timestamp_columns:
+		df[col] = pd.to_datetime(df[col])
+	# Calculate time differences (in days)
+	df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / (60 * 60 * 24)
 
-	Parameters:
-		git_folder_path (str): Path to the git folder (containing .git directory)
-		session: SQLAlchemy session
+	# Display the differences
+	print(df[['git_path', 'mtime_to_ctime', 'atime_to_mtime', 'mtime_to_updated_at', 'mtime_to_pushed_at', 'created_at_to_pushed_at']].head())
 
-	Returns:
-		GitFolder: The inserted or updated GitFolder object
-	"""
+	# Compute correlation matrix for timestamps
+	correlation_matrix = df[timestamp_columns].corr()
+	print(correlation_matrix)
 
-	git_folder_path = str(Path(git_folder_path))
+	# Group by a simplified path (e.g., extract project name) and analyze
+	df['project'] = df['git_path'].str.split('/').str[-1]
+	print(df.groupby('project')[timestamp_columns].mean())
 
-	# Ensure this is a valid git folder before proceeding
-	if not valid_git_folder(os.path.join(git_folder_path, '.git')):
-		logger.warning(f'{git_folder_path} is not a valid git folder')
-		return None
+	if create_heatmap:
+		# Create a list of all unique pairs of timestamp columns
+		pairs = list(combinations(timestamp_columns, 2))
 
-	# Check if folder already exists in database
-	git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
+		# Compute absolute time differences (in days) for each pair
+		diff_data = []
+		for index, row in df.iterrows():
+			row_diffs = {}
+			for col1, col2 in pairs:
+				pair_name = f"{col1}_to_{col2}"
+				diff = abs((row[col1] - row[col2]).total_seconds() / (60 * 60 * 24))  # Convert to days
+				row_diffs[pair_name] = diff
+			diff_data.append(row_diffs)
+		# Create a DataFrame of differences, indexed by git_path
+		diff_df = pd.DataFrame(diff_data, index=df['git_path'])
+		# Create a heatmap
+		plt.figure(figsize=(12, 8))
+		sns.heatmap(diff_df, annot=False, fmt=".1f", cmap="YlOrRd", cbar_kws={'label': 'Days'})
+		plt.title('Heatmap of Absolute Time Differences Between Timestamps')
+		plt.xlabel('Timestamp Pairs')
+		plt.ylabel('Repository Path')
+		plt.xticks(rotation=45, ha='right')
+		plt.tight_layout()
 
-	# Get remote URL for this repository
-	remote_url = get_remote(git_folder_path)
-	if remote_url:
-		# Get or create GitRepo object
-		git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
-	else:
-		logger.warning(f'Could not determine remote URL for {git_folder_path}')
+		# Save or display the heatmap
+		plt.savefig('timestamp_differences_heatmap.png')
+		plt.show()
 
+def mark_repo_as_starred(session, repo_id, list_name=None):
+	"""Mark a repository as starred and optionally link to a list"""
+	git_repo = session.query(GitRepo).filter(GitRepo.id == repo_id).first()
 	if not git_repo:
-		git_repo = GitRepo(remote_url, git_folder_path)
-		metadata = await fetch_metadata(git_repo)
-		git_repo = populate_from_metadata(git_repo, metadata)
-		git_repo.scan_count = 1
-		session.add(git_repo)
-		try:
-			session.commit()
-		except Exception as e:
-			logger.error(f'Error committing GitRepo: {e} - rolling back session')
-			session.rollback()
-			return None
-		logger.debug(f'Created new GitRepo: {git_repo}')
+		return False
 
-	if git_folder:
-		# Update existing GitFolder
-		git_folder.scan_count += 1
-		git_folder.last_scan = datetime.now()
-		git_folder.gitrepo_id = git_repo.id
-		git_folder.get_folder_time()
-		git_folder.get_folder_stats()
-		logger.debug(f'Updated GitFolder: {git_folder}')
-	else:
-		# Create new GitFolder
-		git_folder = GitFolder(git_folder_path, git_repo.id)
-		git_folder.scan_count = 1
-		session.add(git_folder)
-		logger.debug(f'Created new GitFolder: {git_folder}')
+	git_repo.is_starred = True
+	git_repo.starred_at = datetime.now()
 
-	# Save changes
-	try:
-		session.commit()
-	except sqlalchemy.exc.StatementError as e:
-		logger.error(f'Error committing GitFolder: {e} - rolling back session')
-		session.rollback()
-		return None
-	except sqlalchemy.exc.IntegrityError as e:
-		logger.error(f'Error committing GitFolder: {e} - rolling back session')
-		session.rollback()
-		return None
-	except Exception as e:
-		logger.error(f'Error committing GitFolder: {e} - rolling back session')
-		session.rollback()
-		return None
-	return git_folder
+	# Create GitStar entry if it doesn't exist
+	git_star = session.query(GitStar).filter(GitStar.gitrepo_id == repo_id).first()
+	if not git_star:
+		git_star = GitStar()
+		git_star.gitrepo_id = repo_id
+		git_star.starred_at = datetime.now()
+		session.add(git_star)
+		session.flush()
 
-def xcheck_update_dupes(session) -> dict:
-	"""
-	Check for duplicate GitRepo entries (same git_url) and update their dupe_flag and dupe_count.
-	A duplicate repository is one with the same git_url in multiple locations.
+	# Link to list if provided
+	if list_name:
+		git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+		if git_list:
+			git_star.gitlist_id = git_list.id
 
-	Parameters:
-		session: SQLAlchemy session
-
-	Returns:
-		dict: Summary of results containing:
-			- total_repos: Total number of repositories
-			- unique_repos: Number of unique repositories
-			- dupe_repos: Number of repositories that are duplicates
-			- dupes_updated: Number of repositories updated
-	"""
-
-	# Get all repositories
-	all_repos = session.query(GitRepo).all()
-	total_repos = len(all_repos)
-
-	# Reset duplicate flags on all repos
-	for repo in all_repos:
-		repo.dupe_flag = False
-		repo.dupe_count = 0
-
-	# Get list of duplicates (repos with same git_url)
-	dupes = get_dupes(session)
-	dupe_urls = set()
-	dupes_updated = 0
-
-	# Process each duplicate group
-	for dupe in dupes:
-		dupe_id = dupe.id
-		dupe_url = dupe.git_url
-		dupe_count = dupe.count
-		dupe_urls.add(dupe_url)
-
-		# Find all repos with this URL
-		same_url_repos = session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all()
-
-		# Update their dupe flags
-		for repo in same_url_repos:
-			repo.dupe_flag = True
-			repo.dupe_count = dupe_count
-			dupes_updated += 1
-
-	# Commit the changes
 	session.commit()
+	return True
 
-	# Prepare result summary
-	result = {
-		'total_repos': total_repos,
-		'unique_repos': total_repos - len(dupes),
-		'dupe_repos': len(dupe_urls),
-		'dupes_updated': dupes_updated
-	}
-
-	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
-	return result
-
-async def insert_update_starred_repo(github_repo, session, create_new=False):
-	"""
-	Insert a new GitRepo or update an existing one in the database
-
-	Parameters:
-		github_repo: repository object from GitHub API or owner/repo string
-		session: SQLAlchemy session
-		create_new: bool - whether to create a new repo if it doesn't exist
-	"""
-	git_folder_path = '[notcloned]'
-
-	# Check if github_repo is a string (URL or owner/repo) or a dict
-	if isinstance(github_repo, dict):
-		# Already have full repo data
-		repo_data = github_repo
-		remote_url = repo_data.get('html_url') or f"https://github.com/{repo_data.get('full_name')}"
-	else:
-		# Normalize the path by removing leading/trailing slashes
-		clean_path = github_repo.strip('/')
-
-		# It's a string, construct proper GitHub URL
-		if 'github.com' in clean_path:
-			# It's already a URL
-			if clean_path.startswith('http'):
-				remote_url = clean_path
-			else:
-				remote_url = f'https://{clean_path}'
-		else:
-			# It's just an owner/repo path
-			remote_url = f'https://github.com/{clean_path}'
-
-	# Get or create GitRepo object
-	git_repo = session.query(GitRepo).filter(GitRepo.git_url == remote_url).first()
-
-	# Get full repository data from GitHub API
-	repo_data = await update_repo_cache(clean_path)
-
-	if not git_repo:
-		# Create new repository with all available data
-		if create_new:
-			git_repo = GitRepo(remote_url, git_folder_path, repo_data)
-			git_repo.scan_count = 1
-			session.add(git_repo)
-			logger.debug(f'Created new GitRepo with full data: {git_repo} remote_url: {remote_url}')
-	else:
-		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}')
-		# Update existing repository if we have repo_data
-		if repo_data:
-			git_repo.last_scan = datetime.now()
-			git_repo.scan_count += 1
-
-			# Update with API data
-			if repo_data.get('description'):
-				git_repo.description = repo_data.get('description')
-			if repo_data.get('stargazers_count'):
-				git_repo.stargazers_count = repo_data.get('stargazers_count')
-			if repo_data.get('language'):
-				git_repo.language = repo_data.get('language')
-
-			# Add other fields you want to update
-			logger.debug(f'Updated existing GitRepo with API data: {git_repo.github_repo_name}')
-	if create_new:
-		# Save changes
-		session.commit()
-	return git_repo
-
-def check_update_dupes(session) -> dict:
-	"""
-	Check for duplicate GitRepo entries (same git_url) and update their dupe_flag and dupe_count.
-	A duplicate repository is one with the same git_url in multiple locations.
-
-	Parameters:
-		session: SQLAlchemy session
-
-	Returns:
-		dict: Summary of results containing:
-			- total_repos: Total number of repositories
-			- unique_repos: Number of unique repositories
-			- dupe_repos: Number of repositories that are duplicates
-			- dupes_updated: Number of repositories updated
-	"""
-
-	# Get all repositories
-	all_repos = session.query(GitRepo).all()
-	total_repos = len(all_repos)
-
-	# Reset duplicate flags on all repos
-	for repo in all_repos:
-		repo.dupe_flag = False
-		repo.dupe_count = 0
-
-	# Get list of duplicates (repos with same git_url)
-	dupes = get_dupes(session)
-	dupe_urls = set()
-	dupes_updated = 0
-
-	# Process each duplicate group
-	for dupe in dupes:
-		dupe_id = dupe.id
-		dupe_url = dupe.git_url
-		dupe_count = dupe.count
-		dupe_urls.add(dupe_url)
-
-		# Find all repos with this URL
-		same_url_repos = session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all()
-
-		# Update their dupe flags
-		for repo in same_url_repos:
-			repo.dupe_flag = True
-			repo.dupe_count = dupe_count
-			dupes_updated += 1
-
-	# Commit the changes
-	session.commit()
-
-	# Prepare result summary
-	result = {
-		'total_repos': total_repos,
-		'unique_repos': total_repos - len(dupes),
-		'dupe_repos': len(dupe_urls),
-		'dupes_updated': dupes_updated
-	}
-
-	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
-	return result
-
-async def populate_starred_repos(session, max_pages=90, use_cache=True):
-	"""
-	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
-
-	Parameters:
-		session: SQLAlchemy session
-		max_pages: Maximum number of pages to fetch (0 for all)
-		use_cache: Whether to use cached data if available
-
-	Returns:
-		dict: Summary statistics about the operation
-	"""
-	from datetime import datetime
-	import os
-
-	# Fetch starred repositories from GitHub API
-	logger.info(f"Fetching starred repositories (max_pages={max_pages}, use_cache={use_cache})")
-	starred_repos = await get_git_stars(max_pages=max_pages, use_cache=use_cache)
-
-	stats = {
-		"total_db_repos": 0,
-		"total_starred_repos": len(starred_repos),
-		"matched": 0,
-		"updated": 0,
-		"not_found": 0,
-		"errors": 0
-	}
-
-	# Create lookup dictionaries for faster matching
-	github_repos_by_url = {}
-	github_repos_by_name = {}
-
-	for repo_data in starred_repos:
-		# Index by various URLs
-		if repo_data.get('clone_url'):
-			github_repos_by_url[repo_data['clone_url']] = repo_data
-		if repo_data.get('html_url'):
-			github_repos_by_url[repo_data['html_url']] = repo_data
-		if repo_data.get('ssh_url'):
-			github_repos_by_url[repo_data['ssh_url']] = repo_data
-		if repo_data.get('git_url'):
-			github_repos_by_url[repo_data['git_url']] = repo_data
-
-		# Index by name
-		if repo_data.get('full_name'):
-			github_repos_by_name[repo_data['full_name'].lower()] = repo_data
-		if repo_data.get('name'):
-			github_repos_by_name[repo_data['name'].lower()] = repo_data
-
-	# Process all repositories in the database
-	try:
-		db_repos = session.query(GitRepo).all()
-		stats["total_db_repos"] = len(db_repos)
-		logger.info(f"Processing {stats['total_db_repos']} database repositories github_repos_by_url:{len(github_repos_by_url)}")
-
-		for db_repo in db_repos:
-			try:
-				# Try to find matching GitHub data
-				repo_data = None
-
-				# Try matching by URL first
-				if db_repo.git_url and db_repo.git_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.git_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.git_url} {stats["matched"]}')
-				if db_repo.git_url and db_repo.git_url.replace('.git','') in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.git_url.replace('.git','')]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.git_url.replace('.git','')} {stats["matched"]}')
-				elif db_repo.clone_url and db_repo.clone_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.clone_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.clone_url} {stats["matched"]}')
-				elif db_repo.html_url and db_repo.html_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.html_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.html_url} {stats["matched"]}')
-				elif db_repo.ssh_url and db_repo.ssh_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.ssh_url]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.ssh_url} {stats["matched"]}')
-
-				# Then try by name
-				elif db_repo.full_name and db_repo.full_name.lower() in github_repos_by_name:
-					repo_data = github_repos_by_name[db_repo.full_name.lower()]
-					stats["matched"] += 1
-					# logger.debug(f'Matched: {db_repo.full_name.lower()} {stats["matched"]}')
-				elif db_repo.github_repo_name:
-					# logger.debug(f"Trying to match by name: {db_repo.github_repo_name} {stats['matched']}")
-					# Try owner/name format
-					full_name = f"{db_repo.github_owner}/{db_repo.github_repo_name}".lower()
-					if full_name in github_repos_by_name:
-						repo_data = github_repos_by_name[full_name]
-						stats["matched"] += 1
-						# logger.debug(f"match by name: {db_repo.github_repo_name} {len(repo_data)} {stats['matched']}")
-					# Try just the name
-					elif db_repo.github_repo_name.lower() in github_repos_by_name:
-						repo_data = github_repos_by_name[db_repo.github_repo_name.lower()]
-						stats["matched"] += 1
-						# logger.debug(f"match by name: {db_repo.github_repo_name} {len(repo_data)} {stats['matched']}")
-
-				# If we found matching data, update the database entry
-				if repo_data:
-					# Update the entry with all GitHub data
-					db_repo.last_scan = datetime.now()
-					db_repo.scan_count += 1
-
-					# Update with all API data
-					db_repo.node_id = repo_data.get('node_id')
-					db_repo.full_name = repo_data.get('full_name')
-					db_repo.private = repo_data.get('private')
-					db_repo.html_url = repo_data.get('html_url')
-					db_repo.description = repo_data.get('description')
-					db_repo.fork = repo_data.get('fork')
-					db_repo.clone_url = repo_data.get('clone_url')
-					db_repo.ssh_url = repo_data.get('ssh_url')
-					db_repo.git_url_api = repo_data.get('git_url')
-					db_repo.svn_url = repo_data.get('svn_url')
-					db_repo.homepage = repo_data.get('homepage')
-
-					# Statistics
-					db_repo.size = repo_data.get('size')
-					db_repo.stargazers_count = repo_data.get('stargazers_count')
-					db_repo.watchers_count = repo_data.get('watchers_count')
-					db_repo.forks_count = repo_data.get('forks_count')
-					db_repo.open_issues_count = repo_data.get('open_issues_count')
-					db_repo.language = repo_data.get('language')
-
-					# Repository features
-					db_repo.has_issues = repo_data.get('has_issues')
-					db_repo.has_projects = repo_data.get('has_projects')
-					db_repo.has_downloads = repo_data.get('has_downloads')
-					db_repo.has_wiki = repo_data.get('has_wiki')
-					db_repo.has_pages = repo_data.get('has_pages')
-					db_repo.has_discussions = repo_data.get('has_discussions')
-					db_repo.archived = repo_data.get('archived')
-					db_repo.disabled = repo_data.get('disabled')
-					db_repo.allow_forking = repo_data.get('allow_forking')
-					db_repo.is_template = repo_data.get('is_template')
-					db_repo.web_commit_signoff_required = repo_data.get('web_commit_signoff_required')
-
-					# Topics
-					if repo_data.get('topics'):
-						db_repo.topics = ','.join(repo_data.get('topics'))
-
-					db_repo.visibility = repo_data.get('visibility')
-					db_repo.default_branch = repo_data.get('default_branch')
-
-					# License information
-					if repo_data.get('license'):
-						db_repo.license_key = repo_data.get('license', {}).get('key')
-						db_repo.license_name = repo_data.get('license', {}).get('name')
-						db_repo.license_url = repo_data.get('license', {}).get('url')
-
-					# Try to parse timestamps
-					try:
-						if repo_data.get('created_at'):
-							db_repo.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
-						if repo_data.get('updated_at'):
-							db_repo.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
-						if repo_data.get('pushed_at'):
-							db_repo.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
-					except ValueError as e:
-						logger.warning(f"Error parsing timestamps: {e}")
-
-					# Owner information if available
-					if repo_data.get('owner') and isinstance(repo_data['owner'], dict):
-						if not db_repo.github_owner:
-							db_repo.github_owner = repo_data['owner'].get('login')
-
-					stats["updated"] += 1
-					# logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name}")
-				else:
-					# No matching GitHub data found
-					stats["not_found"] += 1
-					# logger.warning(f"No GitHub data for id: {db_repo.id} db_repo: {db_repo}")
-
-				# Commit periodically to avoid large transactions
-				if (stats["updated"] + stats["not_found"]) % 100 == 0:
-					session.commit()
-					logger.warning(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
-
-			except Exception as e:
-				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
-				stats["errors"] += 1
-
-		# Final commit
-		session.commit()
-		logger.info(f"Finished processing repositories: {stats}")
-
-	except Exception as e:
-		logger.error(f"Error fetching database repositories: {e}")
-		stats["errors"] += 1
-		return {"errors": stats["errors"], "message": str(e)}
-
-	return stats
-
-async def populate_repo_data(session, args):
-	"""
-	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
-	Uses the provided git_repos list rather than querying again.
-
-	Parameters:
-		session: SQLAlchemy session
-
-	Returns:
-		dict: Summary statistics about the operation
-	"""
-	from datetime import datetime
-	import os
-
-	# Use the existing git_repos variable
-	git_repos = session.query(GitRepo).all()
-
-	# Fetch starred repositories from GitHub API
-	starred_repos = await get_git_stars()
-
-	stats = {
-		"total_db_repos": len(git_repos),
-		"total_starred_repos": len(starred_repos['repos']),
-		"matched": 0,
-		"updated": 0,
-		"not_found": 0,
-		"errors": 0
-	}
-
-	# Create lookup dictionaries for faster matching
-	github_repos_by_url = {}
-	github_repos_by_name = {}
-
-	# Build lookup dictionaries
-	for repo_data in starred_repos['repos']:
-		# Index by various URLs
-		if repo_data.get('clone_url'):
-			github_repos_by_url[repo_data['clone_url']] = repo_data
-		if repo_data.get('html_url'):
-			github_repos_by_url[repo_data['html_url']] = repo_data
-		if repo_data.get('ssh_url'):
-			github_repos_by_url[repo_data['ssh_url']] = repo_data
-		if repo_data.get('git_url'):
-			github_repos_by_url[repo_data['git_url']] = repo_data
-
-		# Index by name
-		if repo_data.get('full_name'):
-			github_repos_by_name[repo_data['full_name'].lower()] = repo_data
-		if repo_data.get('name'):
-			github_repos_by_name[repo_data['name'].lower()] = repo_data
-
-	logger.info(f"Processing {stats['total_db_repos']} database repositories against {stats['total_starred_repos']} starred repos")
-
-	# Process each repository from the git_repos list
-	try:
-		for db_repo in git_repos:
-			try:
-				# Try to find matching GitHub data
-				repo_data = None
-				# Try matching by URL first
-				if db_repo.git_url and db_repo.git_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.git_url]
-					stats["matched"] += 1
-				elif db_repo.git_url and db_repo.git_url.replace('.git', '') in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.git_url.replace('.git', '')]
-					stats["matched"] += 1
-				elif db_repo.clone_url and db_repo.clone_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.clone_url]
-					stats["matched"] += 1
-				elif db_repo.html_url and db_repo.html_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.html_url]
-					stats["matched"] += 1
-				elif db_repo.ssh_url and db_repo.ssh_url in github_repos_by_url:
-					repo_data = github_repos_by_url[db_repo.ssh_url]
-					stats["matched"] += 1
-
-				# Then try by name
-				elif db_repo.full_name and db_repo.full_name.lower() in github_repos_by_name:
-					repo_data = github_repos_by_name[db_repo.full_name.lower()]
-					stats["matched"] += 1
-				elif db_repo.github_repo_name:
-					# Try owner/name format
-					full_name = f"{db_repo.github_owner}/{db_repo.github_repo_name}".lower()
-					if full_name in github_repos_by_name:
-						repo_data = github_repos_by_name[full_name]
-						stats["matched"] += 1
-					# Try just the name
-					elif db_repo.github_repo_name.lower() in github_repos_by_name:
-						repo_data = github_repos_by_name[db_repo.github_repo_name.lower()]
-						stats["matched"] += 1
-
-				# If we found matching data, update the database entry
-				if repo_data:
-					# Update the entry with all GitHub data
-					update_repo_from_data(db_repo, repo_data)
-					stats["updated"] += 1
-					if args.debug:
-						logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name} scan_count: {db_repo.scan_count} ")
-				else:
-					# No matching GitHub data found
-					stats["not_found"] += 1
-
-				# Commit periodically to avoid large transactions
-				if (stats["updated"] + stats["not_found"]) % 100 == 0:
-					session.commit()
-					logger.info(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
-
-			except Exception as e:
-				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
-				stats["errors"] += 1
-
-		# Final commit
-		session.commit()
-		logger.info(f"Finished processing repositories: {stats}")
-
-	except Exception as e:
-		logger.error(f"Error processing repositories: {e}")
-		stats["errors"] += 1
-		return {"errors": stats["errors"], "message": str(e)}
-
-	return stats
-
-async def fetch_missing_repo_data(session, update_all=False):
-	"""
-	Fetch GitHub API data for repositories that weren't found in starred repos
-	"""
-
-	stats = {
-		"total_repos": 0,
-		"processed": 0,
-		"updated": 0,
-		"failed": 0,
-		"skipped": 0,
-		"from_cache": 0
-	}
-
-	# Load cache first
-	stars_cache_file = f'{CACHE_DIR}/starred_repos.json'
-	cache_data = {'repos': []}
-
-	if os.path.exists(stars_cache_file):
-		try:
-			async with aiofiles.open(stars_cache_file, 'r') as f:
-				cache_content = await f.read()
-				cache_data = json.loads(cache_content)
-				logger.info(f"Loaded {len(cache_data['repos'])} repositories from cache")
-		except Exception as e:
-			logger.error(f"Failed to load cache: {e}")
-
-	# Build lookup dictionary for cached repos
-	cache_repos_by_name = {}
-	for repo in cache_data.get('repos', []):
-		if repo.get('full_name'):
-			cache_repos_by_name[repo['full_name'].lower()] = repo
-		if repo.get('name'):
-			# Also index by name only as fallback
-			cache_repos_by_name[repo['name'].lower()] = repo
-
-	# Get GitHub auth token
-	auth = get_auth_param()
-	if not auth:
-		logger.error('fetch_missing_repo_data: no auth provided')
-		return stats
-
-	# Setup GitHub API headers
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
-
-	# Query repos from database that need updating
-	if update_all:
-		db_repos = session.query(GitRepo).all()
-	else:
-		# Only get repos that are missing key GitHub data
-		db_repos = session.query(GitRepo).filter((GitRepo.node_id.is_(None)) | (GitRepo.full_name.is_(None)) | (GitRepo.description.is_(None))).all()
-
-	stats["total_repos"] = len(db_repos)
-	logger.info(f"Found {stats['total_repos']} repositories that need GitHub data")
-
-	# Process repositories in batches for efficiency
-	batch_size = 10
-	for i in range(0, len(db_repos), batch_size):
-		batch = db_repos[i:i+batch_size]
-		tasks = []
-
-		async with aiohttp.ClientSession() as api_session:
-			for repo in batch:
-				tasks.append(process_repo(repo, api_session, headers, cache_repos_by_name, cache_data, stats, session))
-
-			await asyncio.gather(*tasks)
-
-			# Commit after each batch
-			session.commit()
-			logger.info(f"Progress: {i+len(batch)}/{stats['total_repos']} repositories processed")
-
-	# Final cache update
-	try:
-		if not os.path.exists(CACHE_DIR):
-			os.makedirs(CACHE_DIR)
-
-		async with aiofiles.open(stars_cache_file, 'w') as f:
-			cache_data['timestamp'] = str(datetime.now())
-			await f.write(json.dumps(cache_data, indent=4))
-			logger.info("Final update to cache file with new data")
-	except Exception as e:
-		logger.error(f"Failed to update cache: {e}")
-
-	# Final commit
-	session.commit()
-	logger.info(f"Finished fetching repository data: {stats}")
-
-	return stats
-
-async def process_repo(repo, api_session, headers, cache_repos_by_name, cache_data, stats, session):
-	"""Helper function to process a single repository"""
-	stats["processed"] += 1
-
-	# Skip if no owner/name information is available
-	if not repo.github_owner or not repo.github_repo_name:
-		stats["skipped"] += 1
-		logger.warning(f"Skipping repo with missing owner/name: {repo}")
-		return
-
-	# Construct the repository path
-	repo_path = f"{repo.github_owner}/{repo.github_repo_name}"
-	api_url = f"https://api.github.com/repos/{repo_path}"
-
-	# First check if repo exists in cache
-	repo_data = None
-	repo_key = repo_path.lower()
-
-	if repo_key in cache_repos_by_name:
-		repo_data = cache_repos_by_name[repo_key]
-		stats["from_cache"] += 1
-	else:
-		# Not in cache, make API request
-		logger.info(f"Fetching GitHub data for {repo_path} ({stats['processed']}/{stats['total_repos']})")
-
-		try:
-			# Make the API request
-			async with api_session.get(api_url, headers=headers) as response:
-				if response.status == 200:
-					repo_data = await response.json()
-
-					# Add to cache
-					cache_data['repos'].append(repo_data)
-					cache_repos_by_name[repo_path.lower()] = repo_data
-
-				elif response.status == 404:
-					logger.warning(f"Repository not found on GitHub: {repo_path} (possibly private, renamed or deleted)")
-					stats["failed"] += 1
-					return
-				else:
-					error_text = await response.text()
-					logger.error(f"GitHub API error ({response.status}): {error_text}")
-					stats["failed"] += 1
-					return
-
-		except Exception as e:
-			logger.error(f"Error processing {repo_path}: {e}")
-			stats["failed"] += 1
-			return
-
-	# If we have data (either from cache or API), update the repository
-	if repo_data:
-		try:
-			# Update repository with data
-			update_repo_from_data(repo, repo_data)
-			stats["updated"] += 1
-
-		except Exception as e:
-			logger.error(f"Error updating repository {repo_path}: {e}")
-			stats["failed"] += 1
-
-def update_repo_from_data(repo, repo_data):
-	"""Update a repository with data from GitHub API"""
-	repo.last_scan = datetime.now()
-	repo.scan_count += 1
-
-	# Update all fields with API data
-	repo.node_id = repo_data.get('node_id')
-	repo.full_name = repo_data.get('full_name')
-	repo.private = repo_data.get('private')
-	repo.html_url = repo_data.get('html_url')
-	repo.description = repo_data.get('description')
-	repo.fork = repo_data.get('fork')
-	repo.clone_url = repo_data.get('clone_url')
-	repo.ssh_url = repo_data.get('ssh_url')
-	repo.git_url_api = repo_data.get('git_url')
-	repo.svn_url = repo_data.get('svn_url')
-	repo.homepage = repo_data.get('homepage')
-
-	# Statistics
-	repo.size = repo_data.get('size')
-	repo.stargazers_count = repo_data.get('stargazers_count')
-	repo.watchers_count = repo_data.get('watchers_count')
-	repo.forks_count = repo_data.get('forks_count')
-	repo.open_issues_count = repo_data.get('open_issues_count')
-	repo.language = repo_data.get('language')
-
-	# Repository features
-	repo.has_issues = repo_data.get('has_issues')
-	repo.has_projects = repo_data.get('has_projects')
-	repo.has_downloads = repo_data.get('has_downloads')
-	repo.has_wiki = repo_data.get('has_wiki')
-	repo.has_pages = repo_data.get('has_pages')
-	repo.has_discussions = repo_data.get('has_discussions')
-	repo.archived = repo_data.get('archived')
-	repo.disabled = repo_data.get('disabled')
-	repo.allow_forking = repo_data.get('allow_forking')
-	repo.is_template = repo_data.get('is_template')
-	repo.web_commit_signoff_required = repo_data.get('web_commit_signoff_required')
-
-	# Topics
-	if repo_data.get('topics'):
-		repo.topics = ','.join(repo_data.get('topics'))
-
-	repo.visibility = repo_data.get('visibility')
-	repo.default_branch = repo_data.get('default_branch')
-
-	# License information
-	if repo_data.get('license'):
-		repo.license_key = repo_data.get('license', {}).get('key')
-		repo.license_name = repo_data.get('license', {}).get('name')
-		repo.license_url = repo_data.get('license', {}).get('url')
-
-	# Parse timestamps
-	try:
-		if repo_data.get('created_at'):
-			repo.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
-		if repo_data.get('updated_at'):
-			repo.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
-		if repo_data.get('pushed_at'):
-			repo.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
-	except ValueError as e:
-		logger.warning(f"Error parsing timestamps: {e}")
-
-def ensure_datetime(dt_value):
-	"""Convert a value to datetime if it's not already, or return None if conversion fails"""
-	if dt_value is None:
-		return None
-	if isinstance(dt_value, datetime):
-		return dt_value
-
-	# Try to convert string to datetime if it's a string
-	if isinstance(dt_value, str):
-		try:
-			return datetime.fromisoformat(dt_value.replace('Z', '+00:00'))
-		except (ValueError, TypeError):
-			try:
-				return datetime.strptime(dt_value, '%Y-%m-%dT%H:%M:%SZ')
-			except (ValueError, TypeError):
-				pass
-
-	# If we can't convert it, return None
-	logger.warning(f"Could not convert to datetime: {dt_value} (type: {type(dt_value)})")
-	return None
-
-def populate_from_metadata(repo, metadata):
-	"""
-	Populate a GitRepo object with metadata from GitHub API
-
-	Parameters:
-		repo: GitRepo object to populate
-		metadata: Dictionary containing GitHub repository metadata
-
-	Returns:
-		GitRepo: The updated repo object
-	"""
-	if not metadata:
-		logger.warning("No metadata provided to populate_from_metadata")
-		return repo
-
-	# Record the update time
-	repo.last_scan = datetime.now()
-	repo.scan_count = repo.scan_count + 1 if repo.scan_count else 1
-
-	# Basic repository information
-	repo.github_repo_name = metadata.get('name')
-	repo.full_name = metadata.get('full_name')
-	repo.node_id = metadata.get('node_id')
-	repo.private = metadata.get('private')
-
-	# URLs
-	repo.html_url = metadata.get('html_url')
-	repo.git_url = metadata.get('git_url')
-	repo.ssh_url = metadata.get('ssh_url')
-	repo.clone_url = metadata.get('clone_url')
-	repo.svn_url = metadata.get('svn_url')
-	repo.git_url_api = metadata.get('url')
-	repo.homepage = metadata.get('homepage')
-
-	# Description
-	repo.description = metadata.get('description')
-
-	# Repository type information
-	repo.fork = metadata.get('fork')
-	repo.visibility = metadata.get('visibility')
-	repo.default_branch = metadata.get('default_branch')
-
-	# Statistics
-	repo.size = metadata.get('size')
-	repo.stargazers_count = metadata.get('stargazers_count')
-	repo.watchers_count = metadata.get('watchers_count')
-	repo.forks_count = metadata.get('forks_count')
-	repo.open_issues_count = metadata.get('open_issues_count')
-	repo.language = metadata.get('language')
-
-	# Repository features
-	repo.has_issues = metadata.get('has_issues')
-	repo.has_projects = metadata.get('has_projects')
-	repo.has_downloads = metadata.get('has_downloads')
-	repo.has_wiki = metadata.get('has_wiki')
-	repo.has_pages = metadata.get('has_pages')
-	repo.has_discussions = metadata.get('has_discussions')
-	repo.archived = metadata.get('archived')
-	repo.disabled = metadata.get('disabled')
-	repo.allow_forking = metadata.get('allow_forking')
-	repo.is_template = metadata.get('is_template')
-	repo.web_commit_signoff_required = metadata.get('web_commit_signoff_required')
-
-	# Topics - stored as comma-separated string
-	if metadata.get('topics'):
-		repo.topics = ','.join(metadata.get('topics'))
-
-	# License information
-	if metadata.get('license') and isinstance(metadata['license'], dict):
-		repo.license_key = metadata['license'].get('key')
-		repo.license_name = metadata['license'].get('name')
-		repo.license_url = metadata['license'].get('url')
-
-	# Owner information
-	if metadata.get('owner') and isinstance(metadata['owner'], dict):
-		repo.github_owner = metadata['owner'].get('login')
-		# Store additional owner data if needed
-
-	# Parse timestamps
-	try:
-		if metadata.get('created_at'):
-			repo.created_at = ensure_datetime(metadata.get('created_at'))
-		if metadata.get('updated_at'):
-			repo.updated_at = ensure_datetime(metadata.get('updated_at'))
-		if metadata.get('pushed_at'):
-			repo.pushed_at = ensure_datetime(metadata.get('pushed_at'))
-	except ValueError as e:
-		logger.warning(f"Error parsing timestamps: {e}")
-
-	# Store complete metadata if needed for reference
-	# repo.raw_metadata = json.dumps(metadata)  # If you want to store the raw JSON
-
-	logger.debug(f"Populated metadata for {repo.full_name} ({repo.id})")
-	return repo
-
-async def fetch_metadata(repo):
-	"""Fetch metadata from GitHub API for this repository"""
-	auth = get_auth_param()
-	if not auth:
-		logger.error('fetch_metadata: no auth provided')
-		return None
-
-	api_url = f'https://api.github.com/repos/{repo.github_owner}/{repo.github_repo_name}'
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
-	repo_metadata = None
-	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.get(api_url, headers=headers) as r:
-				if r.status == 200:
-					repo_metadata = await r.json()
-					# for key, value in repo_data.items():
-					# 	setattr(self, key, value)
-					logger.debug(f'Fetched metadata for {repo.github_repo_name}')
-				else:
-					logger.error(f"Failed to fetch metadata: {r.status} {await r.text()}")
-	except Exception as e:
-		logger.error(f"Error fetching metadata: {e}")
-	finally:
-		await session.close()
-		logger.debug(f"Session closed after fetching metadata for {repo}")
-		return repo_metadata
 
 if __name__ == '__main__':
 	pass

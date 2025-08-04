@@ -1,25 +1,20 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
-## Form generated from reading UI file 'mainwindowmtLyWy.ui'
+## Form generated from reading UI file 'mainwindoweMBGkB.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.6.2
+## Created by: Qt User Interface Compiler version 5.15.15
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
-    QCursor, QFont, QFontDatabase, QGradient,
-    QIcon, QImage, QKeySequence, QLinearGradient,
-    QPainter, QPalette, QPixmap, QRadialGradient,
-    QTransform)
-from PySide6.QtWidgets import (QApplication, QFormLayout, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QMenu,
-    QMenuBar, QPushButton, QSizePolicy, QStatusBar,
-    QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtCore import Qt, QRect, QCoreApplication, QMetaObject  # type: ignore
+from PySide6.QtGui import QAction  # type: ignore
+from PySide6.QtWidgets import (
+    QWidget, QFormLayout, QLabel, QLineEdit, QHBoxLayout, QPushButton,
+    QTreeWidget, QTreeWidgetItem, QMenuBar, QMenu, QStatusBar
+)  # type: ignore
+
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -44,7 +39,7 @@ class Ui_MainWindow(object):
         self.formLayout.setObjectName(u"formLayout")
         self.formLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.formLayout.setLabelAlignment(Qt.AlignCenter)
-        self.formLayout.setFormAlignment(Qt.AlignJustify|Qt.AlignTop)  # type: ignore
+        self.formLayout.setFormAlignment(Qt.AlignJustify | Qt.AlignTop)
         self.formLayout.setContentsMargins(0, 3, 3, 3)
         self.idLabel = QLabel(self.formLayoutWidget_3)
         self.idLabel.setObjectName(u"idLabel")
