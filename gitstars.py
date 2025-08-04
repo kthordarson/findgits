@@ -149,65 +149,6 @@ async def get_git_stars(args, session):
 			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
 		return git_starred_repos
 
-async def get_list_members(args, list_url) -> List[dict]:
-	"""
-	Get members of a GitHub starred repository list by scraping the list page.
-
-	Args:
-		args: Command line arguments
-		list_url: URL of the GitHub starred repository list
-
-	Returns:
-		List[dict]: List of dictionaries with repository details
-	"""
-	members = []
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return members
-
-	async with aiohttp.ClientSession() as api_session:
-		if args.debug:
-			logger.debug(f"Fetching list members from {list_url}")
-		async with api_session.get(list_url) as r:
-			if r.status == 200:
-				content = await r.text()
-	soup = BeautifulSoup(content, 'html.parser')
-	# repo_items = soup.find_all('div', class_='Box-row d-flex flex-items-center p-3')
-	data_soup = soup.select_one('div', attrs={"id":"user-list-repositories","class":"my-3"})
-	list_soup = data_soup.find_all('div', class_="col-12 d-block width-full py-4 border-bottom color-border-muted")
-	list_hrefs = [k.find('div', class_='d-inline-block mb-1').find('a').attrs['href'] for k in list_soup]
-
-	for item in list_soup:
-		h3_tag = item.find('h3')
-		a_tag = h3_tag.find('a') if h3_tag else None
-		repo_url = f"https://github.com{a_tag['href']}" if a_tag else ''
-		repo_full_text = a_tag.get_text(strip=True) if a_tag else ''
-		owner = ''
-		repo_name = ''
-		if a_tag:
-			owner_span = a_tag.find('span', class_='text-normal')
-			if owner_span:
-				owner = owner_span.get_text(strip=True).replace('/', '').strip()
-				repo_name = repo_full_text.replace(owner_span.get_text(), '').strip()
-			else:
-				# fallback: parse from href
-				parts = a_tag['href'].strip('/').split('/')
-				if len(parts) >= 2:
-					owner = parts[0]
-					repo_name = parts[1]
-
-		# repo_name = item.find('a', class_='Link--primary').get_text(strip=True)
-		repo_desc = item.find('p', class_='f6 color-fg-muted my-1').get_text(strip=True) if item.find('p', class_='f6 color-fg-muted my-1') else ''
-		# repo_url = f"https://github.com{item.find('a', class_='Link--primary')['href']}"
-		members.append({
-			'name': repo_name,
-			'description': repo_desc,
-			'url': repo_url
-		})
-	if args.debug:
-		logger.debug(f"Found {len(members)} members in list {list_url}")
-	return members
-
 async def get_lists(args, session) -> dict:
 	"""
 	Fetches the user's GitHub starred repository lists by scraping the stars page.
