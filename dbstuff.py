@@ -342,25 +342,31 @@ class GitStar(Base):
 	id: Mapped[int] = mapped_column(primary_key=True)
 	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
 	starred_at = Column(DateTime)
-	# Add other available info as needed, e.g. stargazers_count, description, etc.
+	# Add other available info as needed
 	stargazers_count = Column(Integer)
 	description = Column(String(1024))
 	full_name = Column(String(255))
 	html_url = Column(String(255))
-	# Relationship
+
+	# NEW: Link to lists that contain this starred repo
+	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
+
+	# Relationships
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="star_entry")
+	git_list: Mapped["GitList"] = relationship("GitList", back_populates="starred_repos")
 
 class GitList(Base):
-	"""A starred repo list, linked to GitStar"""
+	"""A starred repo list, containing multiple GitStars"""
 	__tablename__ = 'gitlists'
 	id: Mapped[int] = mapped_column(primary_key=True)
 	list_name = Column(String(255))
 	list_description = Column(String(1024))
 	list_url = Column(String(255))
 	repo_count = Column(Integer, default=0)
-	# Link to GitStar (many-to-one)
-	gitstar_id = Column(Integer, ForeignKey('gitstars.id'))
-	star: Mapped["GitStar"] = relationship("GitStar", back_populates="lists")
+	created_at = Column('created_at', DateTime, default=datetime.now)
+
+	# Relationships - one list can contain many starred repos
+	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
 
 # Add relationships to GitRepo and GitStar
 GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
