@@ -719,26 +719,22 @@ async def fetch_metadata(repo, session, args):
 			logger.error(f"Error parsing cached metadata: {e} {type(e)} for {repo}")
 			logger.error(f'traceback: {traceback.format_exc()}')
 	else:
-		if args.nodl:
-			logger.warning(f"Running in --nodl mode, no API requests will be made for {repo_path}")
+		# Use update_repo_cache to get metadata
+		repo_metadata = None
+		try:
+			repo_metadata = await update_repo_cache(repo_path, session, args)
+			return repo_metadata
+		except RateLimitExceededError as e:
+			logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
+			raise e
+		except AttributeError as e:
+			logger.warning(f"Error fetching repository metadata: {e} for {repo_path}")
+			logger.warning(f'traceback: {traceback.format_exc()}')
+		except Exception as e:
+			logger.error(f"Error fetching repository metadata: {e} {type(e)} for {repo_path}")
+			logger.error(f'traceback: {traceback.format_exc()}')
+			# return None
+		if not repo_metadata:
+			logger.warning(f"No cache entry found for {repo_path}")
 			return None
-		else:
-			# Use update_repo_cache to get metadata
-			repo_metadata = None
-			try:
-				repo_metadata = await update_repo_cache(repo_path, session, args)
-				return repo_metadata
-			except RateLimitExceededError as e:
-				logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
-				raise e
-			except AttributeError as e:
-				logger.warning(f"Error fetching repository metadata: {e} for {repo_path}")
-				logger.warning(f'traceback: {traceback.format_exc()}')
-			except Exception as e:
-				logger.error(f"Error fetching repository metadata: {e} {type(e)} for {repo_path}")
-				logger.error(f'traceback: {traceback.format_exc()}')
-				# return None
-			if not repo_metadata:
-				logger.warning(f"No cache entry found for {repo_path}")
-				return None
 

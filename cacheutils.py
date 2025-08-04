@@ -110,9 +110,6 @@ async def update_repo_cache(repo_name_or_url, session, args):
 			except Exception as e:
 				logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_name_or_url}")
 				logger.error(f'traceback: {traceback.format_exc()}')
-	if args.nodl:
-		logger.warning(f"Skipping API call for {repo_name} due to --nodl flag")
-		return None
 	auth = await get_auth_params()
 	if not auth:
 		logger.error('update_repo_cache: no auth provided')

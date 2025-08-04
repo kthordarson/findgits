@@ -321,7 +321,6 @@ def get_args():
 	myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
 	myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
 	myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
-	myparse.add_argument('--nodl', help='disable all downloads/api call', action='store_true', default=False, dest='nodl')
 	args = myparse.parse_args()
 	if args.disable_cache:
 		args.use_cache = False

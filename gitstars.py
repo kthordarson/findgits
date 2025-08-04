@@ -27,10 +27,6 @@ async def get_info_for_list(link, headers, session, args):
 			except json.JSONDecodeError as e:
 				logger.error(f'Failed to parse cached list info: {e}')
 
-	if args.nodl:
-		logger.warning(f"Skipping API call for {link} due to --nodl flag")
-		return []
-
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit, skipping fetch for list.")
 		await asyncio.sleep(1)
@@ -170,10 +166,6 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 				logger.error(f"Failed to parse cache: {e} {type(e)}")
 				logger.error(f'traceback: {traceback.format_exc()}')
 
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return []
-
 	auth = await get_auth_params()
 	if not auth:
 		logger.error("No GitHub authentication available")
@@ -285,13 +277,6 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		return {
 			'lists_metadata': cached_metadata,
 			'lists_with_repos': cached_stars
-		}
-
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return {
-			'lists_metadata': cached_metadata or [],
-			'lists_with_repos': cached_stars or {}
 		}
 
 	# Get authentication
