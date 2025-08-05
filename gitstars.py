@@ -4,7 +4,7 @@ import asyncio
 import json
 from loguru import logger
 from bs4 import BeautifulSoup
-from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
+from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit, RateLimitExceededError
 from utils import get_client_session, get_auth_params, get_semaphore
 
 async def get_info_for_list(link, headers, session, args):
@@ -29,7 +29,7 @@ async def get_info_for_list(link, headers, session, args):
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit, skipping fetch for list.")
 		await asyncio.sleep(1)
-		return []
+		raise RateLimitExceededError()
 
 	all_hrefs = []
 	current_url = link
@@ -100,7 +100,7 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
-		return None
+		raise RateLimitExceededError()
 
 	async with semaphore:
 		# Check if we should stop (other pages found empty results)
@@ -139,7 +139,7 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 					return page_num, page_data
 				elif page_response.status == 403:
 					logger.warning(f"Rate limit hit on page {page_num}")
-					return page_num, []
+					raise RateLimitExceededError()
 				else:
 					logger.warning(f"Page {page_num} failed with status {page_response.status}")
 					return page_num, []
@@ -182,7 +182,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
-		return []
+		raise RateLimitExceededError()
 
 	async with get_client_session(args) as api_session:
 		# Fetch first page to determine total pages
@@ -351,10 +351,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
-		return {
-			'lists_metadata': cached_metadata or [],
-			'lists_with_repos': cached_stars or {}
-		}
+		raise RateLimitExceededError()  # return {'lists_metadata': cached_metadata or [], 'lists_with_repos': cached_stars or {}}
 
 	# Scrape the GitHub stars page once
 	soup = None
