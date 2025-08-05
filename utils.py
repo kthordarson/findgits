@@ -62,6 +62,9 @@ def get_remote_url(git_path: str) -> str:
 	Returns: str - remote url
 	"""
 	remote_url = '[no remote]'
+	remote_out = ''
+	out = ''
+	err = ''
 	try:
 		os.chdir(git_path)
 		cmdstr = ['git', 'remote', '-v']

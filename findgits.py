@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 import traceback
-from typing import cast
+from typing import cast, Optional, Any, Dict, List, Tuple
 import asyncio
 import re
 from datetime import datetime
@@ -8,7 +8,8 @@ from pathlib import Path
 import argparse
 import json
 from loguru import logger
-from sqlalchemy.orm import sessionmaker
+import sqlalchemy
+from sqlalchemy.orm import sessionmaker, Session
 from dbstuff import GitRepo, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
 from repotools import create_repo_to_list_mapping, verify_star_list_links, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
@@ -23,7 +24,7 @@ from stats import (
     show_rate_limits
 )
 
-async def process_git_folder(git_path, session, args):
+async def process_git_folder(git_path: Path, session: Session, args: argparse.Namespace) -> Optional[Any]:
     """Process a single git folder asynchronously"""
     try:
         # Always ensure the session is in a valid state
@@ -61,7 +62,7 @@ async def process_git_folder(git_path, session, args):
                 result.is_starred = True
             if hasattr(result, 'star_id'):
                 result.star_id = star_entry.id
-            if hasattr(result, 'list_id') and star_entry.gitlist_id:
+            if hasattr(result, 'list_id') and star_entry.gitlist_id is not None:
                 result.list_id = star_entry.gitlist_id
         else:
             git_repo.is_starred = False
@@ -83,7 +84,7 @@ async def process_git_folder(git_path, session, args):
             session.rollback()
         return None
 
-async def process_starred_repo(repo, session, args):
+async def process_starred_repo(repo: str, session: Session, args: argparse.Namespace) -> None:
     """Process a single starred repo asynchronously"""
     try:
         await insert_update_starred_repo(github_repo=repo, session=session, args=args, create_new=True)
@@ -91,7 +92,7 @@ async def process_starred_repo(repo, session, args):
         logger.error(f'Error processing {repo}: {e} {type(e)}')
         logger.error(f'traceback: {traceback.format_exc()}')
 
-async def link_existing_repos_to_stars(session, args):
+async def link_existing_repos_to_stars(session: Session, args: argparse.Namespace) -> None:
     """Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
     try:
         # Get all starred repos from GitHub
@@ -183,7 +184,7 @@ async def link_existing_repos_to_stars(session, args):
                     list_name = repo_to_list_mapping[full_name]
                     git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
                     if git_list:
-                        git_star.gitlist_id = git_list.id
+                        git_star.gitlist_id = git_list.id  # type: ignore
                         linked_count += 1
 
             except Exception as e:
@@ -200,7 +201,7 @@ async def link_existing_repos_to_stars(session, args):
         session.rollback()
 
 # Update populate_git_lists to use the unified function
-async def populate_git_lists(session, args):
+async def populate_git_lists(session: Session, args: argparse.Namespace) -> List[Dict[str, Any]]:
     # Use the unified function instead of separate calls
     unified_data = await get_lists_and_stars_unified(session, args)
     list_data = unified_data['lists_metadata']
@@ -275,7 +276,7 @@ async def populate_git_lists(session, args):
 
     return list_data
 
-def get_args():
+def get_args() -> argparse.Namespace:
     myparse = argparse.ArgumentParser(description="findgits")
     myparse.add_argument('--scanpath','-sp', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
     # info
@@ -307,7 +308,7 @@ def get_args():
         args.check_rate_limits = True
     return args
 
-def get_session(args):
+def get_session(args: argparse.Namespace) -> Tuple[Session, sqlalchemy.Engine]:
     engine = get_engine(args)
     s = sessionmaker(bind=engine)
     session = s()
@@ -315,7 +316,7 @@ def get_session(args):
     print(f'DB Engine: {engine} DB Type: {engine.name} DB URL: {engine.url}')
     return session, engine
 
-async def main():
+async def main() -> None:
     args = get_args()
     session, engine = get_session(args)
 
