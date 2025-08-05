@@ -303,6 +303,9 @@ async def show_list_by_group(session, args):
 	for list_name, repos in grouped_repos.items():
 		print(f"\n{list_name} ({len(repos)} repos):")
 		print("-" * (len(list_name) + 10))
+		print(f"{'Stars':>9} | {'Language':<15} | {'Repository Name':<40} | {'Description'}")
+		print(f"{'-' * 9} | {'-' * 15} | {'-' * 40} | {'-' * 11}")
+
 		for repo in repos[:args.max_output]:
 			stars = repo.get('stargazers_count', 0)
 			if repo.get('language'):
@@ -315,7 +318,7 @@ async def show_list_by_group(session, args):
 				desc = 'No description'
 			if len(desc) > 60:
 				desc = desc[:57] + "..."
-			print(f"⭐ {stars:7d} | {lang:15} | {repo['full_name']:40} | {desc}")
+			print(f"{stars:9d} | {lang:15} | {repo['full_name']:40} | {desc}")
 
 async def show_rate_limits(session, args):
 	"""Show GitHub API rate limit information"""
