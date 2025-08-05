@@ -4,7 +4,6 @@ import asyncio
 import json
 from loguru import logger
 from bs4 import BeautifulSoup
-import datetime
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
 from utils import get_client_session, get_auth_params
 

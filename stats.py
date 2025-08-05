@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 import traceback
-import json
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -10,9 +9,8 @@ from itertools import combinations
 from typing import Dict, List
 from loguru import logger
 from sqlalchemy import text
-from dbstuff import GitRepo, GitFolder, GitStar, GitList
+from dbstuff import GitRepo, GitFolder
 from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
-from repotools import check_update_dupes
 from cacheutils import get_api_rate_limits
 
 def dbcheck(session) -> dict:

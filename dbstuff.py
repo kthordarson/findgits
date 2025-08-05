@@ -2,10 +2,10 @@ from __future__ import annotations
 import os
 import pandas as pd
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, cast, Sequence, Any
 from loguru import logger
 import sqlalchemy
-from sqlalchemy import (Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
+from sqlalchemy import (Row, func, Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import DeclarativeBase
@@ -123,18 +123,18 @@ class GitFolder(Base):
 
 	def get_folder_stats(self):
 		t0 = datetime.now()
-		if not os.path.exists(self.git_path):  # redundant check, but just in case?
+		if not os.path.exists(cast(str, self.git_path)):  # redundant check, but just in case?
 			self.valid = False
 			logger.error(f'{self} does not exist')
 			return
-		self.folder_size = get_directory_size(self.git_path)
-		self.file_count = get_subfilecount(self.git_path)
-		self.subdir_count = get_subdircount(self.git_path)
+		self.folder_size = get_directory_size(cast(str, self.git_path))
+		self.file_count = get_subfilecount(cast(str, self.git_path))
+		self.subdir_count = get_subdircount(cast(str, self.git_path))
 		self.scan_time = (datetime.now() - t0).total_seconds()
 		self.last_scan = datetime.now()
 		self.scanned = True
 		self.scan_count += 1
-		stat = os.stat(self.git_path)
+		stat = os.stat(cast(str, self.git_path))
 		self.git_path_ctime = ensure_datetime(datetime.fromtimestamp(stat.st_ctime))
 		self.git_path_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
 		self.git_path_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
@@ -216,7 +216,8 @@ class GitRepo(Base):
 	scanned = Column(Boolean, default=False)  # Fixed this line
 
 	is_starred = Column('is_starred', Boolean, default=False)
-	starred_at = Column('starred_at', DateTime, nullable=True)
+	# starred_at = Column('starred_at', DateTime, nullable=True)
+	starred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 	# Relationships - specify foreign_keys explicitly to resolve ambiguity
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
@@ -284,7 +285,7 @@ class GitRepo(Base):
 
 			# Topics
 			if repo_data.get('topics'):
-				self.topics = ','.join(repo_data.get('topics'))
+				self.topics = ','.join(repo_data.get('topics', []))
 
 			self.visibility = repo_data.get('visibility')
 			self.default_branch = repo_data.get('default_branch')
@@ -298,11 +299,15 @@ class GitRepo(Base):
 			# Try to parse timestamps
 			try:
 				if repo_data.get('created_at'):
-					self.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
+					created_at_str = repo_data.get('created_at','')
+					self.created_at = datetime.strptime(created_at_str, '%Y-%m-%dT%H:%M:%SZ')
+					# self.created_at = datetime.strptime(repo_data.get('created_at'), '%Y-%m-%dT%H:%M:%SZ')
 				if repo_data.get('updated_at'):
-					self.updated_at = datetime.strptime(repo_data.get('updated_at'), '%Y-%m-%dT%H:%M:%SZ')
+					updated_at_str = repo_data.get('updated_at','')
+					self.updated_at = datetime.strptime(updated_at_str, '%Y-%m-%dT%H:%M:%SZ')
 				if repo_data.get('pushed_at'):
-					self.pushed_at = datetime.strptime(repo_data.get('pushed_at'), '%Y-%m-%dT%H:%M:%SZ')
+					pushed_at_str = repo_data.get('pushed_at','')
+					self.pushed_at = datetime.strptime(pushed_at_str, '%Y-%m-%dT%H:%M:%SZ')
 			except ValueError as e:
 				logger.warning(f"Error parsing timestamps: {e}")
 
@@ -311,15 +316,15 @@ class GitRepo(Base):
 
 	def update_config_times(self):
 		""" Update the config_ctime, config_atime, config_mtime based on the local git config file """
-		if self.local_path == '[notcloned]':
+		if cast(str, self.local_path) == '[notcloned]':
 			self.config_ctime = None
 			self.config_atime = None
 			self.config_mtime = None
 			return
-		if not os.path.exists(self.local_path):
+		if not os.path.exists(cast(str, self.local_path)):
 			logger.error(f'Local path {self.local_path} does not exist')
 			return
-		config_path = os.path.join(self.local_path, '.git', 'config')
+		config_path = os.path.join(cast(str, self.local_path), '.git', 'config')
 		if not os.path.exists(config_path):
 			logger.error(f'Git config file {config_path} does not exist')
 			return
@@ -329,7 +334,7 @@ class GitRepo(Base):
 		self.config_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
 	def update_local_git_info(self):
-		git_info = get_git_info(self.local_path)
+		git_info = get_git_info(cast(str, self.local_path))
 		self.branch = git_info.get('current_branch')
 		for remote_branch in git_info['remote_branches']:
 			if 'target' in remote_branch:
@@ -374,7 +379,8 @@ class GitStar(Base):
 	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
 	# Link to lists that contain this starred repo
 	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
-	starred_at = Column(DateTime)
+	# starred_at = Column('starred_at', DateTime, nullable=True)
+	starred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 	stargazers_count = Column(Integer)
 	description = Column(String(1024))
 	full_name = Column(String(255))
@@ -554,7 +560,7 @@ def get_engine(args) -> sqlalchemy.Engine:
 	else:
 		raise TypeError(f'[db] unknown dbtype {args} ')
 
-def get_dupes(session: Session) -> list:
+def get_dupes(session: Session) -> Sequence[Row[Any]]:
 	"""
 	Get a list of duplicate git repos.
 	A duplicate is defined as a git repo with the same git_url
@@ -627,14 +633,14 @@ def mark_repo_as_starred(session, repo_id, list_name=None):
 		return False
 
 	git_repo.is_starred = True
-	git_repo.starred_at = datetime.now()
+	git_repo.starred_at = func.now()
 
 	# Create GitStar entry if it doesn't exist
 	git_star = session.query(GitStar).filter(GitStar.gitrepo_id == repo_id).first()
 	if not git_star:
 		git_star = GitStar()
 		git_star.gitrepo_id = repo_id
-		git_star.starred_at = datetime.now()
+		git_star.starred_at = func.now()
 		session.add(git_star)
 		session.flush()
 
