@@ -115,29 +115,44 @@ async def update_repo_cache(repo_name_or_url, session, args):
 		logger.error('update_repo_cache: no auth provided')
 		return None
 	api_url = f'https://api.github.com/repos/{repo_name}'
-
-	async with get_client_session(args) as api_session:
-		async with api_session.get(api_url) as r:
-			if r.status == 200:
-				repo_data = await r.json()
-				try:
-					set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
-				except Exception as e:
-					logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
-					logger.error(f'traceback: {traceback.format_exc()}')
+	try:
+		async with get_client_session(args) as api_session:
+			async with api_session.get(api_url) as r:
+				if r.status == 200:
+					repo_data = await r.json()
+					try:
+						set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
+					except Exception as e:
+						logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
+						logger.error(f'traceback: {traceback.format_exc()}')
+						return None
+					session.commit()
+					return repo_data
+				elif r.status in (403, 404, 451):
+					logger.warning(f"Repository error {r.status}: {api_url}")
+					default_repo_data = BLANK_REPO_DATA.copy()
+					default_repo_data['name'] = repo_name
+					try:
+						defaultjson = json.dumps([default_repo_data])
+					except TypeError as e:
+						logger.error(f"TypeError while serializing default repo data: {e} {type(e)}")
+						logger.error(f'traceback: {traceback.format_exc()}')
+						logger.error(f"Default repo data: {default_repo_data}")
+						return None
+					except Exception as e:
+						logger.error(f"Failed to serialize default repo data: {e} {type(e)}")
+						logger.error(f'traceback: {traceback.format_exc()}')
+						return None
+					set_cache_entry(session, cache_key, cache_type, defaultjson)
+					session.commit()
+					return default_repo_data
+				else:
+					logger.error(f"Failed to fetch repository data: {r.status}")
 					return None
-				session.commit()
-				return repo_data
-			elif r.status in (403, 404, 451):
-				logger.warning(f"Repository error {r.status}: {api_url}")
-				default_repo_data = BLANK_REPO_DATA.copy()
-				default_repo_data['name'] = repo_name
-				set_cache_entry(session, cache_key, cache_type, json.dumps([default_repo_data]))
-				session.commit()
-				return default_repo_data
-			else:
-				logger.error(f"Failed to fetch repository data: {r.status}")
-				return None
+	except Exception as e:
+		logger.error(f"Fatal Error fetching repository data: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
+		return None
 
 def get_cache_entry(session, cache_key, cache_type):
 	"""Get a cache entry from the database"""

@@ -31,9 +31,9 @@ BLANK_REPO_DATA = {
 	"description": "Repository BLANK_REPO_DATA",
 	"fork": False,
 	"url": 'BLANK_REPO_DATA',
-    "created_at": datetime(1970, 1, 1).isoformat() + 'Z',  # Unix epoch
-    "updated_at": datetime(1970, 1, 1).isoformat() + 'Z',
-    "pushed_at": datetime(1970, 1, 1).isoformat() + 'Z',   # Add this
+    'created_at': '1970-01-01T00:00:00Z',  # Changed to ISO string
+    'updated_at': '1970-01-01T00:00:00Z',  # Changed to ISO string
+    'pushed_at': '1970-01-01T00:00:00Z',   # Changed to ISO string
 	"git_url": "git://github.com/BLANK_REPO_DATA.git",
 	"ssh_url": "git@github.com:BLANK_REPO_DATA.git",
 	"clone_url": "https://github.com/BLANK_REPO_DATA.git",
@@ -197,9 +197,12 @@ class GitRepo(Base):
 	license_url = Column('license_url', String(255))
 
 	# Timestamps
-	created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-	updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) 
-	pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+	# created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+	# updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) 
+	# pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+	pushed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime(1970, 1, 1))
 
 	# Our internal tracking fields
 	dupe_count = Column('dupe_count', BigInteger)

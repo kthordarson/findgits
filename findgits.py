@@ -92,6 +92,9 @@ async def process_starred_repo(repo: str, session: Session, args: argparse.Names
     except sqlite3.IntegrityError as e:
         logger.error(f'Error processing {repo}: {e} {type(e)}')
         logger.error(f'traceback: {traceback.format_exc()}')
+    except TypeError as e:
+        logger.error(f'Error processing {repo}: {e} {type(e)}')
+        logger.error(f'traceback: {traceback.format_exc()}')
     except Exception as e:
         logger.error(f'Error processing {repo}: {e} {type(e)}')
         logger.error(f'traceback: {traceback.format_exc()}')

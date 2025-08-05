@@ -726,7 +726,7 @@ async def fetch_metadata(repo, session, args):
 			repo_metadata = await update_repo_cache(repo_path, session, args)
 			return repo_metadata
 		except TimeoutError as e:
-			logger.warning(f"Timeout fetching metadata for {repo_path}: {e}")
+			logger.warning(f"Timeout waiting for update_repo_cache. path: {repo_path}: {e}")
 			return None
 		except RateLimitExceededError as e:
 			logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
