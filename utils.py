@@ -45,7 +45,7 @@ def flatten(nested_list):
 	return flattened
 
 def valid_git_folder(k: str) -> bool:
-	k = Path(k)
+	k = str(Path(k))
 	if Path(k).is_dir():
 		if os.path.exists(os.path.join(k, 'config')):
 			return True
@@ -242,9 +242,9 @@ def get_directory_size(directory: str) -> int:
 	return total
 
 def get_subfilecount(directory: str) -> int:
-	directory = Path(directory)
+	directory = str(Path(directory))
 	try:
-		filecount = len([k for k in directory.glob('**/*') if k.is_file()])
+		filecount = len([k for k in Path(directory).glob('**/*') if k.is_file()])
 	except PermissionError as e:
 		logger.warning(f'[err] {e} d:{directory}')
 		return 0
@@ -252,10 +252,10 @@ def get_subfilecount(directory: str) -> int:
 
 
 def get_subdircount(directory: str) -> int:
-	directory = Path(directory)
+	directory = str(Path(directory))
 	dc = 0
 	try:
-		dc = len([k for k in directory.glob('**/*') if k.is_dir()])
+		dc = len([k for k in Path(directory).glob('**/*') if k.is_dir()])
 	except (PermissionError, FileNotFoundError) as e:
 		logger.warning(f'[err] {e} d:{directory}')
 	return dc

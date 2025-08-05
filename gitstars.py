@@ -173,7 +173,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 	api_url = 'https://api.github.com/user/starred'
 	headers = {
 		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
+		'Authorization': f'Bearer {auth.password}',  # type: ignore
 		'X-GitHub-Api-Version': '2022-11-28'
 	}
 	per_page = 100
@@ -258,7 +258,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 				if result is None:
 					failed_pages += 1
 					continue
-				page_num, page_data = result
+				page_num, page_data = result  # type: ignore
 				if page_data:
 					successful_pages.append((page_num, page_data))
 				else:
@@ -336,7 +336,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 			'lists_with_repos': cached_stars or {}
 		}
 
-	listurl = f'https://github.com/{auth.username}?tab=stars'
+	listurl = f'https://github.com/{auth.username}?tab=stars'  # type: ignore
 
 	# Fix: Use proper web scraping headers instead of API headers
 	headers = {
@@ -386,23 +386,23 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 	for sl in souplist:
 		# Extract list name
-		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')
+		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')  # type: ignore
 		list_name = name_elem.text.strip() if name_elem else 'Unknown'
 		try:
-			list_description_elem = sl.find('span', class_='Truncate-text color-fg-muted mr-3')
+			list_description_elem = sl.find('span', class_='Truncate-text color-fg-muted mr-3')  # type: ignore
 			list_description = list_description_elem.text.strip() if list_description_elem else ''
 		except AttributeError as e:
 			if args.debug:
 				logger.warning(f"Failed to extract description for list '{list_name}': {e}")
 			list_description = ''
 		# Extract repo count
-		count_elem = sl.find('div', class_='color-fg-muted text-small no-wrap')
+		count_elem = sl.find('div', class_='color-fg-muted text-small no-wrap')  # type: ignore
 		repo_count_text = count_elem.text.strip() if count_elem else '0'
 
 		list_info = {
 			'name': list_name,
 			'description': list_description,
-			'list_url': sl.get('href', ''),
+			'list_url': sl.get('href', ''),  # type: ignore
 			'repo_count': repo_count_text
 		}
 		git_lists_metadata.append(list_info)
@@ -412,17 +412,17 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 	if len(listsoup) > 0:
 		try:
-			list_items = listsoup[0].find_all('a', attrs={'class': 'd-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
+			list_items = listsoup[0].find_all('a', attrs={'class': 'd-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})  # type: ignore
 
 			for item in list_items:
 				# Fix: Use the same selectors as above for consistency
-				listname = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'
-				list_link = f"https://github.com{item.attrs['href']}"
-				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''
+				listname = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
+				list_link = f"https://github.com{item.attrs['href']}"  # type: ignore
+				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''  # type: ignore
 
 				# There's no description in this structure
 				try:
-					list_description_elem = item.find('span', class_='Truncate-text color-fg-muted mr-3')
+					list_description_elem = item.find('span', class_='Truncate-text color-fg-muted mr-3')  # type: ignore
 					list_description = list_description_elem.text.strip() if list_description_elem else ''
 				except AttributeError as e:
 					if args.debug:
