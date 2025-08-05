@@ -264,6 +264,7 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 		repo_data = github_repo
 		remote_url = repo_data.get('html_url') or f"https://github.com/{repo_data.get('full_name')}"
 		full_name = repo_data.get('full_name')
+		clean_path = full_name
 	else:
 		clean_path = github_repo.strip('/')
 		if 'github.com' in clean_path:

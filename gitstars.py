@@ -416,7 +416,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 			for item in list_items:
 				# Fix: Use the same selectors as above for consistency
-				listname = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
+				list_name = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
 				list_link = f"https://github.com{item.attrs['href']}"  # type: ignore
 				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''  # type: ignore
 
@@ -434,11 +434,11 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				try:
 					list_repos = await get_info_for_list(list_link, headers, session, args)
 				except Exception as e:
-					logger.warning(f'{e} {type(e)} failed to get list info for {listname}')
+					logger.warning(f'{e} {type(e)} failed to get list info for {list_name}')
 					logger.error(f'traceback: {traceback.format_exc()}')
 					list_repos = []
 
-				lists_with_repos[listname] = {
+				lists_with_repos[list_name] = {
 					'href': list_link,
 					'count': list_count_info,
 					'description': list_description,

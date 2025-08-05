@@ -161,7 +161,7 @@ class GitRepo(Base):
 	fork = Column('fork', Boolean)
 	clone_url = Column('clone_url', String(255))
 	ssh_url = Column('ssh_url', String(255))
-	git_url_api = Column('git_url', String(255))
+	git_url_api = Column('git_url_api', String(255))
 	svn_url = Column('svn_url', String(255))
 	homepage = Column('homepage', String(255))
 
