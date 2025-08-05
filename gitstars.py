@@ -1,859 +1,83 @@
 #!/usr/bin/python3
+import traceback
 import asyncio
-import aiohttp
 import json
-import os
 from loguru import logger
-from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
-import datetime
-from typing import Dict, List
-from collections import defaultdict
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
 from utils import get_client_session, get_auth_params
 
-async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
-	"""
-	Get starred repositories grouped by list name
-
-	Returns:
-		Dict[str, List[dict]]: Dictionary with list names as keys and lists of repos as values
-	"""
-	try:
-		try:
-			# Get all lists first
-			git_lists = await get_git_list_stars(session, args)
-			if not git_lists:
-				logger.warning("No GitHub lists found")
-				return {}
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e}")
-			return {}
-		try:
-			# Get all starred repos
-			starred_repos = await get_git_stars(args, session)
-			if not starred_repos:
-				logger.warning("No starred repositories found")
-				return {}
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e}")
-			return {}
-		try:
-			# Create lookup dict for starred repos by full name
-			repo_lookup = {repo['full_name']: repo for repo in starred_repos}
-			# Group repos by list
-			grouped_repos = defaultdict(list)
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e}")
-			return {}
-
-		for list_name, list_data in git_lists.items():
-			try:
-				for href in list_data['hrefs']:
-					# Convert href to full_name format (owner/repo)
-					full_name = href.strip('/').split('github.com/')[-1]
-					if full_name in repo_lookup:
-						grouped_repos[list_name].append(repo_lookup[full_name])
-					else:
-						logger.warning(f"Repository {full_name} found in list but not in starred repos")
-			except Exception as e:
-				logger.error(f"Error getting starred repos by list: {e}")
-				return {}
-		# Add "Uncategorized" list for repos not in any list
-		# in_lists = {repo for repos in grouped_repos.values() for repo in repos}
-		in_list_names = {repo['full_name'] for repos in grouped_repos.values() for repo in repos}
-		try:
-			uncategorized = []
-			# [repo for repo in starred_repos if repo['full_name'] not in {r['full_name'] for r in list(in_list_names)}]
-			for repo in starred_repos:
-				if repo['full_name'] not in in_list_names:
-					uncategorized.append(repo)
-			if uncategorized:
-				grouped_repos["Uncategorized"] = uncategorized
-		except Exception as e:
-			logger.error(f"Error getting starred repos by list: {e} {type(e)}")
-			# return {}
-
-		# Convert defaultdict to regular dict and sort repos in each list
-		result = dict(grouped_repos)
-		for list_name in result:
-			result[list_name].sort(key=lambda x: x.get('updated_at', ''), reverse=True)
-
-		return result
-
-	except Exception as e:
-		logger.error(f"Error getting starred repos by list: {e}")
-		return {}
-
-async def get_git_stars(args, session):
-	"""
-	Get all starred repos with caching support from database
-	"""
-	cache_key = "starred_repos_list"
-	cache_type = "starred_repos"
-
-	jsonbuffer = []
-
-	# Try to load from cache first if use_cache is enabled
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				jsonbuffer = json.loads(cache_entry.data)
-				logger.info(f"Loaded {len(jsonbuffer)} starred repos from database cache")
-				return jsonbuffer  # Return cached data if successful
-			except json.JSONDecodeError as e:
-				logger.error(f"Invalid JSON in cache entry: {e}")
-			except Exception as e:
-				logger.error(f"Error loading from cache: {e}")
-		else:
-			logger.warning("[get_git_stars]] no cache entry found in database for starred repos")
-
-		# If we reach here, either no cache or cache failed - download fresh data
-		logger.info("Downloading fresh starred repos data from GitHub API...")
-		git_starred_repos = await download_git_stars(args, session)
-
-		# Store the downloaded data in the database cache
-		if git_starred_repos:
-			try:
-				cache_obj = json.dumps(git_starred_repos)
-				set_cache_entry(session, cache_key, cache_type, cache_obj)
-				session.commit()
-				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache")
-			except Exception as e:
-				logger.error(f"Failed to store data in cache: {e}")
-		if args.global_limit > 0:
-			# Limit the number of repos returned based on global limit
-			git_starred_repos = git_starred_repos[:args.global_limit]
-			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
-		return git_starred_repos
-	else:
-		# Cache not enabled - download directly and optionally store
-		logger.info("Cache not enabled, downloading starred repos from GitHub API...")
-		git_starred_repos = await download_git_stars(args, session)
-
-		# Even if cache is disabled, we might want to store for future use
-		# Comment out the next block if you don't want to store when cache is disabled
-		if git_starred_repos:
-			try:
-				cache_obj = json.dumps(git_starred_repos)
-				set_cache_entry(session, cache_key, cache_type, cache_obj)
-				session.commit()
-				logger.info(f"Stored {len(git_starred_repos)} starred repos in database cache (cache disabled but stored anyway)")
-			except Exception as e:
-				logger.error(f"Failed to store data in cache: {e}")
-
-		if args.global_limit > 0:
-			# Limit the number of repos returned based on global limit
-			git_starred_repos = git_starred_repos[:args.global_limit]
-			logger.warning(f'Global limit set to {args.global_limit}, returning only first {len(git_starred_repos)} repos')
-		return git_starred_repos
-
-async def download_git_stars(args, session):
-	# If we get here, we need to fetch from the API
-	jsonbuffer = []
-	if args.nodl:
-		logger.warning('Skipping API call due to --nodl flag')
-		return jsonbuffer
-
-	auth = await get_auth_params()
-	if not auth:
-		logger.error('no auth provided')
-		return None
-
-	apiurl = 'https://api.github.com/user/starred'
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
-
-	cache_key = "starred_repos_list"
-	cache_type = "starred_repos"
-
-	if await is_rate_limit_hit(args):
-		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
-		return None
-
-	async with get_client_session(args) as api_session:
-		try:
-			# First, get the first page to determine total pages
-			async with api_session.get(apiurl, headers=headers) as r:
-				if r.status == 401:
-					logger.error(f"[r] autherr:401 a:{auth}")
-					return jsonbuffer
-				elif r.status == 404:
-					logger.warning(f"[r] {r.status} {apiurl} not found")
-					return jsonbuffer
-				elif r.status == 403:
-					logger.warning(f"[r] {r.status} {apiurl} API rate limit exceeded")
-					return jsonbuffer
-				elif r.status == 200:
-					data = await r.json()
-					jsonbuffer.extend(data)
-
-					# Save first page immediately
-					if jsonbuffer:
-						cache_obj = json.dumps(jsonbuffer)
-						set_cache_entry(session, cache_key, cache_type, cache_obj)
-						session.commit()
-
-					# Determine total pages from Link header
-					last_page_no = 1
-					if 'link' in r.headers:
-						links = r.headers['link'].split(',')
-						for link in links:
-							if 'last' in link:
-								lasturl = link.split('>')[0].replace('<','')
-								last_page_no = int(lasturl.split('=')[-1])
-								break
-
-					# If only one page or max_pages is 1, return early
-					if last_page_no == 1 or args.max_pages == 1:
-						logger.info(f"Downloaded {len(jsonbuffer)} starred repos (single page)")
-						return jsonbuffer
-
-					# Determine how many pages to fetch
-					max_pages_to_fetch = last_page_no
-					if args.max_pages > 0:
-						max_pages_to_fetch = min(args.max_pages, last_page_no)
-					if args.global_limit > 0:
-						max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
-						logger.warning(f'Global limit set to {args.global_limit}, adjusting max pages to fetch: {max_pages_to_fetch}')
-
-					logger.info(f"Found {last_page_no} total pages, fetching pages 2-{max_pages_to_fetch} concurrently")
-
-					# Create tasks for remaining pages (starting from page 2)
-					tasks = []
-					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests to avoid rate limiting
-					stop_signal = asyncio.Event()
-
-					# Create tasks for pages 2 through max_pages_to_fetch
-					for page_num in range(2, max_pages_to_fetch + 1):
-						# tasks.append(fetch_page(page_num))
-						tasks.append(fetch_page_generic(api_session, apiurl, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal))
-
-					# Execute all page requests concurrently
-					if tasks:
-						logger.info(f"Starting concurrent download of {len(tasks)} pages...")
-						page_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-						# Sort results by page number and extend jsonbuffer
-						successful_pages = []
-						for result in page_results:
-							if isinstance(result, Exception):
-								logger.error(f"Page fetch failed: {result}")
-								continue
-
-							page_num, page_data = result
-							if page_data:
-								successful_pages.append((page_num, page_data))
-
-						# Sort by page number to maintain order
-						successful_pages.sort(key=lambda x: x[0])
-
-						# Add all page data to buffer
-						for page_num, page_data in successful_pages:
-							jsonbuffer.extend(page_data)
-
-						logger.info(f"Concurrent download completed. Total repos: {len(jsonbuffer)}")
-
-				else:
-					logger.error(f"Initial request failed with status {r.status}")
-					return jsonbuffer
-
-		except Exception as e:
-			logger.error(f"[r] {e}")
-			return jsonbuffer
-
-	# Final cache write with all data
-	if jsonbuffer:
-		try:
-			cache_obj = json.dumps(jsonbuffer)
-			set_cache_entry(session, cache_key, cache_type, cache_obj)
-			session.commit()
-			logger.info(f"Cached {len(jsonbuffer)} starred repos in database")
-		except Exception as e:
-			logger.error(f"Failed to write final cache: {e}")
-
-	return jsonbuffer
-
-async def download_git_stars_v1(args, session):
-	# If we get here, we need to fetch from the API
-	jsonbuffer = []
-	if args.nodl:
-		logger.warning('Skipping API call due to --nodl flag')
-		return jsonbuffer
-	auth = await get_auth_params()
-	if not auth:
-		logger.error('no auth provided')
-		return None
-
-	apiurl = 'https://api.github.com/user/starred'
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'}
-
-	cache_key = "starred_repos_list"
-	cache_type = "starred_repos"
-
-	if await is_rate_limit_hit(args):
-		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
-		return None
-
-	# async with aiohttp.ClientSession() as api_session:
-	async with get_client_session(args) as api_session:
-		try:
-			async with api_session.get(apiurl) as r:
-				if r.status == 401:
-					logger.error(f"[r] autherr:401 a:{auth}")
-				elif r.status == 404:
-					logger.warning(f"[r] {r.status} {apiurl} not found")
-				elif r.status == 403:
-					logger.warning(f"[r] {r.status} {apiurl} API rate limit exceeded")
-				elif r.status == 200:
-					data = await r.json()
-					jsonbuffer.extend(data)
-					# Save after first page
-					if jsonbuffer:
-						cache_obj = json.dumps(jsonbuffer)
-						set_cache_entry(session, cache_key, cache_type, cache_obj)
-						session.commit()
-
-					# Handle pagination
-					if 'link' in r.headers:
-						page_count = 1  # We've already got page 1
-						links = r.headers['link'].split(',')
-						nexturl = None
-						lasturl = None
-						for k in links:
-							if 'next' in k:
-								nexturl = k.split('>')[0].replace('<','')
-							if 'last' in k:
-								lasturl = k.split('>')[0].replace('<','')
-						if not nexturl or not lasturl:
-							return jsonbuffer
-						last_page_no = int(lasturl.split('=')[1])
-						# Fetch remaining pages
-						while nexturl and (args.max_pages == 0 or page_count < args.max_pages):
-							if args.debug:
-								logger.debug(f'[r] p:{page_count}/{last_page_no} jsonbuffer: {len(jsonbuffer)} nexturl: {nexturl}')
-							async with api_session.get(nexturl, headers=headers) as r:
-								if r.status == 200:
-									data = await r.json()
-									jsonbuffer.extend(data)
-									page_count += 1
-									# Save after each page
-									if jsonbuffer:
-										cache_obj = json.dumps(jsonbuffer)
-										set_cache_entry(session, cache_key, cache_type, cache_obj)
-										session.commit()
-
-									if 'link' in r.headers:
-										links = r.headers['link'].split(',')
-										nexturl = None
-										for k in links:
-											if 'next' in k:
-												nexturl = k.split('>')[0].replace('<','')
-										if not nexturl:
-											break
-									else:
-										logger.warning(f'[r] {r.status} link not in headers: {r.headers} nexturl: {nexturl}')
-										break
-								else:
-									logger.warning(f'[r] {r.status} {nexturl}')
-									break
-		except Exception as e:
-			logger.error(f"[r] {e}")
-			return jsonbuffer
-
-	# Write to cache if we got data (final write)
-	if jsonbuffer:
-		try:
-			cache_obj = json.dumps(jsonbuffer)
-			set_cache_entry(session, cache_key, cache_type, cache_obj)
-			session.commit()
-			logger.info(f"Cached {len(jsonbuffer)} starred repos in database")
-		except Exception as e:
-			logger.error(f"Failed to write cache: {e}")
-	return jsonbuffer
-
-async def get_list_members(args, list_url) -> List[dict]:
-	"""
-	Get members of a GitHub starred repository list by scraping the list page.
-
-	Args:
-		args: Command line arguments
-		list_url: URL of the GitHub starred repository list
-
-	Returns:
-		List[dict]: List of dictionaries with repository details
-	"""
-	members = []
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return members
-
-	async with aiohttp.ClientSession() as api_session:
-		if args.debug:
-			logger.debug(f"Fetching list members from {list_url}")
-		async with api_session.get(list_url) as r:
-			if r.status == 200:
-				content = await r.text()
-	soup = BeautifulSoup(content, 'html.parser')
-	# repo_items = soup.find_all('div', class_='Box-row d-flex flex-items-center p-3')
-	data_soup = soup.select_one('div', attrs={"id":"user-list-repositories","class":"my-3"})
-	list_soup = data_soup.find_all('div', class_="col-12 d-block width-full py-4 border-bottom color-border-muted")
-	list_hrefs = [k.find('div', class_='d-inline-block mb-1').find('a').attrs['href'] for k in list_soup]
-
-	for item in list_soup:
-		h3_tag = item.find('h3')
-		a_tag = h3_tag.find('a') if h3_tag else None
-		repo_url = f"https://github.com{a_tag['href']}" if a_tag else ''
-		repo_full_text = a_tag.get_text(strip=True) if a_tag else ''
-		owner = ''
-		repo_name = ''
-		if a_tag:
-			owner_span = a_tag.find('span', class_='text-normal')
-			if owner_span:
-				owner = owner_span.get_text(strip=True).replace('/', '').strip()
-				repo_name = repo_full_text.replace(owner_span.get_text(), '').strip()
-			else:
-				# fallback: parse from href
-				parts = a_tag['href'].strip('/').split('/')
-				if len(parts) >= 2:
-					owner = parts[0]
-					repo_name = parts[1]
-
-		# repo_name = item.find('a', class_='Link--primary').get_text(strip=True)
-		repo_desc = item.find('p', class_='f6 color-fg-muted my-1').get_text(strip=True) if item.find('p', class_='f6 color-fg-muted my-1') else ''
-		# repo_url = f"https://github.com{item.find('a', class_='Link--primary')['href']}"
-		members.append({
-			'name': repo_name,
-			'description': repo_desc,
-			'url': repo_url
-		})
-	if args.debug:
-		logger.debug(f"Found {len(members)} members in list {list_url}")
-	return members
-
-async def get_lists(args, session) -> dict:
-	"""
-	Fetches the user's GitHub starred repository lists by scraping the stars page.
-	"""
-
-	cache_key = "git_lists_metadata"
-	cache_type = "list_metadata"
-
-	# Try cache first if enabled
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				cached_data = json.loads(cache_entry.data)
-				if args.debug:
-					logger.debug(f"Using cached git lists data: {len(cached_data)} lists")
-				return cached_data
-			except (json.JSONDecodeError, AttributeError) as e:
-				logger.warning(f"Failed to load cached git lists data: {e}")
-
-	if args.nodl:
-		logger.warning("Skipping API call for git lists due to --nodl flag")
-		return []
-
-	git_lists = []
-	auth = await get_auth_params()
-	if not auth:
-		logger.error("No authentication provided for get_lists")
-		return []
-
-	listurl = f'https://github.com/{auth.username}?tab=stars'
-
-	async with aiohttp.ClientSession() as api_session:
-		async with api_session.get(listurl) as response:
-			content = await response.text()
-
-	soup = BeautifulSoup(content, 'html.parser')
-	souplist = soup.find_all('a',class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
-
-	for sl in souplist:
-		list_info = {
-			'name': sl.find('span', class_='text-normal').text.strip() if sl.find('span', class_='text-normal') else 'Unknown',
-			'description': sl.find('p', class_='color-fg-muted').text.strip() if sl.find('p', class_='color-fg-muted') else '',
-			'list_url': sl.get('href', ''),
-			'repo_count': sl.find('span', class_='Counter').text.strip() if sl.find('span', class_='Counter') else '0'
-		}
-		git_lists.append(list_info)
-
-	# Cache the results
-	if git_lists:
-		set_cache_entry(session, cache_key, cache_type, json.dumps(git_lists))
-
-	return git_lists
-
-async def get_git_list_stars(session, args) -> dict:
-	"""
-	Get lists of starred repos using database cache
-	"""
-	cache_key = "git_list_stars"
-	cache_type = "list_stars"
-
-	auth = await get_auth_params()
-	if not auth:
-		logger.error('get_git_list_stars: no auth provided')
-		return {}
-
-	listurl = f'https://github.com/{auth.username}?tab=stars'
-	headers = {'Authorization': f'Bearer {auth.password}','X-GitHub-Api-Version': '2022-11-28'}
-	soup = None
-	cache_entry = None
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				soup = BeautifulSoup(cache_entry.data, 'html.parser')
-				if args.debug:
-					logger.debug("Loaded star list from database cache")
-			except Exception as e:
-				logger.error(f'Failed to parse cached star list: {e} {type(e)} {cache_key} not found in database cache type {cache_type}')
-		else:
-			logger.warning(f'Failed to parse cached star list: {cache_key} not found in database cache type {cache_type}')
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return {}
-	if not soup or len(soup) == 0:
-		if await is_rate_limit_hit(args):
-			logger.warning("Rate limit hit!")
-			await asyncio.sleep(1)
-			return None
-
-		async with aiohttp.ClientSession() as api_session:
-			if args.debug:
-				logger.debug(f"Fetching star list from {listurl}")
-			async with api_session.get(listurl) as r:
-				if r.status == 200:
-					content = await r.text()
-					soup = BeautifulSoup(content, 'html.parser')
-					# Save to database cache
-					set_cache_entry(session, cache_key, cache_type, str(soup))
-					session.commit()
-					logger.info("Saved star list to database cache")
-				else:
-					logger.error(f"Failed to fetch star list: {r.status} {listurl}")
-					return {}
-
-	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
-	if len(listsoup) == 0:
-		logger.warning("No lists found in soup")
-		return {}
-	try:
-		list_items = listsoup[0].find_all('a', attrs={'class':'d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})
-	except (TypeError, IndexError) as e:
-		logger.error(f'Failed to find list items in soup {e} {type(e)} from listsoup: {type(listsoup)} {len(listsoup)}')
-		return {}
-
-	lists = {}
-	for item in list_items:
-		listname = item.find('h3').text
-		list_link = f"https://github.com{item.attrs['href']}"
-		list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text
-
-		try:
-			list_description = item.select('span', class_="Truncate-text color-fg-muted mr-3")[1].text.strip()
-		except IndexError:
-			list_description = ''
-
-		try:
-			list_repos = await get_info_for_list(list_link, headers, session, args)
-		except Exception as e:
-			logger.warning(f'{e} {type(e)} failed to get list info for {listname}')
-			list_repos = []
-
-		lists[listname] = {
-			'href': list_link,
-			'count': list_count_info,
-			'description': list_description,
-			'hrefs': list_repos
-		}
-	return lists
-
 async def get_info_for_list(link, headers, session, args):
 	"""
-	Get info for a list using database cache with pagination support
+	Get all repository hrefs from a GitHub list, handling pagination.
+	Uses database caching to avoid repeated scraping.
 	"""
 	cache_key = f"list_info:{link.split('/')[-1]}"
 	cache_type = "list_info"
 
 	# Try cache first
 	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
+		if cache_entry := get_cache_entry(session, cache_key, cache_type):
 			try:
 				cached_data = json.loads(cache_entry.data)
 				if args.debug:
-					logger.debug(f"Loaded list info from database cache for {link}")
+					logger.debug(f"Loaded list info from cache for {link}")
 				return cached_data
-			except Exception as e:
+			except json.JSONDecodeError as e:
 				logger.error(f'Failed to parse cached list info: {e}')
-		else:
-			logger.warning(f"[get_info_for_list] No cache entry found for {link} in database")
 
-	if args.nodl:
-		logger.warning(f"Skipping API call for {link} due to --nodl flag")
+	if await is_rate_limit_hit(args):
+		logger.warning("Rate limit hit, skipping fetch for list.")
+		await asyncio.sleep(1)
 		return []
 
 	all_hrefs = []
 	current_url = link
 	page_num = 1
 
-	if await is_rate_limit_hit(args):
-		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
-		return []
-
 	async with get_client_session(args) as api_session:
-		while current_url:
+		while current_url and page_num <= 100:  # Safety limit
 			try:
 				async with api_session.get(current_url, headers=headers) as r:
 					if r.status != 200:
-						logger.error(f"Failed to fetch page {page_num} of {link}: {r.status}")
+						logger.error(f"Failed to fetch {current_url}: Status {r.status}")
 						break
 
-					content = await r.content.read()
-					soup = BeautifulSoup(content, 'html.parser')
+					soup = BeautifulSoup(await r.text(), 'html.parser')
 
-					# Extract repository links from current page
-					soupdata = soup.select_one('div', attrs={"id":"user-list-repositories","class":"my-3"})
-					if not soupdata:
-						logger.warning(f"No repository container found on page {page_num} of {link}")
-						break
+					# Extract repository links using a more specific selector
+					repo_links = soup.select('#user-list-repositories .d-inline-block.mb-1 a')
+					page_hrefs = [link['href'] for link in repo_links if 'href' in link.attrs]
 
-					listdata = soupdata.find_all('div', class_="col-12 d-block width-full py-4 border-bottom color-border-muted")
-					if not listdata:
-						logger.warning(f"No repositories found on page {page_num} of {link}")
-						break
-
-					# Extract hrefs from current page
-					page_hrefs = []
-					for repo_div in listdata:
-						try:
-							href_element = repo_div.find('div', class_='d-inline-block mb-1').find('a')
-							if href_element and 'href' in href_element.attrs:
-								page_hrefs.append(href_element.attrs['href'])
-						except (AttributeError, TypeError) as e:
-							logger.warning(f"Failed to extract href from repository div: {e}")
-							continue
-
-					all_hrefs.extend(page_hrefs)
-
-					if args.debug:
-						logger.debug(f"Page {page_num}: found {len(page_hrefs)} repos, total: {len(all_hrefs)}")
-
-					# Check for next page
-					next_url = None
-					pagination = soup.find('div', class_='paginate-container')
-					if pagination:
-						next_link = pagination.find('a', class_='next_page')
-						if next_link and 'href' in next_link.attrs:
-							next_url = f"https://github.com{next_link['href']}"
-							if args.debug:
-								logger.debug(f"Found next page: {next_url}")
-
-					# Alternative pagination check - look for numbered pagination
-					if not next_url:
-						pagination_links = soup.find_all('a', attrs={'rel': 'next'})
-						if pagination_links:
-							next_url = f"https://github.com{pagination_links[0]['href']}"
-							if args.debug:
-								logger.debug(f"Found next page via rel=next: {next_url}")
-
-					# If no pagination found or we've reached the end, break
-					if not next_url or len(page_hrefs) == 0:
+					if not page_hrefs:
 						if args.debug:
-							logger.debug(f"No more pages found for {link}")
+							logger.debug(f"No more repos found on page {page_num} of {link}.")
 						break
-
-					current_url = next_url
+					all_hrefs.extend(page_hrefs)
+					# Find next page link
+					next_link = soup.select_one('a.next_page, a[rel=next]')
+					current_url = f"https://github.com{next_link['href']}" if next_link else None
 					page_num += 1
 
-					# Safety check to prevent infinite loops
-					if page_num > 100:  # Reasonable limit
-						logger.warning(f"Reached maximum page limit (100) for {link}")
-						break
-
 			except Exception as e:
-				logger.error(f"Error fetching page {page_num} of {link}: {e}")
+				logger.error(f"Error scraping {current_url}: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 				break
+
+	if page_num > 100:
+		logger.warning(f"Reached maximum page limit (100) for {link}")
 
 	# Cache the complete results
 	if all_hrefs:
 		try:
 			set_cache_entry(session, cache_key, cache_type, json.dumps(all_hrefs))
 			session.commit()
-			logger.info(f"Saved list info to database cache for {link} ({len(all_hrefs)} repos)")
+			logger.info(f"Cached {len(all_hrefs)} repo links for {link}")
 		except Exception as e:
-			logger.error(f'Failed to save list info: {e} {type(e)}')
-
-	if args.debug:
-		logger.debug(f"Total repositories found in {link}: {len(all_hrefs)}")
+			logger.error(f'Failed to save list info to cache: {e} {type(e)}')
+			logger.error(f'traceback: {traceback.format_exc()}')
 
 	return all_hrefs
-
-async def fetch_starred_repos(args, session):
-	"""
-	Fetch user's starred repositories from GitHub API with database caching and concurrent page downloads
-	"""
-	cache_key = "starred_repos_fetch"
-	cache_type = "starred_repos"
-
-	# Check cache first if enabled
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				cache_age = datetime.datetime.now() - cache_entry.timestamp
-				# Use cache if it's less than 1 day old
-				if cache_age.days < 1:
-					cache_data = json.loads(cache_entry.data)
-					logger.info(f"Using cached starred repos ({len(cache_data)} items)")
-					return cache_data
-			except Exception as e:
-				logger.warning(f"Failed to load cache: {e}")
-		else:
-			logger.warning("[fetch_starred_repos] No cache entry found in database for starred repos")
-
-	if args.nodl:
-		logger.warning("Skipping API call due to --nodl flag")
-		return []
-
-	# Get authentication
-	auth = await get_auth_params()
-	if not auth:
-		logger.error("No GitHub authentication available")
-		return []
-
-	# API request setup
-	api_url = 'https://api.github.com/user/starred'
-	headers = {
-		'Accept': 'application/vnd.github+json',
-		'Authorization': f'Bearer {auth.password}',
-		'X-GitHub-Api-Version': '2022-11-28'
-	}
-
-	per_page = 100  # Max allowed by GitHub API
-
-	if await is_rate_limit_hit(args):
-		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
-		return None
-
-	async with get_client_session(args) as api_session:
-		# First, get the first page to determine total pages
-		first_page_url = f"{api_url}?page=1&per_page={per_page}"
-
-		try:
-			async with api_session.get(first_page_url, headers=headers) as response:
-				if response.status == 401:
-					logger.error("Authentication failed - check your token")
-					return []
-				elif response.status == 403:
-					reset_time = response.headers.get('X-RateLimit-Reset')
-					if reset_time:
-						reset_datetime = datetime.datetime.fromtimestamp(int(reset_time))
-						wait_time = (reset_datetime - datetime.datetime.now()).total_seconds()
-						logger.warning(f"Rate limit exceeded. Resets in {wait_time:.1f} seconds")
-					else:
-						logger.warning("Rate limit exceeded")
-					return []
-				elif response.status != 200:
-					logger.error(f"API request failed with status {response.status}")
-					error_data = await response.text()
-					logger.warning(f"Error response: {error_data}")
-					return []
-
-				first_page_data = await response.json()
-				repos = list(first_page_data)  # Start with first page data
-
-				# Determine total pages from Link header - same logic as download_git_stars
-				last_page_no = 1
-				if 'link' in response.headers:
-					links = response.headers['link'].split(',')
-					for link in links:
-						if 'last' in link:
-							lasturl = link.split('>')[0].replace('<','')
-							last_page_no = int(lasturl.split('=')[-1])
-							break
-
-				# If only one page or max_pages is 1, return early
-				if last_page_no == 1 or args.max_pages == 1:
-					logger.info(f"Downloaded {len(repos)} starred repos (single page)")
-				else:
-					# Determine how many pages to fetch
-					max_pages_to_fetch = last_page_no
-					if args.max_pages > 0:
-						max_pages_to_fetch = min(args.max_pages, last_page_no)
-					if args.global_limit > 0:
-						max_pages_to_fetch = min(args.global_limit, max_pages_to_fetch)
-						logger.warning(f'Global limit set to {args.global_limit}, adjusting max pages to fetch: {max_pages_to_fetch}')
-					logger.info(f"Found {last_page_no} total pages, fetching pages 2-{max_pages_to_fetch} concurrently")
-
-					# Create tasks for remaining pages (starting from page 2)
-					semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
-					stop_signal = asyncio.Event()
-
-					# Create tasks for pages 2 through max_pages_to_fetch
-					tasks = []
-					for page_num in range(2, max_pages_to_fetch + 1):
-						# tasks.append(fetch_page(page_num))
-						tasks.append(fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal))
-
-					# Execute all page requests concurrently
-					if tasks:
-						logger.info(f"Starting concurrent download of {len(tasks)} pages...")
-						page_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-						# Process results and add to repos list
-						successful_pages = []
-						for result in page_results:
-							if isinstance(result, Exception):
-								logger.error(f"Page fetch failed: {result}")
-								continue
-
-							page_num, page_data = result
-							if page_data:
-								successful_pages.append((page_num, page_data))
-
-						# Sort by page number to maintain order
-						successful_pages.sort(key=lambda x: x[0])
-
-						# Add all page data to repos list
-						for page_num, page_data in successful_pages:
-							repos.extend(page_data)
-							if args.debug:
-								logger.debug(f"Added page {page_num} data, total repos: {len(repos)}")
-
-						logger.info(f"Concurrent download completed. Total repos: {len(repos)}")
-
-		except Exception as e:
-			logger.error(f"Request error: {e} {type(e)}")
-			return []
-
-	# Cache the results if we got data
-	if repos:
-		try:
-			set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
-			session.commit()
-			logger.info(f"Cached {len(repos)} starred repositories in database")
-		except Exception as e:
-			logger.error(f"Failed to write cache: {e}")
-	else:
-		logger.warning("No starred repositories found or fetched")
-
-	logger.info(f"Fetched {len(repos)} starred repositories from GitHub API")
-	return repos
 
 async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore, args, max_pages_to_fetch=None, stop_signal=None):
 	"""
@@ -881,8 +105,6 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 	async with semaphore:
 		# Check if we should stop (other pages found empty results)
 		if stop_signal and stop_signal.is_set():
-			if args.debug:
-				logger.warning(f"Skipping page {page_num} due to stop signal")
 			return page_num, []
 
 		# Handle different URL formats
@@ -891,7 +113,6 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 		else:
 			page_url = f"{base_url}?page={page_num}"
 
-		# Add per_page parameter for fetch_starred_repos
 		if 'per_page' not in page_url and 'user/starred' in base_url:
 			page_url += "&per_page=100"
 
@@ -923,5 +144,323 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 					logger.warning(f"Page {page_num} failed with status {page_response.status}")
 					return page_num, []
 		except Exception as e:
-			logger.error(f"Error fetching page {page_num}: {e}")
+			logger.error(f"Error fetching page {page_num}: {e} {type(e)}")
+			logger.error(f'traceback: {traceback.format_exc()}')
 			return page_num, []
+
+async def fetch_github_starred_repos(args, session, cache_key="starred_repos_list", cache_type="starred_repos"):
+	"""
+	Unified function to fetch starred repos from GitHub API, with cache and pagination.
+	Returns a list of starred repo dicts.
+	"""
+	# Try cache first
+	if args.use_cache:
+		cache_entry = get_cache_entry(session, cache_key, cache_type)
+		if cache_entry:
+			try:
+				cached_data = json.loads(cache_entry.data)
+				logger.info(f"Loaded {len(cached_data)} starred repos from cache")
+				return cached_data
+			except Exception as e:
+				logger.error(f"Failed to parse cache: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
+
+	auth = await get_auth_params()
+	if not auth:
+		logger.error("No GitHub authentication available")
+		return []
+
+	api_url = 'https://api.github.com/user/starred'
+	headers = {
+		'Accept': 'application/vnd.github+json',
+		'Authorization': f'Bearer {auth.password}',  # type: ignore
+		'X-GitHub-Api-Version': '2022-11-28'
+	}
+	per_page = 100
+	repos = []
+
+	if await is_rate_limit_hit(args):
+		logger.warning("Rate limit hit!")
+		await asyncio.sleep(1)
+		return []
+
+	async with get_client_session(args) as api_session:
+		# Fetch first page to determine total pages
+		first_page_url = f"{api_url}?page=1&per_page={per_page}"
+		async with api_session.get(first_page_url, headers=headers) as response:
+			if response.status != 200:
+				logger.error(f"API request failed with status {response.status}")
+				return []
+			first_page_data = await response.json()
+			repos.extend(first_page_data)
+
+			# Parse Link header to get last page number
+			last_page_no = 1
+			if 'link' in response.headers:
+				links = response.headers['link'].split(',')
+				for link in links:
+					if 'rel="last"' in link:
+						# Extract URL from <url>
+						url_part = link.split('>')[0].replace('<', '').strip()
+						# Extract page number from URL
+						if 'page=' in url_part:
+							try:
+								last_page_no = int(url_part.split('page=')[1].split('&')[0])
+							except (ValueError, IndexError):
+								logger.warning(f"Could not parse last page from link header: {link}")
+						break
+
+			logger.info(f"First page fetched: {len(first_page_data)} repos. Total pages available: {last_page_no}")
+
+			# If only one page, return early
+			if last_page_no == 1:
+				logger.info(f"Downloaded {len(repos)} starred repos (single page)")
+				if repos:
+					set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
+					session.commit()
+				return repos
+
+			# Calculate how many pages to fetch
+			max_pages_to_fetch = last_page_no
+
+			# Apply global_limit if set (but don't limit starred repos by default)
+			if hasattr(args, 'global_limit') and args.global_limit > 0:
+				# Convert global_limit from number of repos to number of pages
+				pages_needed = (args.global_limit + per_page - 1) // per_page  # Round up
+				max_pages_to_fetch = min(pages_needed, max_pages_to_fetch)
+				logger.info(f"Limiting to {max_pages_to_fetch} pages due to global_limit ({args.global_limit} repos)")
+
+			# Don't apply max_pages limit to starred repos - we want all of them
+			if hasattr(args, 'max_pages') and args.max_pages > 0 and args.max_pages < last_page_no:
+				logger.warning(f"max_pages ({args.max_pages}) is set but will be ignored for starred repos to ensure all {last_page_no * per_page} repos are fetched")
+
+			logger.info(f"Fetching pages 2-{max_pages_to_fetch} concurrently (expecting ~{max_pages_to_fetch * per_page} total repos)")
+
+			# Fetch remaining pages concurrently
+			semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
+			stop_signal = asyncio.Event()
+
+			tasks = [
+				fetch_page_generic(api_session, api_url, page_num, headers, semaphore, args, max_pages_to_fetch, stop_signal)
+				for page_num in range(2, max_pages_to_fetch + 1)
+			]
+
+			page_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+			# Process results
+			successful_pages = []
+			failed_pages = 0
+			for result in page_results:
+				if isinstance(result, Exception):
+					logger.error(f"Page fetch failed: {result}")
+					failed_pages += 1
+					continue
+				if result is None:
+					failed_pages += 1
+					continue
+				page_num, page_data = result  # type: ignore
+				if page_data:
+					successful_pages.append((page_num, page_data))
+				else:
+					# Empty page - we've reached the end
+					logger.info(f"Page {page_num} returned no data - reached end of starred repos")
+
+			# Sort by page number and add to repos
+			successful_pages.sort(key=lambda x: x[0])
+			for page_num, page_data in successful_pages:
+				repos.extend(page_data)
+				if len(page_data) < per_page:
+					logger.info(f"Page {page_num} returned {len(page_data)} repos (less than {per_page}), likely the last page")
+
+			if failed_pages > 0:
+				logger.warning(f"{failed_pages} pages failed to fetch")
+
+	# Cache results
+	if repos:
+		set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
+		session.commit()
+		logger.info(f"Successfully fetched and cached {len(repos)} starred repos from {len(successful_pages) + 1} total pages (including first page)")
+	else:
+		logger.warning("No starred repos fetched!")
+
+	return repos
+
+async def get_lists_and_stars_unified(session, args) -> dict:
+	"""
+	Unified function that gets both list metadata and repository links from GitHub stars page.
+	"""
+	cache_key_metadata = "git_lists_metadata"
+	cache_key_stars = "git_list_stars"
+	cache_type_metadata = "list_metadata"
+	cache_type_stars = "list_stars"
+
+	# Try cache first for both types
+	cached_metadata = None
+	cached_stars = None
+
+	if args.use_cache:
+		# Check for cached metadata
+		cache_entry_metadata = get_cache_entry(session, cache_key_metadata, cache_type_metadata)
+		if cache_entry_metadata:
+			try:
+				cached_metadata = json.loads(cache_entry_metadata.data)
+				if args.debug:
+					logger.debug(f"Using cached metadata: {len(cached_metadata)} lists")
+			except (json.JSONDecodeError, AttributeError) as e:
+				logger.warning(f"Failed to load cached metadata: {e}")
+
+		# Check for cached stars data
+		cache_entry_stars = get_cache_entry(session, cache_key_stars, cache_type_stars)
+		if cache_entry_stars:
+			try:
+				cached_stars = json.loads(cache_entry_stars.data)
+				if args.debug:
+					logger.debug(f"Using cached stars data: {len(cached_stars)} lists")
+			except Exception as e:
+				logger.warning(f"Failed to load cached stars data: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
+
+	# If we have both cached, return them
+	if cached_metadata and cached_stars:
+		return {
+			'lists_metadata': cached_metadata,
+			'lists_with_repos': cached_stars
+		}
+
+	# Get authentication
+	auth = await get_auth_params()
+	if not auth:
+		logger.error('No auth provided for get_lists_and_stars_unified')
+		return {
+			'lists_metadata': cached_metadata or [],
+			'lists_with_repos': cached_stars or {}
+		}
+
+	listurl = f'https://github.com/{auth.username}?tab=stars'  # type: ignore
+
+	# Fix: Use proper web scraping headers instead of API headers
+	headers = {
+		'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+		'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+		'Accept-Language': 'en-US,en;q=0.5',
+		'Accept-Encoding': 'gzip, deflate',
+		'Connection': 'keep-alive',
+		'Upgrade-Insecure-Requests': '1',
+	}
+
+	if await is_rate_limit_hit(args):
+		logger.warning("Rate limit hit!")
+		await asyncio.sleep(1)
+		return {
+			'lists_metadata': cached_metadata or [],
+			'lists_with_repos': cached_stars or {}
+		}
+
+	# Scrape the GitHub stars page once
+	soup = None
+	async with get_client_session(args) as api_session:
+		if args.debug:
+			logger.debug(f"Fetching unified star list data from {listurl}")
+		async with api_session.get(listurl, headers=headers) as r:
+			if r.status == 200:
+				content = await r.text()
+				soup = BeautifulSoup(content, 'html.parser')
+			elif r.status == 406:
+				logger.error("GitHub returned 406 Not Acceptable - check your headers. Using cached data if available.")
+				return {
+					'lists_metadata': cached_metadata or [],
+					'lists_with_repos': cached_stars or {}
+				}
+			else:
+				logger.error(f"Failed to fetch star list: {r.status} {listurl}")
+				return {
+					'lists_metadata': cached_metadata or [],
+					'lists_with_repos': cached_stars or {}
+				}
+
+	git_lists_metadata = []
+	souplist = soup.find_all('a', class_="d-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline")
+
+	if args.debug:
+		logger.debug(f"Found {len(souplist)} list elements in HTML")
+
+	for sl in souplist:
+		# Extract list name
+		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')  # type: ignore
+		list_name = name_elem.text.strip() if name_elem else 'Unknown'
+		try:
+			list_description_elem = sl.find('span', class_='Truncate-text color-fg-muted mr-3')  # type: ignore
+			list_description = list_description_elem.text.strip() if list_description_elem else ''
+		except AttributeError as e:
+			if args.debug:
+				logger.warning(f"Failed to extract description for list '{list_name}': {e}")
+			list_description = ''
+		# Extract repo count
+		count_elem = sl.find('div', class_='color-fg-muted text-small no-wrap')  # type: ignore
+		repo_count_text = count_elem.text.strip() if count_elem else '0'
+
+		list_info = {
+			'name': list_name,
+			'description': list_description,
+			'list_url': sl.get('href', ''),  # type: ignore
+			'repo_count': repo_count_text
+		}
+		git_lists_metadata.append(list_info)
+
+	lists_with_repos = {}
+	listsoup = soup.find_all('div', attrs={"id": "profile-lists-container"})
+
+	if len(listsoup) > 0:
+		try:
+			list_items = listsoup[0].find_all('a', attrs={'class': 'd-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})  # type: ignore
+
+			for item in list_items:
+				# Fix: Use the same selectors as above for consistency
+				list_name = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
+				list_link = f"https://github.com{item.attrs['href']}"  # type: ignore
+				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''  # type: ignore
+
+				# There's no description in this structure
+				try:
+					list_description_elem = item.find('span', class_='Truncate-text color-fg-muted mr-3')  # type: ignore
+					list_description = list_description_elem.text.strip() if list_description_elem else ''
+				except AttributeError as e:
+					if args.debug:
+						logger.warning(f"Failed to extract description for list '{list_name}': {e}")
+					list_description = ''
+				# list_description = ''
+
+				# Get individual list repository links
+				try:
+					list_repos = await get_info_for_list(list_link, headers, session, args)
+				except Exception as e:
+					logger.warning(f'{e} {type(e)} failed to get list info for {list_name}')
+					logger.error(f'traceback: {traceback.format_exc()}')
+					list_repos = []
+
+				lists_with_repos[list_name] = {
+					'href': list_link,
+					'count': list_count_info,
+					'description': list_description,
+					'hrefs': list_repos
+				}
+		except (TypeError, IndexError) as e:
+			logger.error(f'Failed to find list items in soup {e} {type(e)}')
+	else:
+		logger.warning("No lists found in soup")
+
+	# Cache both results
+	if git_lists_metadata:
+		set_cache_entry(session, cache_key_metadata, cache_type_metadata, json.dumps(git_lists_metadata))
+
+	if lists_with_repos:
+		set_cache_entry(session, cache_key_stars, cache_type_stars, json.dumps(lists_with_repos))
+
+	session.commit()
+
+	logger.info(f"Fetched unified data: {len(git_lists_metadata)} list metadata entries, {len(lists_with_repos)} lists with repos")
+
+	return {
+		'lists_metadata': git_lists_metadata,
+		'lists_with_repos': lists_with_repos
+	}

@@ -7,7 +7,7 @@ from pathlib import Path
 from loguru import logger
 from dbstuff import GitRepo, GitFolder, RepoInfo, GitStar, GitList, get_dupes
 from utils import valid_git_folder, get_remote_url, ensure_datetime
-from gitstars import get_git_stars, get_git_list_stars
+from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
 
 async def verify_star_list_links(session, args):
@@ -31,7 +31,8 @@ async def verify_star_list_links(session, args):
 		}
 
 	except Exception as e:
-		logger.error(f"Error verifying star-list links: {e}")
+		logger.error(f"Error verifying star-list links: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
 		return None
 
 async def insert_update_git_folder(git_folder_path, session, args):
@@ -84,7 +85,8 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			repo_info = RepoInfo(owner, repo_name)
 			repo_metadata = await fetch_metadata(repo_info, session, args)
 		except Exception as e:
-			logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
+			logger.error(f'Failed to fetch metadata for {repo_path}: {e} {type(e)}')
+			logger.error(f'traceback: {traceback.format_exc()}')
 			repo_metadata = None
 
 	try:
@@ -120,6 +122,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 				repo_metadata = None
 			except Exception as e:
 				logger.error(f'Failed to fetch metadata for {repo_path}: {e}')
+				logger.error(f'traceback: {traceback.format_exc()}')
 				repo_metadata = None
 
 		# Try lookup by name if URL lookup failed
@@ -128,6 +131,8 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 		# Check if folder already exists in database
 		git_folder = session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first()
+		if 'BLANK_REPO_DATA' in remote_url or 'BLANK_REPO_DATA' in git_folder_path or 'BLANK_REPO_DATA' in repo_name:
+			logger.warning(f"BLANK_REPO_DATA found in remote_url: {remote_url} or git_folder_path: {git_folder_path} or repo_name: {repo_name}")
 
 		# If no repo exists, create a new one with safeguards
 		if not git_repo:
@@ -145,15 +150,20 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 				# Populate with metadata if available
 				if repo_metadata:
+					if 'BLANK_REPO_DATA' in repo_metadata:
+						logger.warning(f"BLANK_REPO_DATA found in repo_metadata for {repo_name} repo_metadata: {repo_metadata}")
 					git_repo = populate_from_metadata(git_repo, repo_metadata)
-
 				session.add(git_repo)
 				session.flush()  # Get the ID without committing
-				logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name}')
+				if 'BLANK_REPO_DATA' in git_repo.git_url or 'BLANK_REPO_DATA' in git_repo.github_repo_name:
+					logger.warning(f"BLANK_REPO_DATA found in git_repo.git_url: {git_repo.git_url} or git_repo.github_repo_name: {git_repo.github_repo_name}")
+					session.rollback()
+					return None
+				else:
+					logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name}')
+
 		else:
 			# Update existing repo
-			if args.debug:
-				logger.debug(f'Found existing GitRepo: {git_repo.github_repo_name} full_name: {git_repo.full_name}')
 			git_repo.last_scan = datetime.now()
 			git_repo.scan_count += 1
 			git_repo.update_config_times()
@@ -181,7 +191,10 @@ async def insert_update_git_folder(git_folder_path, session, args):
 		return git_folder
 
 	except Exception as e:
-		logger.error(f'Database error: {e} repo_metadata: {repo_metadata}')
+		logger.error(f'Database error: {e} {type(e)} for git_folder_path: {git_folder_path}')
+		logger.error(f'traceback: {traceback.format_exc()}')
+		if repo_metadata:
+			logger.error(f'repo_metadata: {repo_metadata}')
 		logger.error(f'traceback: {traceback.format_exc()}')
 		logger.error(f'tracebackstack: {traceback.print_stack()}')
 		if session.is_active:
@@ -190,14 +203,53 @@ async def insert_update_git_folder(git_folder_path, session, args):
 
 async def create_repo_to_list_mapping(session, args):
 	"""Create a mapping of repo URLs to list names - fetch once and reuse"""
-	git_lists_data = await get_git_list_stars(session, args)
+	git_lists_data = await get_lists_and_stars_unified(session, args)
 	repo_to_list_mapping = {}
 
-	for list_name, list_data in git_lists_data.items():
-		for href in list_data.get('hrefs', []):
+	# Debug the structure
+	if args.debug:
+		logger.debug(f"git_lists_data keys: {git_lists_data.keys()}")
+		logger.debug(f"git_lists_data structure: {type(git_lists_data)}")
+
+	# Extract the correct data structure
+	lists_with_repos = git_lists_data.get('lists_with_repos', {})
+
+	# Handle the nested structure more carefully
+	if isinstance(lists_with_repos, dict):
+		if 'lists_with_repos' in lists_with_repos:
+			# Handle double-nested structure
+			actual_lists = lists_with_repos['lists_with_repos']
+		else:
+			# Handle single-level structure
+			actual_lists = lists_with_repos
+	else:
+		logger.warning(f"Unexpected lists_with_repos type: {type(lists_with_repos)}")
+		return repo_to_list_mapping
+
+	if args.debug:
+		logger.debug(f"actual_lists type: {type(actual_lists)}, keys: {actual_lists.keys() if isinstance(actual_lists, dict) else 'N/A'}")
+
+	# Ensure actual_lists is a dictionary before iterating
+	if not isinstance(actual_lists, dict):
+		logger.warning(f"actual_lists is not a dictionary: {type(actual_lists)}")
+		return repo_to_list_mapping
+
+	# Now iterate over the actual list data
+	for list_name, list_data in actual_lists.items():
+		# Ensure list_data is a dictionary
+		if not isinstance(list_data, dict):
+			logger.warning(f"list_data for {list_name} is not a dictionary: {type(list_data)}")
+			continue
+
+		hrefs = list_data.get('hrefs', [])
+		if args.debug:
+			logger.debug(f"List {list_name} has {len(hrefs)} hrefs")
+
+		for href in hrefs:
 			href_clean = href.strip('/').split('github.com/')[-1].rstrip('.git')
 			repo_to_list_mapping[href_clean] = list_name
 
+	logger.info(f"Created repo-to-list mapping with {len(repo_to_list_mapping)} entries")
 	return repo_to_list_mapping
 
 async def insert_update_starred_repo(github_repo, session, args, create_new=False, list_name=None):
@@ -212,6 +264,7 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 		repo_data = github_repo
 		remote_url = repo_data.get('html_url') or f"https://github.com/{repo_data.get('full_name')}"
 		full_name = repo_data.get('full_name')
+		clean_path = full_name
 	else:
 		clean_path = github_repo.strip('/')
 		if 'github.com' in clean_path:
@@ -271,22 +324,6 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			if git_list:
 				git_star.gitlist_id = git_list.id
 				logger.info(f"Linked GitStar {git_star.id} to GitList {git_list.id} ({list_name})")
-		# else:
-		# 	# Try to determine which list this repo belongs to
-		# 	git_lists_data = await get_git_list_stars(session, args)
-		# 	repo_full_name = git_repo.full_name or full_name
-
-		# 	for list_name_check, list_data in git_lists_data.items():
-		# 		for href in list_data.get('hrefs', []):
-		# 			href_clean = href.strip('/').split('github.com/')[-1].rstrip('.git')
-		# 			if href_clean == repo_full_name:
-		# 				git_list = session.query(GitList).filter(GitList.list_name == list_name_check).first()
-		# 				if git_list:
-		# 					git_star.gitlist_id = git_list.id
-		# 					logger.info(f"Auto-linked GitStar {git_star.id} to GitList {git_list.id} ({list_name_check})")
-		# 				break
-		# 		if git_star.gitlist_id:
-		# 			break
 	else:
 		logger.warning(f'No GitRepo found for remote_url: {remote_url}')
 
@@ -372,7 +409,7 @@ async def populate_repo_data(session, args, starred_repos=None):
 
 	# Use provided starred_repos or fetch if not provided
 	if starred_repos is None:
-		starred_repos = await get_git_stars(args, session)
+		starred_repos = await fetch_github_starred_repos(args, session)
 
 	stats = {
 		"total_db_repos": len(git_repos),
@@ -450,8 +487,8 @@ async def populate_repo_data(session, args, starred_repos=None):
 					# Update the entry with all GitHub data
 					update_repo_from_data(db_repo, repo_data)
 					stats["updated"] += 1
-					if args.debug:
-						logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name} scan_count: {db_repo.scan_count} ")
+					# if args.debug:
+					# 	logger.debug(f"Updated repository: {db_repo.id} - {db_repo.github_repo_name} scan_count: {db_repo.scan_count} ")
 				else:
 					# No matching GitHub data found
 					stats["not_found"] += 1
@@ -462,7 +499,8 @@ async def populate_repo_data(session, args, starred_repos=None):
 					logger.info(f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed")
 
 			except Exception as e:
-				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e}")
+				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e} {type(e)}")
+				logger.error(f'traceback: {traceback.format_exc()}')
 				stats["errors"] += 1
 
 		# Final commit
@@ -470,7 +508,8 @@ async def populate_repo_data(session, args, starred_repos=None):
 		logger.info(f"Finished processing repositories: {stats}")
 
 	except Exception as e:
-		logger.error(f"Error processing repositories: {e}")
+		logger.error(f"Error processing repositories: {e} {type(e)}")
+		logger.error(f'traceback: {traceback.format_exc()}')
 		stats["errors"] += 1
 		return {"errors": stats["errors"], "message": str(e)}
 
@@ -678,23 +717,25 @@ async def fetch_metadata(repo, session, args):
 				logger.info(f"Using cached metadata for {repo_path} (age: {cache_age:.1f} seconds)")
 				return cached_repo
 		except Exception as e:
-			logger.error(f"Error parsing cached metadata: {e}")
+			logger.error(f"Error parsing cached metadata: {e} {type(e)} for {repo}")
+			logger.error(f'traceback: {traceback.format_exc()}')
 	else:
-		if args.nodl:
-			logger.warning(f"Running in --nodl mode, no API requests will be made for {repo_path}")
+		# Use update_repo_cache to get metadata
+		repo_metadata = None
+		try:
+			repo_metadata = await update_repo_cache(repo_path, session, args)
+			return repo_metadata
+		except RateLimitExceededError as e:
+			logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
+			raise e
+		except AttributeError as e:
+			logger.warning(f"Error fetching repository metadata: {e} for {repo_path}")
+			logger.warning(f'traceback: {traceback.format_exc()}')
+		except Exception as e:
+			logger.error(f"Error fetching repository metadata: {e} {type(e)} for {repo_path}")
+			logger.error(f'traceback: {traceback.format_exc()}')
+			# return None
+		if not repo_metadata:
+			logger.warning(f"No cache entry found for {repo_path}")
 			return None
-		else:
-			# Use update_repo_cache to get metadata
-			try:
-				repo_metadata = await update_repo_cache(repo_path, session, args)
-				return repo_metadata
-			except RateLimitExceededError as e:
-				logger.warning(f"Rate limit exceeded for repository {repo_path}: {e}")
-				raise e
-			except Exception as e:
-				logger.error(f"Error fetching repository metadata: {e}")
-				# return None
-			if not repo_metadata:
-				logger.warning(f"No cache entry found for {repo_path}")
-				return None
 

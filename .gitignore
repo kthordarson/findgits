@@ -1,3 +1,5 @@
+*.toml
+.coverage
 *.gz
 *.json
 *.png
@@ -18,3 +20,4 @@ gitrepo.db-journal
 *.txt
 *.db*
 .idea/**
+.coveragerc

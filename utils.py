@@ -1,7 +1,8 @@
 import os
+import traceback
 from pathlib import Path
 from loguru import logger
-from subprocess import Popen, PIPE, TimeoutExpired
+from subprocess import Popen, PIPE
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
 import aiohttp
@@ -44,7 +45,7 @@ def flatten(nested_list):
 	return flattened
 
 def valid_git_folder(k: str) -> bool:
-	k = Path(k)
+	k = str(Path(k))
 	if Path(k).is_dir():
 		if os.path.exists(os.path.join(k, 'config')):
 			return True
@@ -54,35 +55,34 @@ def valid_git_folder(k: str) -> bool:
 		logger.warning(f'{k} {type(k)} not valid ')
 	return False
 
-def format_bytes(num_bytes):
-	"""Format a byte value as a string with a unit prefix (TB, GB, MB, KB, or B).
-	Args: num_bytes (int): The byte value to format.
-	Returns: str: A string with a formatted byte value and unit prefix.
-	"""
-	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-		if abs(num_bytes) < 1024.0:
-			return f"{num_bytes:.2f} {unit}"
-		num_bytes /= 1024.0
-	return f"{num_bytes:.2f} TB"
-
 def get_remote_url(git_path: str) -> str:
 	"""
 	Get the remote url of a git folder
 	Parameters: git_path: str - path to git folder
 	Returns: str - remote url
 	"""
-	os.chdir(git_path)
-	cmdstr = ['git', 'remote', '-v']
-	out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
-	remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
 	remote_url = '[no remote]'
+	remote_out = ''
+	out = ''
+	err = ''
 	try:
-		remote_url = remote_out[0].split()[1]
-	except IndexError as e:
-		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+		os.chdir(git_path)
+		cmdstr = ['git', 'remote', '-v']
+		out, err = Popen(cmdstr, stdout=PIPE, stderr=PIPE).communicate()
+		if out:
+			remote_out = [k.strip() for k in out.decode('utf8').split('\n') if k]
+			try:
+				remote_url = remote_out[0].split()[1]
+			except IndexError as e:
+				logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+			except Exception as e:
+				logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+				logger.warning(f'traceback: {traceback.format_exc()}')
 	except Exception as e:
-		logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
-	return remote_url
+		logger.warning(f'[gr] fatal {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+		logger.warning(f'traceback: {traceback.format_exc()}')
+	finally:
+		return remote_url
 
 def get_git_info(git_path: str) -> dict:
 	"""
@@ -211,6 +211,7 @@ def get_git_info(git_path: str) -> dict:
 	except Exception as e:
 		git_info['error'] = f"{e} {type(e)}"
 		logger.warning(f'[get_git_info] {e} {type(e)} {git_path=}')
+		logger.error(f'traceback: {traceback.format_exc()}')
 	finally:
 		os.chdir(original_dir)
 
@@ -244,9 +245,9 @@ def get_directory_size(directory: str) -> int:
 	return total
 
 def get_subfilecount(directory: str) -> int:
-	directory = Path(directory)
+	directory = str(Path(directory))
 	try:
-		filecount = len([k for k in directory.glob('**/*') if k.is_file()])
+		filecount = len([k for k in Path(directory).glob('**/*') if k.is_file()])
 	except PermissionError as e:
 		logger.warning(f'[err] {e} d:{directory}')
 		return 0
@@ -254,10 +255,10 @@ def get_subfilecount(directory: str) -> int:
 
 
 def get_subdircount(directory: str) -> int:
-	directory = Path(directory)
+	directory = str(Path(directory))
 	dc = 0
 	try:
-		dc = len([k for k in directory.glob('**/*') if k.is_dir()])
+		dc = len([k for k in Path(directory).glob('**/*') if k.is_dir()])
 	except (PermissionError, FileNotFoundError) as e:
 		logger.warning(f'[err] {e} d:{directory}')
 	return dc
