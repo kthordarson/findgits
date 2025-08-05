@@ -379,10 +379,10 @@ class GitStar(Base):
 	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
 	# starred_at = Column('starred_at', DateTime, nullable=True)
 	starred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-	stargazers_count = Column(Integer)
-	description = Column(String(1024))
-	full_name = Column(String(255))
-	html_url = Column(String(255))
+	stargazers_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+	description: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+	full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+	html_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
 	# Relationships - specify foreign_keys explicitly
 	repo: Mapped["GitRepo"] = relationship(

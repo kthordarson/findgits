@@ -89,7 +89,7 @@ def check_git_dates(session, create_heatmap=False):
 	# Repos with significant time differences
 	old_repos = df[df['created_at_to_pushed_at'] > 1000].sort_values('created_at_to_pushed_at', ascending=False)
 	if not old_repos.empty:
-		print(f"📜 Oldest repositories (created > 1000 days before last push):")
+		print("📜 Oldest repositories (created > 1000 days before last push):")
 		for _, repo in old_repos.head(5).iterrows():
 			days = repo['created_at_to_pushed_at']
 			years = days / 365.25
@@ -98,7 +98,7 @@ def check_git_dates(session, create_heatmap=False):
 	# Recently accessed repos
 	recent_access = df[df['atime_to_mtime'] < 7].sort_values('atime_to_mtime')
 	if not recent_access.empty:
-		print(f"\n📂 Recently accessed repositories (accessed within 7 days of modification):")
+		print("\n📂 Recently accessed repositories (accessed within 7 days of modification):")
 		for _, repo in recent_access.head(5).iterrows():
 			days = repo['atime_to_mtime']
 			print(f"   • {repo['short_path']:<50} {days:5.1f} days ago")
@@ -106,7 +106,7 @@ def check_git_dates(session, create_heatmap=False):
 	# Repos with future timestamps (potential issues)
 	future_timestamps = df[(df['mtime_to_updated_at'] < 0) | (df['mtime_to_pushed_at'] < 0)]
 	if not future_timestamps.empty:
-		print(f"\n⚠️  Repositories with timestamp inconsistencies:")
+		print("\n⚠️  Repositories with timestamp inconsistencies:")
 		for _, repo in future_timestamps.head(5).iterrows():
 			issues = []
 			if repo['mtime_to_updated_at'] < 0:
@@ -123,7 +123,7 @@ def check_git_dates(session, create_heatmap=False):
 	# Pretty print correlation matrix with better formatting
 	correlation_display = correlation_matrix.round(3)
 	correlation_display.columns = ['CTime', 'ATime', 'MTime', 'Created', 'Updated', 'Pushed']
-	correlation_display.index = ['CTime', 'ATime', 'MTime', 'Created', 'Updated', 'Pushed']
+	correlation_display.index = pd.Index(['CTime', 'ATime', 'MTime', 'Created', 'Updated', 'Pushed'])
 	print(correlation_display.to_string())
 
 	# Group by project analysis
@@ -179,7 +179,7 @@ def check_git_dates(session, create_heatmap=False):
 
 		# Save or display the heatmap
 		plt.savefig('timestamp_differences_heatmap.png')
-		print(f"\n💾 Heatmap saved as 'timestamp_differences_heatmap.png'")
+		print("\n💾 Heatmap saved as 'timestamp_differences_heatmap.png'")
 		plt.show()
 
 async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
