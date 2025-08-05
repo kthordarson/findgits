@@ -291,6 +291,7 @@ def get_args() -> argparse.Namespace:
     myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
     # tuning, debug, etc
     myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
+    myparse.add_argument('--max_output', help='stats max_output', action='store', default=20, dest='max_output', type=int)
     myparse.add_argument('--global_limit', help='global limit', action='store', default=0, dest='global_limit', type=int)
     myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
     myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')

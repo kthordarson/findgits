@@ -303,7 +303,7 @@ async def show_list_by_group(session, args):
 	for list_name, repos in grouped_repos.items():
 		print(f"\n{list_name} ({len(repos)} repos):")
 		print("-" * (len(list_name) + 10))
-		for repo in repos:
+		for repo in repos[:args.max_output]:
 			stars = repo.get('stargazers_count', 0)
 			if repo.get('language'):
 				lang = repo.get('language', 'Unknown')[:15].ljust(15)  # Ensure fixed width
