@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import traceback
+from typing import cast
 import asyncio
 import re
 from datetime import datetime
@@ -95,7 +96,7 @@ async def link_existing_repos_to_stars(session, args):
     try:
         # Get all starred repos from GitHub
         starred_repos = await fetch_github_starred_repos(args, session)
-        starred_lookup = {repo['full_name']: repo for repo in starred_repos}
+        # starred_lookup = {repo['full_name']: repo for repo in starred_repos}
 
         logger.info(f"Found {len(starred_repos)} starred repos from GitHub API")
 
@@ -357,7 +358,7 @@ async def main():
 
         cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
         if cache_entry:
-            git_lists = json.loads(cache_entry.data)
+            git_lists = json.loads(cast(str, cache_entry.data))
         else:
             # Fallback if cache somehow failed
             if args.debug:

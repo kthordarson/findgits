@@ -6,10 +6,9 @@ from typing import Optional, List, cast, Sequence, Any
 from loguru import logger
 import sqlalchemy
 from sqlalchemy import (Row, func, Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
-from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import Session
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -68,7 +67,7 @@ class GitFolder(Base):
 	""" A folder containing one git repo """
 	__tablename__ = 'git_path'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'))
+	gitrepo_id: Mapped[int] = mapped_column(Integer, ForeignKey('gitrepo.id'))
 	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
 	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
 	git_path = Column('git_path', String(255))
@@ -86,12 +85,10 @@ class GitFolder(Base):
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
 	scanned = Column(Boolean, default=False)  # Fixed this line
-	is_starred = Column(Boolean, default=False)
+	is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
 
 	# Relationships
 	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
-	# star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id])
-	# list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id])
 	star_entry: Mapped[Optional["GitStar"]] = relationship(
 		"GitStar",
 		foreign_keys=[star_id],
@@ -147,7 +144,8 @@ class GitRepo(Base):
 	id: Mapped[int] = mapped_column(primary_key=True)
 
 	# Basic repository information
-	git_url = Column('git_url', String(255))
+	# git_url = Column('git_url', String(255))
+	git_url: Mapped[str] = mapped_column(String)
 	github_repo_name = Column('github_repo_name', String(255))
 	github_owner = Column('github_owner', String(255))
 	local_path = Column('local_path', String(255))
@@ -163,7 +161,7 @@ class GitRepo(Base):
 	fork = Column('fork', Boolean)
 	clone_url = Column('clone_url', String(255))
 	ssh_url = Column('ssh_url', String(255))
-	git_url_api = Column('git_url_api', String(255))
+	git_url_api = Column('git_url', String(255))
 	svn_url = Column('svn_url', String(255))
 	homepage = Column('homepage', String(255))
 
@@ -199,9 +197,9 @@ class GitRepo(Base):
 	license_url = Column('license_url', String(255))
 
 	# Timestamps
-	created_at = Column('created_at', DateTime)
-	updated_at = Column('updated_at', DateTime)
-	pushed_at = Column('pushed_at', DateTime)
+	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+	pushed_at: Mapped[datetime] = mapped_column(DateTime)
 
 	# Our internal tracking fields
 	dupe_count = Column('dupe_count', BigInteger)
@@ -215,7 +213,7 @@ class GitRepo(Base):
 	valid = Column(Boolean, default=True)
 	scanned = Column(Boolean, default=False)  # Fixed this line
 
-	is_starred = Column('is_starred', Boolean, default=False)
+	is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
 	# starred_at = Column('starred_at', DateTime, nullable=True)
 	starred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -376,7 +374,7 @@ class GitStar(Base):
 	"""A starred repo, linked to a GitRepo"""
 	__tablename__ = 'gitstars'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	gitrepo_id = Column(Integer, ForeignKey('gitrepo.id'), unique=True)
+	gitrepo_id: Mapped[int] = mapped_column(Integer, ForeignKey('gitrepo.id'))
 	# Link to lists that contain this starred repo
 	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
 	# starred_at = Column('starred_at', DateTime, nullable=True)
@@ -399,11 +397,11 @@ class GitList(Base):
 	"""A starred repo list, containing multiple GitStars"""
 	__tablename__ = 'gitlists'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	list_name = Column(String(255))
-	list_description = Column(String(1024))
-	list_url = Column(String(255))
-	repo_count = Column(Integer, default=0)
-	created_at = Column('created_at', DateTime, default=datetime.now)
+	list_name: Mapped[str] = mapped_column(String)
+	repo_count: Mapped[int] = mapped_column(Integer, default=0)
+	list_description: Mapped[str] = mapped_column(String(1024))
+	list_url: Mapped[str] = mapped_column(String(255))
+	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 	# Relationships - one list can contain many starred repos
 	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
