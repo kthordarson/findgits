@@ -9,6 +9,7 @@ import argparse
 import json
 from loguru import logger
 import sqlalchemy
+import sqlite3
 from sqlalchemy.orm import sessionmaker, Session
 from dbstuff import GitRepo, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
@@ -88,6 +89,9 @@ async def process_starred_repo(repo: str, session: Session, args: argparse.Names
     """Process a single starred repo asynchronously"""
     try:
         await insert_update_starred_repo(github_repo=repo, session=session, args=args, create_new=True)
+    except sqlite3.IntegrityError as e:
+        logger.error(f'Error processing {repo}: {e} {type(e)}')
+        logger.error(f'traceback: {traceback.format_exc()}')
     except Exception as e:
         logger.error(f'Error processing {repo}: {e} {type(e)}')
         logger.error(f'traceback: {traceback.format_exc()}')

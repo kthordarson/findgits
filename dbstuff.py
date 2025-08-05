@@ -31,9 +31,9 @@ BLANK_REPO_DATA = {
 	"description": "Repository BLANK_REPO_DATA",
 	"fork": False,
 	"url": 'BLANK_REPO_DATA',
-	"created_at": None,
-	"updated_at": None,
-	"pushed_at": None,
+    "created_at": datetime(1970, 1, 1).isoformat() + 'Z',  # Unix epoch
+    "updated_at": datetime(1970, 1, 1).isoformat() + 'Z',
+    "pushed_at": datetime(1970, 1, 1).isoformat() + 'Z',   # Add this
 	"git_url": "git://github.com/BLANK_REPO_DATA.git",
 	"ssh_url": "git@github.com:BLANK_REPO_DATA.git",
 	"clone_url": "https://github.com/BLANK_REPO_DATA.git",
@@ -197,9 +197,9 @@ class GitRepo(Base):
 	license_url = Column('license_url', String(255))
 
 	# Timestamps
-	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-	updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-	pushed_at: Mapped[datetime] = mapped_column(DateTime)
+	created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+	updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) 
+	pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 	# Our internal tracking fields
 	dupe_count = Column('dupe_count', BigInteger)
@@ -306,8 +306,11 @@ class GitRepo(Base):
 				if repo_data.get('pushed_at'):
 					pushed_at_str = repo_data.get('pushed_at','')
 					self.pushed_at = datetime.strptime(pushed_at_str, '%Y-%m-%dT%H:%M:%SZ')
+				else:
+					self.pushed_at = datetime(1970, 1, 1)  # Unix epoch as default
 			except ValueError as e:
 				logger.warning(f"Error parsing timestamps: {e}")
+				self.pushed_at = datetime(1970, 1, 1) if not hasattr(self, 'pushed_at') else self.pushed_at
 
 	def __repr__(self):
 		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
