@@ -6,7 +6,7 @@ import sqlite3
 from loguru import logger
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA, RepoCacheExpanded
-from utils import get_client_session, ensure_datetime, get_auth_params
+from utils import get_client_session, ensure_datetime, get_auth_params, get_semaphore
 
 class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
@@ -95,64 +95,65 @@ async def update_repo_cache(repo_name_or_url, session, args):
 	"""
 	if 'BLANK_REPO_DATA' in repo_name_or_url:
 		logger.warning(f"BLANK_REPO_DATA repo_name_or_url: {repo_name_or_url}")
-
-	# Normalize repo name
-	repo_name = repo_name_or_url.strip('/').replace('github.com/', '').replace('.git', '')
-	cache_key = f"repo:{repo_name}"
-	cache_type = "repo_data"
-	# Try cache first
-	if args.use_cache:
-		cache_entry = get_cache_entry(session, cache_key, cache_type)
-		if cache_entry:
-			try:
-				cache_data = json.loads(cache_entry.data)
-				return cache_data[0] if cache_data else None
-			except Exception as e:
-				logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_name_or_url}")
-				logger.error(f'traceback: {traceback.format_exc()}')
-	auth = await get_auth_params()
-	if not auth:
-		logger.error('update_repo_cache: no auth provided')
-		return None
-	api_url = f'https://api.github.com/repos/{repo_name}'
-	try:
-		async with get_client_session(args) as api_session:
-			async with api_session.get(api_url) as r:
-				if r.status == 200:
-					repo_data = await r.json()
-					try:
-						set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
-					except Exception as e:
-						logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
-						logger.error(f'traceback: {traceback.format_exc()}')
+	semaphore = get_semaphore()
+	async with semaphore:
+		# Normalize repo name
+		repo_name = repo_name_or_url.strip('/').replace('github.com/', '').replace('.git', '')
+		cache_key = f"repo:{repo_name}"
+		cache_type = "repo_data"
+		# Try cache first
+		if args.use_cache:
+			cache_entry = get_cache_entry(session, cache_key, cache_type)
+			if cache_entry:
+				try:
+					cache_data = json.loads(cache_entry.data)
+					return cache_data[0] if cache_data else None
+				except Exception as e:
+					logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_name_or_url}")
+					logger.error(f'traceback: {traceback.format_exc()}')
+		auth = await get_auth_params()
+		if not auth:
+			logger.error('update_repo_cache: no auth provided')
+			return None
+		api_url = f'https://api.github.com/repos/{repo_name}'
+		try:
+			async with get_client_session(args) as api_session:
+				async with api_session.get(api_url) as r:
+					if r.status == 200:
+						repo_data = await r.json()
+						try:
+							set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
+						except Exception as e:
+							logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
+							logger.error(f'traceback: {traceback.format_exc()}')
+							return None
+						session.commit()
+						return repo_data
+					elif r.status in (403, 404, 451):
+						logger.warning(f"Repository error {r.status}: {api_url}")
+						default_repo_data = BLANK_REPO_DATA.copy()
+						default_repo_data['name'] = repo_name
+						try:
+							defaultjson = json.dumps([default_repo_data])
+						except TypeError as e:
+							logger.error(f"TypeError while serializing default repo data: {e} {type(e)}")
+							logger.error(f'traceback: {traceback.format_exc()}')
+							logger.error(f"Default repo data: {default_repo_data}")
+							return None
+						except Exception as e:
+							logger.error(f"Failed to serialize default repo data: {e} {type(e)}")
+							logger.error(f'traceback: {traceback.format_exc()}')
+							return None
+						set_cache_entry(session, cache_key, cache_type, defaultjson)
+						session.commit()
+						return default_repo_data
+					else:
+						logger.error(f"Failed to fetch repository data: {r.status}")
 						return None
-					session.commit()
-					return repo_data
-				elif r.status in (403, 404, 451):
-					logger.warning(f"Repository error {r.status}: {api_url}")
-					default_repo_data = BLANK_REPO_DATA.copy()
-					default_repo_data['name'] = repo_name
-					try:
-						defaultjson = json.dumps([default_repo_data])
-					except TypeError as e:
-						logger.error(f"TypeError while serializing default repo data: {e} {type(e)}")
-						logger.error(f'traceback: {traceback.format_exc()}')
-						logger.error(f"Default repo data: {default_repo_data}")
-						return None
-					except Exception as e:
-						logger.error(f"Failed to serialize default repo data: {e} {type(e)}")
-						logger.error(f'traceback: {traceback.format_exc()}')
-						return None
-					set_cache_entry(session, cache_key, cache_type, defaultjson)
-					session.commit()
-					return default_repo_data
-				else:
-					logger.error(f"Failed to fetch repository data: {r.status}")
-					return None
-	except Exception as e:
-		logger.error(f"Fatal Error fetching repository data: {e} {type(e)}")
-		logger.error(f'traceback: {traceback.format_exc()}')
-		return None
+		except Exception as e:
+			logger.error(f"Fatal Error fetching repository data: {e} {type(e)}")
+			logger.error(f'traceback: {traceback.format_exc()}')
+			return None
 
 def get_cache_entry(session, cache_key, cache_type):
 	"""Get a cache entry from the database"""

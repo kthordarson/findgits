@@ -15,7 +15,7 @@ from dbstuff import GitRepo, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
 from repotools import create_repo_to_list_mapping, verify_star_list_links, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
-from utils import flatten
+from utils import flatten, cleanup_shared_session
 from cacheutils import set_cache_entry, get_cache_entry
 # Import functions from stats.py
 from stats import (
@@ -297,6 +297,7 @@ def get_args() -> argparse.Namespace:
     myparse.add_argument('--db_file', help='sqlitedb filename', default='gitrepo.db', dest='db_file', action='store', metavar='db_file')
     myparse.add_argument('--dropdatabase', action='store_true', default=False, dest='dropdatabase', help='drop database, no warnings')
     # tuning, debug, etc
+    myparse.add_argument('--batch_size', help='batch_size', action='store', default=5, dest='batch_size', type=int)
     myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
     myparse.add_argument('--max_output', help='stats max_output', action='store', default=20, dest='max_output', type=int)
     myparse.add_argument('--global_limit', help='global limit', action='store', default=0, dest='global_limit', type=int)
@@ -333,118 +334,119 @@ async def main() -> None:
         logger.info('Database dropped')
         session.close()
         return
+    try:
+        if args.scanpath:
+            scanpath = Path(args.scanpath[0])
 
-    if args.scanpath:
-        scanpath = Path(args.scanpath[0])
-
-        if args.debug:
-            logger.debug(f'Scan path: {scanpath}')
-
-        # Fetch starred repos ONCE at the beginning
-        starred_repos = await fetch_github_starred_repos(args, session)
-
-        list_data = await populate_git_lists(session, args)
-        if args.debug:
-            logger.debug(f'Populated git lists from GitHub, got {len(list_data)} ... starting populate_repo_data')
-
-        # Pass the already-fetched starred_repos to populate_repo_data instead of letting it fetch again
-        stats = await populate_repo_data(session, args, starred_repos=starred_repos)
-
-        if args.debug:
-            logger.debug(f'populate_repo_data done stats: {stats}')
-
-        # Use the existing starred_repos data
-        print(f'Using {len(starred_repos)} starred repos from GitHub API')
-
-        if args.global_limit > 0:
-            logger.warning(f'Global limit set to {args.global_limit}, this will limit the number of repositories processed.')
-            git_repos = session.query(GitRepo).limit(args.global_limit).all()
-        else:
-            git_repos = session.query(GitRepo).all()
-
-        if args.debug:
-            logger.debug(f'Git Repos: {len(git_repos)}')
-
-        cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
-        if cache_entry:
-            git_lists = json.loads(cast(str, cache_entry.data))
-        else:
-            # Fallback if cache somehow failed
             if args.debug:
-                logger.debug("[fallback] Cache entry not found, fetching lists and stars from GitHub")
-            git_lists = await get_lists_and_stars_unified(session, args)
-        try:
-            urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
-        except TypeError as e:
-            logger.error(f"Error flattening URLs: {e}")
+                logger.debug(f'Scan path: {scanpath}')
+
+            # Fetch starred repos ONCE at the beginning
+            starred_repos = await fetch_github_starred_repos(args, session)
+
+            list_data = await populate_git_lists(session, args)
             if args.debug:
-                logger.error(f"git_lists: {git_lists}")
-            urls = []
+                logger.debug(f'Populated git lists from GitHub, got {len(list_data)} ... starting populate_repo_data')
 
-        localrepos = [k.github_repo_name for k in git_repos]
-        notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
-        foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
-        print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+            # Pass the already-fetched starred_repos to populate_repo_data instead of letting it fetch again
+            stats = await populate_repo_data(session, args, starred_repos=starred_repos)
 
-        # Process repos in parallel
-        batch_size = 20
-        for i in range(0, len(notfoundrepos), batch_size):
-            batch = notfoundrepos[i:i+batch_size]
-            tasks = []
+            if args.debug:
+                logger.debug(f'populate_repo_data done stats: {stats}')
 
-            for repo in batch:
-                if '20142995/pocsuite3' in repo:
-                    logger.warning(f'problematic repo: {repo}')
-                tasks.append(process_starred_repo(repo, session, args))
+            # Use the existing starred_repos data
+            print(f'Using {len(starred_repos)} starred repos from GitHub API')
 
-            await asyncio.gather(*tasks)
-            session.commit()
-        await link_existing_repos_to_stars(session, args)
-
-        verification_results = await verify_star_list_links(session, args)
-        if verification_results:
-            print(f"Star-List Link Verification: {verification_results}")
-
-        if scanpath.is_dir():
-            # Find git folders
-            git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir() and '.cargo' not in str(k) and 'developmenttest' not in str(k)]
             if args.global_limit > 0:
-                git_folders = git_folders[:args.global_limit]
-                logger.warning(f'Global limit set to {args.global_limit}, processing only first {len(git_folders)} git folders')
-            print(f'Scan path: {scanpath} found {len(git_folders)} git folders')
-            tasks = set()
-            for git_folder in git_folders:
-                git_path = git_folder.parent
-                tasks.add(process_git_folder(git_path, session, args))
-            await asyncio.gather(*tasks)
-            session.commit()
-            print(f'Processed {len(git_folders)} git folders')
-        else:
-            logger.error(f'Scan path: {scanpath} is not a valid directory')
+                logger.warning(f'Global limit set to {args.global_limit}, this will limit the number of repositories processed.')
+                git_repos = session.query(GitRepo).limit(args.global_limit).all()
+            else:
+                git_repos = session.query(GitRepo).all()
 
-        # PRE-FETCH the repo-to-list mapping ONCE
-        logger.info("Creating repo-to-list mapping...")
-        repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
-        logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
+            if args.debug:
+                logger.debug(f'Git Repos: {len(git_repos)}')
 
-    if args.checkdates:
-        check_git_dates(session)
+            cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
+            if cache_entry:
+                git_lists = json.loads(cast(str, cache_entry.data))
+            else:
+                # Fallback if cache somehow failed
+                if args.debug:
+                    logger.debug("[fallback] Cache entry not found, fetching lists and stars from GitHub")
+                git_lists = await get_lists_and_stars_unified(session, args)
+            try:
+                urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+            except TypeError as e:
+                logger.error(f"Error flattening URLs: {e}")
+                if args.debug:
+                    logger.error(f"git_lists: {git_lists}")
+                urls = []
 
-    if args.list_by_group:
-        await show_list_by_group(session, args)
+            localrepos = [k.github_repo_name for k in git_repos]
+            notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
+            foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
+            print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 
-    if args.list_stats:
-        show_starred_repo_stats(session)
+            # Process repos in parallel
+            for i in range(0, len(notfoundrepos), args.batch_size):
+                batch = notfoundrepos[i:i+args.batch_size]
+                tasks = []
 
-    if args.check_rate_limits:
-        await show_rate_limits(session, args)
+                for repo in batch:
+                    if '20142995/pocsuite3' in repo:
+                        logger.warning(f'problematic repo: {repo}')
+                    tasks.append(process_starred_repo(repo, session, args))
 
-    # If only info/stats flags were used, close session and return
-    if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits):
+                await asyncio.gather(*tasks)
+                session.commit()
+                await asyncio.sleep(1)  # Small delay to avoid overwhelming the DB
+            await link_existing_repos_to_stars(session, args)
+
+            verification_results = await verify_star_list_links(session, args)
+            if verification_results:
+                print(f"Star-List Link Verification: {verification_results}")
+
+            if scanpath.is_dir():
+                # Find git folders
+                git_folders = [k for k in scanpath.glob('**/.git') if Path(k).is_dir() and '.cargo' not in str(k) and 'developmenttest' not in str(k)]
+                if args.global_limit > 0:
+                    git_folders = git_folders[:args.global_limit]
+                    logger.warning(f'Global limit set to {args.global_limit}, processing only first {len(git_folders)} git folders')
+                print(f'Scan path: {scanpath} found {len(git_folders)} git folders')
+                tasks = set()
+                for git_folder in git_folders:
+                    git_path = git_folder.parent
+                    tasks.add(process_git_folder(git_path, session, args))
+                await asyncio.gather(*tasks)
+                session.commit()
+                print(f'Processed {len(git_folders)} git folders')
+            else:
+                logger.error(f'Scan path: {scanpath} is not a valid directory')
+
+            # PRE-FETCH the repo-to-list mapping ONCE
+            logger.info("Creating repo-to-list mapping...")
+            repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
+            logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
+
+        if args.checkdates:
+            check_git_dates(session)
+
+        if args.list_by_group:
+            await show_list_by_group(session, args)
+
+        if args.list_stats:
+            show_starred_repo_stats(session)
+
+        if args.check_rate_limits:
+            await show_rate_limits(session, args)
+
+        # If only info/stats flags were used, close session and return
+        if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits):
+            session.close()
+            return
+    finally:
+        await cleanup_shared_session()
         session.close()
-        return
-
-    session.close()
 
 if __name__ == '__main__':
     asyncio.run(main())

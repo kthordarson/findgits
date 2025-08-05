@@ -5,7 +5,7 @@ import json
 from loguru import logger
 from bs4 import BeautifulSoup
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit
-from utils import get_client_session, get_auth_params
+from utils import get_client_session, get_auth_params, get_semaphore
 
 async def get_info_for_list(link, headers, session, args):
 	"""
@@ -237,7 +237,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 			logger.info(f"Fetching pages 2-{max_pages_to_fetch} concurrently (expecting ~{max_pages_to_fetch * per_page} total repos)")
 
 			# Fetch remaining pages concurrently
-			semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
+			semaphore = get_semaphore()   # asyncio.Semaphore(5)  # Limit concurrent requests
 			stop_signal = asyncio.Event()
 
 			tasks = [
