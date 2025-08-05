@@ -121,9 +121,9 @@ async def insert_update_git_folder(git_folder_path, session, args):
 				logger.warning(f'Failed to fetch metadata for {repo_path}: {e}')
 				repo_metadata = None
 			except Exception as e:
-				logger.error(f'Failed to fetch metadata for {repo_path}: {e}')
+				logger.error(f'Fatal Exception for {repo_path}: {e} {type(e)}')
 				logger.error(f'traceback: {traceback.format_exc()}')
-				repo_metadata = None
+				raise e
 
 		# Try lookup by name if URL lookup failed
 		if not git_repo:

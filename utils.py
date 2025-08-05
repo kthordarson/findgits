@@ -130,8 +130,9 @@ def get_remote_url(git_path: str) -> str:
 				logger.warning(f'[gr] {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 				logger.warning(f'traceback: {traceback.format_exc()}')
 	except Exception as e:
-		logger.warning(f'[gr] fatal {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
-		logger.warning(f'traceback: {traceback.format_exc()}')
+		logger.error(f'[gr] fatal {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
+		logger.error(f'traceback: {traceback.format_exc()}')
+		raise e
 	finally:
 		return remote_url
 
