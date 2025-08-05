@@ -10,7 +10,7 @@ from utils import valid_git_folder, get_remote_url, ensure_datetime
 from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
 from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededError
 
-async def verify_star_list_links(session, args):
+async def verify_star_list_links(session, args) -> dict:
 	"""Verify that GitStar entries are properly linked to GitList entries"""
 	try:
 		# Count total GitStar entries
@@ -35,7 +35,7 @@ async def verify_star_list_links(session, args):
 		logger.error(f'traceback: {traceback.format_exc()}')
 		return None
 
-async def insert_update_git_folder(git_folder_path, session, args):
+async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder | None:
 	"""
 	Insert a new GitFolder or update an existing one in the database
 	"""
@@ -201,7 +201,7 @@ async def insert_update_git_folder(git_folder_path, session, args):
 			session.rollback()
 		return None
 
-async def create_repo_to_list_mapping(session, args):
+async def create_repo_to_list_mapping(session, args) -> dict:
 	"""Create a mapping of repo URLs to list names - fetch once and reuse"""
 	git_lists_data = await get_lists_and_stars_unified(session, args)
 	repo_to_list_mapping = {}
@@ -252,7 +252,7 @@ async def create_repo_to_list_mapping(session, args):
 	logger.info(f"Created repo-to-list mapping with {len(repo_to_list_mapping)} entries")
 	return repo_to_list_mapping
 
-async def insert_update_starred_repo(github_repo, session, args, create_new=False, list_name=None):
+async def insert_update_starred_repo(github_repo, session, args, create_new=False, list_name=None) -> GitRepo | None:
 	"""
 	Insert a new GitRepo or update an existing one in the database
 	Also create GitStar entry and link to GitList if provided
@@ -389,7 +389,7 @@ def check_update_dupes(session) -> dict:
 	# logger.info(f"Found {result['dupe_repos']} duplicate repo URLs among {total_repos} total repos")
 	return result
 
-async def populate_repo_data(session, args, starred_repos=None):
+async def populate_repo_data(session, args, starred_repos=None) -> dict:
 	"""
 	Update existing GitRepo entries in database with detailed information from GitHub starred repositories.
 	Uses the provided git_repos list rather than querying again.
@@ -515,7 +515,7 @@ async def populate_repo_data(session, args, starred_repos=None):
 
 	return stats
 
-def update_repo_from_data(repo, repo_data):
+def update_repo_from_data(repo, repo_data) -> None:
 	"""Update a repository with data from GitHub API"""
 	repo.last_scan = datetime.now()
 	repo.scan_count += 1
@@ -579,7 +579,7 @@ def update_repo_from_data(repo, repo_data):
 		logger.warning(f"Error parsing timestamps: {e}")
 
 
-def populate_from_metadata(repo, metadata):
+def populate_from_metadata(repo, metadata) -> GitRepo:
 	"""
 	Populate a GitRepo object with metadata from GitHub API
 
@@ -674,7 +674,7 @@ def populate_from_metadata(repo, metadata):
 	# logger.debug(f"Populated metadata for repoid: {repo.id} - {repo.full_name}")
 	return repo
 
-async def fetch_metadata(repo, session, args):
+async def fetch_metadata(repo, session, args) -> dict | None:
 	"""
 	Fetch metadata from GitHub API for this repository with database caching
 

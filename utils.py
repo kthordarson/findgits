@@ -14,51 +14,51 @@ _global_session = None
 _global_connector = None
 _semaphore = None
 
-def get_semaphore():
-    global _semaphore
-    if _semaphore is None:
-        _semaphore = asyncio.Semaphore(3)  # Limit to 3 concurrent requests
-    return _semaphore
+def get_semaphore() -> asyncio.Semaphore:
+	global _semaphore
+	if _semaphore is None:
+		_semaphore = asyncio.Semaphore(3)  # Limit to 3 concurrent requests
+	return _semaphore
 
-async def get_shared_session(args):
-    global _global_session, _global_connector
-    
-    if _global_session is None or _global_session.closed:
-        auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
-        if not auth:
-            logger.error('no auth provided')
-            return None
-            
-        headers = {
-            'Accept': 'application/vnd.github+json',
-            'Authorization': f'Bearer {auth.password}',
-            'X-GitHub-Api-Version': '2022-11-28'
-        }
-        timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-        _global_connector = aiohttp.TCPConnector(
-            limit=3,
-            limit_per_host=1,
-            ttl_dns_cache=300,
-            use_dns_cache=True,
-            keepalive_timeout=30,
-            enable_cleanup_closed=True
-        )
-        _global_session = aiohttp.ClientSession(
-            headers=headers, 
-            timeout=timeout, 
-            connector=_global_connector
-        )
-    
-    return _global_session
+async def get_shared_session(args) -> aiohttp.ClientSession | None:
+	global _global_session, _global_connector
 
-async def cleanup_shared_session():
-    global _global_session, _global_connector
-    if _global_session:
-        await _global_session.close()
-        _global_session = None
-        _global_connector = None
+	if _global_session is None or _global_session.closed:
+		auth = HTTPBasicAuth(os.getenv("GITHUB_USERNAME",''), os.getenv("FINDGITSTOKEN",''))
+		if not auth:
+			logger.error('no auth provided')
+			return None
 
-async def get_auth_params():
+		headers = {
+			'Accept': 'application/vnd.github+json',
+			'Authorization': f'Bearer {auth.password}',
+			'X-GitHub-Api-Version': '2022-11-28'
+		}
+		timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
+		_global_connector = aiohttp.TCPConnector(
+			limit=3,
+			limit_per_host=1,
+			ttl_dns_cache=300,
+			use_dns_cache=True,
+			keepalive_timeout=30,
+			enable_cleanup_closed=True
+		)
+		_global_session = aiohttp.ClientSession(
+			headers=headers,
+			timeout=timeout,
+			connector=_global_connector
+		)
+
+	return _global_session
+
+async def cleanup_shared_session() -> None:
+	global _global_session, _global_connector
+	if _global_session:
+		await _global_session.close()
+		_global_session = None
+		_global_connector = None
+
+async def get_auth_params() -> tuple[HTTPBasicAuth, HTTPBasicAuth] | None:
 	"""Get authentication parameters from environment variables."""
 	username = os.getenv("GITHUB_USERNAME", '')
 	token = os.getenv("FINDGITSTOKEN", '')
@@ -86,7 +86,7 @@ async def get_client_session(args):
 				await session.close()
 				await asyncio.sleep(0.1)  # Allow time for cleanup
 
-def flatten(nested_list):
+def flatten(nested_list) -> list:
 	flattened = []
 	for item in nested_list:
 		if isinstance(item, list):
@@ -315,7 +315,7 @@ def get_subdircount(directory: str) -> int:
 		logger.warning(f'[err] {e} d:{directory}')
 	return dc
 
-def ensure_datetime(dt_value):
+def ensure_datetime(dt_value) -> datetime | None:
 	"""Convert a value to datetime if it's not already, or return None if conversion fails"""
 	if dt_value is None:
 		return None

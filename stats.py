@@ -24,7 +24,7 @@ def dbcheck(session) -> dict:
 	result = {'repo_count': len(repos), 'folder_count': len(folders)}
 	return result
 
-def check_git_dates(session, create_heatmap=False):
+def check_git_dates(session, create_heatmap=False) -> None:
 	"""
 	Check and analyze git timestamp differences
 	"""
@@ -218,7 +218,7 @@ async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 		logger.error(f'traceback: {traceback.format_exc()}')
 		return {}
 
-def show_starred_repo_stats(session):
+def show_starred_repo_stats(session) -> None:
 	"""Pretty print starred repo count statistics by list"""
 	query = text("""
 		SELECT COALESCE(gl.list_name, 'not in a list') as list_name,
@@ -295,7 +295,7 @@ def show_starred_repo_stats(session):
 		for i, (list_name, count) in enumerate(top_lists, 1):
 			print(f"   {i}. {list_name}: {count:,} repos")
 
-async def show_list_by_group(session, args):
+async def show_list_by_group(session, args) -> None:
 	"""Show starred repos grouped by list"""
 	grouped_repos = await get_starred_repos_by_list(session, args)
 	total_repos = sum(len(repos) for repos in grouped_repos.values())
@@ -320,7 +320,7 @@ async def show_list_by_group(session, args):
 				desc = desc[:57] + "..."
 			print(f"{stars:9d} | {lang:15} | {repo['full_name']:40} | {desc}")
 
-async def show_rate_limits(session, args):
+async def show_rate_limits(session, args) -> None:
 	"""Show GitHub API rate limit information"""
 	rate_limits = await get_api_rate_limits(args)
 	if rate_limits:

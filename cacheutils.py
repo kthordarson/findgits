@@ -12,7 +12,9 @@ class RateLimitExceededError(Exception):
 	"""Custom exception for rate limit exceeded errors"""
 	pass
 
-async def get_api_rate_limits(args):
+async def get_api_rate_limits(args) -> dict:
+	# Fetch GitHub API rate limits and return them as a dictionary
+
 	rate_limits = {'limit_hit':False, 'rate_limits': {}}
 	rates = {}
 	try:
@@ -33,7 +35,7 @@ async def get_api_rate_limits(args):
 		rate_limits['rate_limits'] = rates
 		return rate_limits
 
-async def is_rate_limit_hit(args, threshold_percent=10):
+async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 	"""
 	Check if any GitHub API rate limits are hit or approaching their limits
 	Args:
@@ -90,7 +92,7 @@ async def is_rate_limit_hit(args, threshold_percent=10):
 		# Return True as a precaution when we can't determine limits
 		return True
 
-async def update_repo_cache(repo_name_or_url, session, args):
+async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 	"""
 	Fetch repository data from GitHub API and update the database cache
 	"""
@@ -164,11 +166,11 @@ async def update_repo_cache(repo_name_or_url, session, args):
 			logger.error(f'traceback: {traceback.format_exc()}')
 			raise e
 
-def get_cache_entry(session, cache_key, cache_type):
+def get_cache_entry(session, cache_key, cache_type) -> CacheEntry | None:
 	"""Get a cache entry from the database"""
 	return session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
 
-def set_cache_entry(session, cache_key, cache_type, data):
+def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 	"""Set or update a cache entry in the database"""
 	if 'BLANK_REPO_DATA' in data:
 		logger.warning(f"Invalid data for cache entry: {json.loads(data)[0]["name"]} ")

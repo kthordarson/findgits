@@ -31,9 +31,9 @@ BLANK_REPO_DATA = {
 	"description": "Repository BLANK_REPO_DATA",
 	"fork": False,
 	"url": 'BLANK_REPO_DATA',
-    'created_at': '1970-01-01T00:00:00Z',  # Changed to ISO string
-    'updated_at': '1970-01-01T00:00:00Z',  # Changed to ISO string
-    'pushed_at': '1970-01-01T00:00:00Z',   # Changed to ISO string
+	'created_at': '1970-01-01T00:00:00Z',  # Changed to ISO string
+	'updated_at': '1970-01-01T00:00:00Z',  # Changed to ISO string
+	'pushed_at': '1970-01-01T00:00:00Z',   # Changed to ISO string
 	"git_url": "git://github.com/BLANK_REPO_DATA.git",
 	"ssh_url": "git@github.com:BLANK_REPO_DATA.git",
 	"clone_url": "https://github.com/BLANK_REPO_DATA.git",
@@ -118,7 +118,7 @@ class GitFolder(Base):
 	def __repr__(self):
 		return f'<GitFolder {self.id} git_path={self.git_path}>'
 
-	def get_folder_stats(self):
+	def get_folder_stats(self) -> None:
 		t0 = datetime.now()
 		if not os.path.exists(cast(str, self.git_path)):  # redundant check, but just in case?
 			self.valid = False
@@ -198,7 +198,7 @@ class GitRepo(Base):
 
 	# Timestamps
 	# created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-	# updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) 
+	# updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 	# pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -318,7 +318,7 @@ class GitRepo(Base):
 	def __repr__(self):
 		return f'<GitRepo id={self.id} git_url: {self.git_url} localpath: {self.local_path} owner: {self.github_owner} name: {self.github_repo_name}>'
 
-	def update_config_times(self):
+	def update_config_times(self) -> None:
 		""" Update the config_ctime, config_atime, config_mtime based on the local git config file """
 		if cast(str, self.local_path) == '[notcloned]':
 			self.config_ctime = None
@@ -337,7 +337,7 @@ class GitRepo(Base):
 		self.config_atime = ensure_datetime(datetime.fromtimestamp(stat.st_atime))
 		self.config_mtime = ensure_datetime(datetime.fromtimestamp(stat.st_mtime))
 
-	def update_local_git_info(self):
+	def update_local_git_info(self) -> None:
 		git_info = get_git_info(cast(str, self.local_path))
 		self.branch = git_info.get('current_branch')
 		for remote_branch in git_info['remote_branches']:
@@ -576,7 +576,7 @@ def get_dupes(session: Session) -> Sequence[Row[Any]]:
 	dupes = session.execute(sql).all()
 	return dupes
 
-def check_git_dates(session, create_heatmap=False):
+def check_git_dates(session, create_heatmap=False) -> None:
 	df = pd.DataFrame(session.execute(text('select git_path.git_path, git_path.git_path_ctime, git_path.git_path_atime, git_path.git_path_mtime, gitrepo.created_at, gitrepo.updated_at, gitrepo.pushed_at from git_path inner join gitrepo on git_path.gitrepo_id=gitrepo.id ')).tuples())
 	# Convert timestamp columns to datetime if not already
 	timestamp_columns = ['git_path_ctime', 'git_path_atime', 'git_path_mtime', 'created_at', 'updated_at', 'pushed_at']
@@ -630,7 +630,7 @@ def check_git_dates(session, create_heatmap=False):
 		plt.savefig('timestamp_differences_heatmap.png')
 		plt.show()
 
-def mark_repo_as_starred(session, repo_id, list_name=None):
+def mark_repo_as_starred(session, repo_id, list_name=None) -> bool:
 	"""Mark a repository as starred and optionally link to a list"""
 	git_repo = session.query(GitRepo).filter(GitRepo.id == repo_id).first()
 	if not git_repo:

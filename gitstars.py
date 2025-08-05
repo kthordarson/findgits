@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from cacheutils import get_cache_entry, set_cache_entry, is_rate_limit_hit, RateLimitExceededError
 from utils import get_client_session, get_auth_params, get_semaphore
 
-async def get_info_for_list(link, headers, session, args):
+async def get_info_for_list(link, headers, session, args) -> list:
 	"""
 	Get all repository hrefs from a GitHub list, handling pagination.
 	Uses database caching to avoid repeated scraping.
@@ -79,7 +79,7 @@ async def get_info_for_list(link, headers, session, args):
 
 	return all_hrefs
 
-async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore, args, max_pages_to_fetch=None, stop_signal=None):
+async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore, args, max_pages_to_fetch=None, stop_signal=None) -> tuple:
 	"""
 	Generic function to fetch a single page from GitHub API
 
@@ -148,7 +148,7 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 			logger.error(f'traceback: {traceback.format_exc()}')
 			return page_num, []
 
-async def fetch_github_starred_repos(args, session, cache_key="starred_repos_list", cache_type="starred_repos"):
+async def fetch_github_starred_repos(args, session, cache_key="starred_repos_list", cache_type="starred_repos") -> list:
 	"""
 	Unified function to fetch starred repos from GitHub API, with cache and pagination.
 	Returns a list of starred repo dicts.
