@@ -20,7 +20,7 @@ async def get_api_rate_limits(args):
 		async with get_client_session(args) as api_session:
 			async with api_session.get('https://api.github.com/rate_limit') as r:
 				rates = await r.json()
-	except aiohttp.client_exceptions.ContentTypeError as e:
+	except aiohttp.ContentTypeError as e:
 		logger.error(f"ContentTypeError while fetching rate limits: {e}")
 		rate_limits['limit_hit'] = True
 		rate_limits['rate_limits'] = {'error': 'ContentTypeError', 'message': str(e)}

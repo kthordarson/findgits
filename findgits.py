@@ -5,22 +5,18 @@ import re
 from datetime import datetime
 from pathlib import Path
 import argparse
-from typing import Dict, List
 import json
-from collections import defaultdict
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
-from dbstuff import GitRepo, GitFolder, GitStar, GitList
+from dbstuff import GitRepo, GitStar, GitList
 from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
-from repotools import create_repo_to_list_mapping, verify_star_list_links, check_update_dupes, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
+from repotools import create_repo_to_list_mapping, verify_star_list_links, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
 from utils import flatten
 from cacheutils import set_cache_entry, get_cache_entry
 # Import functions from stats.py
 from stats import (
-    dbcheck,
     check_git_dates,
-    get_starred_repos_by_list,
     show_starred_repo_stats,
     show_list_by_group,
     show_rate_limits
@@ -367,8 +363,13 @@ async def main():
             if args.debug:
                 logger.debug("[fallback] Cache entry not found, fetching lists and stars from GitHub")
             git_lists = await get_lists_and_stars_unified(session, args)
-
-        urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+        try:
+            urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
+        except TypeError as e:
+            logger.error(f"Error flattening URLs: {e}")
+            if args.debug:
+                logger.error(f"git_lists: {git_lists}")
+            urls = []
 
         localrepos = [k.github_repo_name for k in git_repos]
         notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
