@@ -19,7 +19,7 @@ from utils import flatten, cleanup_shared_session
 from cacheutils import set_cache_entry, get_cache_entry
 # Import functions from stats.py
 from stats import (
-    check_git_dates,
+    stats_check_git_dates,
     show_starred_repo_stats,
     show_list_by_group,
     show_rate_limits
@@ -291,6 +291,7 @@ def get_args() -> argparse.Namespace:
     myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
     myparse.add_argument('--list-stats', help='show starred repo count statistics by list', action='store_true', default=False, dest='list_stats')
     myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
+    myparse.add_argument('--dbinfoall', help='show all dbinfo', action='store_true', default=False, dest='alldbinfo')
     myparse.add_argument('--check_rate_limits', help='check_rate_limits', action='store_true', default=False, dest='check_rate_limits')
     # db
     myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
@@ -301,14 +302,14 @@ def get_args() -> argparse.Namespace:
     myparse.add_argument('--max_pages', help='gitstars max_pages', action='store', default=100, dest='max_pages', type=int)
     myparse.add_argument('--max_output', help='stats max_output', action='store', default=20, dest='max_output', type=int)
     myparse.add_argument('--global_limit', help='global limit', action='store', default=0, dest='global_limit', type=int)
-    myparse.add_argument('--debug', help='debug', action='store_true', default=True, dest='debug')
+    myparse.add_argument('--debug', help='debug', action='store_true', default=False, dest='debug')
     myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
     myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
     args = myparse.parse_args()
     if args.disable_cache:
         args.use_cache = False
         logger.info('Cache disabled')
-    if args.debug:
+    if args.debug or args.alldbinfo:
         logger.info('Debug mode enabled')
         args.checkdates = True
         args.dbinfo = True
@@ -429,7 +430,7 @@ async def main() -> None:
             logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
 
         if args.checkdates:
-            check_git_dates(session)
+            stats_check_git_dates(session)
 
         if args.list_by_group:
             await show_list_by_group(session, args)

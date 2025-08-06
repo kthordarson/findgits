@@ -24,7 +24,7 @@ def dbcheck(session) -> dict:
 	result = {'repo_count': len(repos), 'folder_count': len(folders)}
 	return result
 
-def check_git_dates(session, create_heatmap=False) -> None:
+def stats_check_git_dates(session, create_heatmap=False) -> None:
 	"""
 	Check and analyze git timestamp differences
 	"""
