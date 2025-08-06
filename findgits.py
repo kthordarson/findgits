@@ -11,7 +11,7 @@ from loguru import logger
 import sqlalchemy
 import sqlite3
 from sqlalchemy.orm import sessionmaker, Session
-from dbstuff import GitRepo, GitStar, GitList
+from dbstuff import GitRepo, GitStar, GitList, GitFolder
 from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
 from repotools import create_repo_to_list_mapping, verify_star_list_links, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
 from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
@@ -276,22 +276,46 @@ async def populate_git_lists(session: Session, args: argparse.Namespace) -> List
 
     # Commit the database changes
     session.commit()
-
     # Log final results
     total_repos = sum(entry.get('parsed_repo_count', 0) for entry in list_data)
     logger.info(f"Populated {len(list_data)} lists with {total_repos} total repositories")
-
     return list_data
+
+async def run_update_paths(session: Session, args: argparse.Namespace) -> None:
+    """Run the update_paths function to update paths in the database"""
+    try:
+        # Ensure the session is active
+        if not session.is_active:
+            logger.warning('Session is not active, rolling back before update_paths')
+            session.rollback()
+
+        git_paths = session.query(GitFolder).filter(GitFolder.git_path.isnot(None)).all()
+        for git_path in git_paths:
+            if not git_path.git_path:
+                logger.warning(f'{git_path.id} has no git_path, skipping')
+                continue
+            git_path.get_folder_stats()
+            if args.debug:
+                logger.debug(f'Updating folder_stats for GitFolder ID {git_path.id}: {git_path.git_path}')
+        # Commit the changes
+        session.commit()
+        logger.info(f"{len(git_paths)} folder_stats updated successfully")
+    except Exception as e:
+        logger.error(f"Error during update_paths: {e} {type(e)}")
+        logger.error(f'traceback: {traceback.format_exc()}')
+        if session.is_active:
+            session.rollback()
 
 def get_args() -> argparse.Namespace:
     myparse = argparse.ArgumentParser(description="findgits")
     myparse.add_argument('--scanpath','-sp', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
+    myparse.add_argument('--update_paths','-up', help='update_paths', action='store_true', dest='update_paths', default=False)
     # info
     myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
     myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
     myparse.add_argument('--list-stats', help='show starred repo count statistics by list', action='store_true', default=False, dest='list_stats')
     myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
-    myparse.add_argument('--dbinfoall', help='show all dbinfo', action='store_true', default=False, dest='alldbinfo')
+    myparse.add_argument('--dbinfoall', help='show all dbinfo', action='store_true', default=False, dest='dbinfoall')
     myparse.add_argument('--check_rate_limits', help='check_rate_limits', action='store_true', default=False, dest='check_rate_limits')
     # db
     myparse.add_argument('--dbmode', help='mysql/sqlite/postgresql', dest='dbmode', default='sqlite', action='store', metavar='dbmode')
@@ -309,7 +333,7 @@ def get_args() -> argparse.Namespace:
     if args.disable_cache:
         args.use_cache = False
         logger.info('Cache disabled')
-    if args.debug or args.alldbinfo:
+    if args.debug or args.dbinfoall:
         logger.info('Debug mode enabled')
         args.checkdates = True
         args.dbinfo = True
@@ -440,6 +464,9 @@ async def main() -> None:
 
         if args.check_rate_limits:
             await show_rate_limits(session, args)
+
+        if args.update_paths:
+            await run_update_paths(session, args)
 
         # If only info/stats flags were used, close session and return
         if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits):
