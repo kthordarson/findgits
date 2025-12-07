@@ -40,20 +40,39 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 		df[col] = pd.to_datetime(df[col])
 
 	# Calculate time differences (in days)
-	df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / (60 * 60 * 24)
+	seconds_per_day = 60 * 60 * 24
+	df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).dt.total_seconds() / seconds_per_day  # type: ignore
+	df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).dt.total_seconds() / seconds_per_day  # type: ignore
+	df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).dt.total_seconds() / seconds_per_day  # type: ignore
+	df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).dt.total_seconds() / seconds_per_day  # type: ignore
+	df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / seconds_per_day  # type: ignore
+
+	# df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).astype('timedelta64[D]').astype(float)
+	# df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).astype('timedelta64[D]').astype(float)
+	# df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).astype('timedelta64[D]').astype(float)
+	# df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).astype('timedelta64[D]').astype(float)
+	# df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).astype('timedelta64[D]').astype(float)
+
+	# df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']) / pd.Timedelta(days=1)
+	# df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']) / pd.Timedelta(days=1)
+	# df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']) / pd.Timedelta(days=1)
+	# df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']) / pd.Timedelta(days=1)
+	# df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']) / pd.Timedelta(days=1)
+
+	# df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	# df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	# df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	# df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
+	# df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / (60 * 60 * 24)
 
 	print("\n" + "=" * 80)
-	print("📅 GIT REPOSITORY TIMESTAMP ANALYSIS")
+	print("GIT REPOSITORY TIMESTAMP ANALYSIS")
 	print("=" * 80)
-	print(f"📊 Analyzing {len(df)} git repositories")
+	print(f" Analyzing {len(df)} git repositories")
 	print()
 
 	# Pretty print the differences with better formatting
-	print("🕐 TIMESTAMP DIFFERENCES (Top 10 repositories by path):")
+	print("TIMESTAMP DIFFERENCES (Top 10 repositories by path):")
 	print("-" * 80)
 
 	# Create a shortened path column for display
@@ -75,7 +94,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	print("-" * 80)
 
 	# Summary statistics
-	print("\n📈 SUMMARY STATISTICS (days):")
+	print("\nSUMMARY STATISTICS (days):")
 	print("-" * 50)
 
 	summary_stats = df[['mtime_to_ctime', 'atime_to_mtime', 'mtime_to_updated_at', 'mtime_to_pushed_at', 'created_at_to_pushed_at']].describe()
@@ -83,13 +102,13 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	print(summary_stats.round(1).to_string())
 
 	# Interesting findings
-	print("\n🔍 INTERESTING FINDINGS:")
+	print("\n INTERESTING FINDINGS:")
 	print("-" * 50)
 
 	# Repos with significant time differences
 	old_repos = df[df['created_at_to_pushed_at'] > 1000].sort_values('created_at_to_pushed_at', ascending=False)
 	if not old_repos.empty:
-		print("📜 Oldest repositories (created > 1000 days before last push):")
+		print(" Oldest repositories (created > 1000 days before last push):")
 		for _, repo in old_repos.head(5).iterrows():
 			days = repo['created_at_to_pushed_at']
 			years = days / 365.25
@@ -98,25 +117,37 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	# Recently accessed repos
 	recent_access = df[df['atime_to_mtime'] < 7].sort_values('atime_to_mtime')
 	if not recent_access.empty:
-		print("\n📂 Recently accessed repositories (accessed within 7 days of modification):")
+		print("\n Recently accessed repositories (accessed within 7 days of modification):")
 		for _, repo in recent_access.head(5).iterrows():
 			days = repo['atime_to_mtime']
 			print(f"   • {repo['short_path']:<50} {days:5.1f} days ago")
 
 	# Repos with future timestamps (potential issues)
-	future_timestamps = df[(df['mtime_to_updated_at'] < 0) | (df['mtime_to_pushed_at'] < 0)]
+	# future_timestamps = df[(df['mtime_to_updated_at'] < 0) | (df['mtime_to_pushed_at'] < 0)]
+	# if not future_timestamps.empty:
+	# 	print("\n  Repositories with timestamp inconsistencies:")
+	# 	for _, repo in future_timestamps.head(5).iterrows():
+	# 		issues = []
+	# 		if repo['mtime_to_updated_at'] < 0:
+	# 			issues.append(f"updated {abs(repo['mtime_to_updated_at']):.0f}d future")
+	# 		if repo['mtime_to_pushed_at'] < 0:
+	# 			issues.append(f"pushed {abs(repo['mtime_to_pushed_at']):.0f}d future")
+	# 		print(f"   • {repo['short_path']:<50} {', '.join(issues)}")
+
+	# Repos with future timestamps (potential issues)
+	future_timestamps = df[(df['mtime_to_updated_at'] < -7) | (df['mtime_to_pushed_at'] < -7)]
 	if not future_timestamps.empty:
-		print("\n⚠️  Repositories with timestamp inconsistencies:")
+		print("\n  Repositories where local files are newer than remote:")
 		for _, repo in future_timestamps.head(5).iterrows():
 			issues = []
-			if repo['mtime_to_updated_at'] < 0:
-				issues.append(f"updated {abs(repo['mtime_to_updated_at']):.0f}d future")
-			if repo['mtime_to_pushed_at'] < 0:
-				issues.append(f"pushed {abs(repo['mtime_to_pushed_at']):.0f}d future")
+			if repo['mtime_to_updated_at'] < -7:
+				issues.append(f"local {abs(repo['mtime_to_updated_at']):.0f}d after remote update")
+			if repo['mtime_to_pushed_at'] < -7:
+				issues.append(f"local {abs(repo['mtime_to_pushed_at']):.0f}d after remote push")
 			print(f"   • {repo['short_path']:<50} {', '.join(issues)}")
 
 	# Compute correlation matrix for timestamps
-	print("\n🔗 TIMESTAMP CORRELATIONS:")
+	print("\n TIMESTAMP CORRELATIONS:")
 	print("-" * 50)
 	correlation_matrix = df[timestamp_columns].corr()
 
@@ -127,7 +158,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	print(correlation_display.to_string())
 
 	# Group by project analysis
-	print("\n📁 PROJECT-LEVEL ANALYSIS:")
+	print("\n PROJECT-LEVEL ANALYSIS:")
 	print("-" * 50)
 	df['project'] = df['git_path'].str.split('/').str[-1]
 	project_stats = df.groupby('project')[['atime_to_mtime', 'created_at_to_pushed_at']].agg({
@@ -179,7 +210,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 
 		# Save or display the heatmap
 		plt.savefig('timestamp_differences_heatmap.png')
-		print("\n💾 Heatmap saved as 'timestamp_differences_heatmap.png'")
+		print("\n Heatmap saved as 'timestamp_differences_heatmap.png'")
 		plt.show()
 
 async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
@@ -244,11 +275,11 @@ def show_starred_repo_stats(session) -> None:
 	listed_count = total_repos - unlisted_count
 
 	print("\n" + "=" * 60)
-	print("📊 STARRED REPOSITORIES BY LIST")
+	print(" STARRED REPOSITORIES BY LIST")
 	print("=" * 60)
 
 	# Summary stats
-	print("📈 Summary:")
+	print(" Summary:")
 	print(f"   Total starred repositories: {total_repos:,}")
 	print(f"   Repositories in lists: {listed_count:,} ({(listed_count/total_repos*100):.1f}%)")
 	print(f"   Repositories not in lists: {unlisted_count:,} ({(unlisted_count/total_repos*100):.1f}%)")
@@ -272,15 +303,15 @@ def show_starred_repo_stats(session) -> None:
 
 		# Different emoji for different categories
 		if list_name == 'not in a list':
-			emoji = "📂"
+			emoji = ""
 		elif repo_count >= 100:
-			emoji = "🔥"
+			emoji = ""
 		elif repo_count >= 50:
-			emoji = "⭐"
+			emoji = ""
 		elif repo_count >= 10:
-			emoji = "📋"
+			emoji = ""
 		else:
-			emoji = "📄"
+			emoji = ""
 
 		print(f"{emoji} {list_name:<18} {repo_count:<8,} {percentage:<11.1f}% {bar}")
 
@@ -291,7 +322,7 @@ def show_starred_repo_stats(session) -> None:
 	# Top lists
 	top_lists = sorted([row for row in result if row[0] != 'not in a list'], key=lambda x: x[1], reverse=True)[:5]
 	if top_lists:
-		print("\n🏆 Top 5 Lists by Repository Count:")
+		print("\nTop 5 Lists by Repository Count:")
 		for i, (list_name, count) in enumerate(top_lists, 1):
 			print(f"   {i}. {list_name}: {count:,} repos")
 
@@ -328,9 +359,9 @@ async def show_rate_limits(session, args) -> None:
 		print("=" * 50)
 
 		if rate_limits.get('limit_hit'):
-			print("⚠️  RATE LIMIT HIT!")
+			print("  RATE LIMIT HIT!")
 		else:
-			print("✅ Rate limits OK")
+			print(" Rate limits OK")
 
 		# Main rate limit info
 		rate_info = rate_limits.get('rate_limits', {}).get('rate', {})
@@ -343,7 +374,7 @@ async def show_rate_limits(session, args) -> None:
 			# Convert timestamp to readable time
 			reset_time = datetime.fromtimestamp(reset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
-			print("\n📊 Overall Rate Limit:")
+			print("\n Overall Rate Limit:")
 			print(f"   Limit:     {limit:,}")
 			print(f"   Used:      {used:,}")
 			print(f"   Remaining: {remaining:,}")
@@ -363,7 +394,7 @@ async def show_rate_limits(session, args) -> None:
 		# Resource-specific limits
 		resources = rate_limits.get('rate_limits', {}).get('resources', {})
 		if resources:
-			print("\n📋 Resource-Specific Limits:")
+			print("\n Resource-Specific Limits:")
 			print("-" * 50)
 
 			# Sort by usage percentage for better visibility
@@ -383,7 +414,7 @@ async def show_rate_limits(session, args) -> None:
 
 			for resource, limit, used, remaining, usage_pct in resource_data:
 				if used > 0 or limit < 5000:  # Show resources that are used or have lower limits
-					status = "⚠️ " if usage_pct > 80 else "🟡" if usage_pct > 50 else "🟢"
+					status = " "  # if usage_pct > 80 else "🟡" if usage_pct > 50 else "🟢"
 					print(f"{status} {resource:25} {used:4d}/{limit:4d} ({usage_pct:5.1f}%) - {remaining:4d} remaining")
 	else:
 		print("❌ No API rate limits found or unable to fetch.")

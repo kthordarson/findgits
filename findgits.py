@@ -297,8 +297,6 @@ async def run_update_paths(session: Session, args: argparse.Namespace) -> None:
                 logger.warning(f'{git_path.id} has no git_path, skipping')
                 continue
             git_path.get_folder_stats()
-            if args.debug:
-                logger.debug(f'Updating folder_stats for GitFolder ID {git_path.id}: {git_path.git_path}')
         # Commit the changes
         session.commit()
         logger.info(f"{len(git_paths)} folder_stats updated successfully")
