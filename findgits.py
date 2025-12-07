@@ -454,13 +454,13 @@ async def main() -> None:
             logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")
 
         if args.checkdates:
-            stats_check_git_dates(session)
+            stats_check_git_dates(session, args)
 
         if args.list_by_group:
             await show_list_by_group(session, args)
 
         if args.list_stats:
-            show_starred_repo_stats(session)
+            show_starred_repo_stats(session, args)
 
         if args.check_rate_limits:
             await show_rate_limits(session, args)

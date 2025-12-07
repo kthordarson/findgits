@@ -24,7 +24,7 @@ def dbcheck(session) -> dict:
 	result = {'repo_count': len(repos), 'folder_count': len(folders)}
 	return result
 
-def stats_check_git_dates(session, create_heatmap=False) -> None:
+def stats_check_git_dates(session, args, create_heatmap=False) -> None:
 	"""
 	Check and analyze git timestamp differences
 	"""
@@ -72,7 +72,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	print()
 
 	# Pretty print the differences with better formatting
-	print("TIMESTAMP DIFFERENCES (Top 10 repositories by path):")
+	print(f"TIMESTAMP DIFFERENCES (Top {args.max_output} repositories by path):")
 	print("-" * 80)
 
 	# Create a shortened path column for display
@@ -80,7 +80,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	df['short_path'] = df['short_path'].apply(lambda x: x[-60:] if len(x) > 60 else x)
 
 	# Select columns for display
-	display_df = df[['short_path', 'mtime_to_ctime', 'atime_to_mtime', 'mtime_to_updated_at', 'mtime_to_pushed_at', 'created_at_to_pushed_at']].head(10)
+	display_df = df[['short_path', 'mtime_to_ctime', 'atime_to_mtime', 'mtime_to_updated_at', 'mtime_to_pushed_at', 'created_at_to_pushed_at']].head(args.max_output)
 
 	# Format the display with proper column names and rounding
 	display_df.columns = ['Repository Path', 'MTime→CTime', 'ATime→MTime', 'MTime→Updated', 'MTime→Pushed', 'Created→Pushed']
@@ -109,7 +109,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	old_repos = df[df['created_at_to_pushed_at'] > 1000].sort_values('created_at_to_pushed_at', ascending=False)
 	if not old_repos.empty:
 		print(" Oldest repositories (created > 1000 days before last push):")
-		for _, repo in old_repos.head(5).iterrows():
+		for _, repo in old_repos.head(args.max_output).iterrows():
 			days = repo['created_at_to_pushed_at']
 			years = days / 365.25
 			print(f"   • {repo['short_path']:<50} {days:7.0f} days ({years:.1f} years)")
@@ -118,7 +118,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	recent_access = df[df['atime_to_mtime'] < 7].sort_values('atime_to_mtime')
 	if not recent_access.empty:
 		print("\n Recently accessed repositories (accessed within 7 days of modification):")
-		for _, repo in recent_access.head(5).iterrows():
+		for _, repo in recent_access.head(args.max_output).iterrows():
 			days = repo['atime_to_mtime']
 			print(f"   • {repo['short_path']:<50} {days:5.1f} days ago")
 
@@ -138,7 +138,7 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	future_timestamps = df[(df['mtime_to_updated_at'] < -7) | (df['mtime_to_pushed_at'] < -7)]
 	if not future_timestamps.empty:
 		print("\n  Repositories where local files are newer than remote:")
-		for _, repo in future_timestamps.head(5).iterrows():
+		for _, repo in future_timestamps.head(args.max_output).iterrows():
 			issues = []
 			if repo['mtime_to_updated_at'] < -7:
 				issues.append(f"local {abs(repo['mtime_to_updated_at']):.0f}d after remote update")
@@ -170,13 +170,13 @@ def stats_check_git_dates(session, create_heatmap=False) -> None:
 	project_stats.columns = ['Avg_Access_Days', 'Std_Access_Days', 'Avg_Age_Days', 'Std_Age_Days']
 
 	# Show top projects by age and recent access
-	print("Top 10 projects by average age (created to last push):")
-	oldest_projects = project_stats.sort_values('Avg_Age_Days', ascending=False).head(10)
+	print(f"Top {args.max_output} projects by average age (created to last push):")
+	oldest_projects = project_stats.sort_values('Avg_Age_Days', ascending=False).head(args.max_output)
 	for project, stats in oldest_projects.iterrows():
 		print(f"   • {project:<30} {stats['Avg_Age_Days']:7.0f} days avg age")
 
 	print("\nMost recently accessed projects:")
-	recent_projects = project_stats[project_stats['Avg_Access_Days'] < 30].sort_values('Avg_Access_Days').head(10)
+	recent_projects = project_stats[project_stats['Avg_Access_Days'] < 30].sort_values('Avg_Access_Days').head(args.max_output)
 	for project, stats in recent_projects.iterrows():
 		print(f"   • {project:<30} {stats['Avg_Access_Days']:5.1f} days since access")
 
@@ -249,7 +249,7 @@ async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 		logger.error(f'traceback: {traceback.format_exc()}')
 		return {}
 
-def show_starred_repo_stats(session) -> None:
+def show_starred_repo_stats(session, args) -> None:
 	"""Pretty print starred repo count statistics by list"""
 	query = text("""
 		SELECT COALESCE(gl.list_name, 'not in a list') as list_name,
@@ -320,9 +320,9 @@ def show_starred_repo_stats(session) -> None:
 	print("=" * 60)
 
 	# Top lists
-	top_lists = sorted([row for row in result if row[0] != 'not in a list'], key=lambda x: x[1], reverse=True)[:5]
+	top_lists = sorted([row for row in result if row[0] != 'not in a list'], key=lambda x: x[1], reverse=True)[:args.max_output]
 	if top_lists:
-		print("\nTop 5 Lists by Repository Count:")
+		print(f"\nTop {args.max_output} Lists by Repository Count:")
 		for i, (list_name, count) in enumerate(top_lists, 1):
 			print(f"   {i}. {list_name}: {count:,} repos")
 
