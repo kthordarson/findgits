@@ -289,7 +289,9 @@ async def run_update_paths(session: Session, args: argparse.Namespace) -> None:
             logger.warning('Session is not active, rolling back before update_paths')
             session.rollback()
 
-        git_paths = session.query(GitFolder).filter(GitFolder.git_path.isnot(None)).all()
+        # git_paths = session.query(GitFolder).filter(GitFolder.git_path.isnot(None)).all()
+        # git_paths = session.query(GitFolder).filter(GitFolder.git_path != None).all()
+        git_paths = session.query(GitFolder).filter(GitFolder.git_path.is_not(None)).all()
         for git_path in git_paths:
             if not git_path.git_path:
                 logger.warning(f'{git_path.id} has no git_path, skipping')
@@ -477,4 +479,7 @@ async def main() -> None:
         session.close()
 
 if __name__ == '__main__':
+    # sqlite3 -header -column gitrepo.db ".tables" | tr ' ' '\n' | grep -v '^$' | grep -v 'sqlite_' | while read table; do count=$(sqlite3 gitrepo.db "SELECT COUNT(*) FROM \"$table\";"); printf "%-25s %8s\n" "$table" "$count rows"; done
+    # sqlite3 -header -column gitrepo.db ".tables" | tr ' ' '\n' | grep -v '^$' | grep -v 'sqlite_' | while read table; do count=$(sqlite3 gitrepo.db "SELECT COUNT(*) FROM \"$table\";"); printf "%-25s %8s\n" "$table" "$count rows"; done
+
     asyncio.run(main())

@@ -12,6 +12,11 @@ from cacheutils import update_repo_cache, get_cache_entry, RateLimitExceededErro
 
 async def verify_star_list_links(session, args) -> dict:
 	"""Verify that GitStar entries are properly linked to GitList entries"""
+	result_dict = {
+		'total_stars': 0,
+		'linked_stars': 0,
+		'unlinked_stars': 0
+	}
 	try:
 		# Count total GitStar entries
 		total_stars = session.query(GitStar).count()
@@ -23,17 +28,13 @@ async def verify_star_list_links(session, args) -> dict:
 		unlinked_stars = session.query(GitStar).filter(GitStar.gitlist_id.is_(None)).count()
 
 		logger.info(f"GitStar verification: Total={total_stars}, Linked={linked_stars}, Unlinked={unlinked_stars}")
-
-		return {
-			'total_stars': total_stars,
-			'linked_stars': linked_stars,
-			'unlinked_stars': unlinked_stars
-		}
-
+		result_dict['total_stars'] = total_stars
+		result_dict['linked_stars'] = linked_stars
+		result_dict['unlinked_stars'] = unlinked_stars
 	except Exception as e:
 		logger.error(f"Error verifying star-list links: {e} {type(e)}")
 		logger.error(f'traceback: {traceback.format_exc()}')
-		return None
+	return result_dict
 
 async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder | None:
 	"""

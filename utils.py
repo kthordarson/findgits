@@ -58,13 +58,13 @@ async def cleanup_shared_session() -> None:
 		_global_session = None
 		_global_connector = None
 
-async def get_auth_params() -> tuple[HTTPBasicAuth, HTTPBasicAuth] | None:
+async def get_auth_params() -> HTTPBasicAuth | None:
 	"""Get authentication parameters from environment variables."""
 	username = os.getenv("GITHUB_USERNAME", '')
 	token = os.getenv("FINDGITSTOKEN", '')
 	if not username or not token:
 		logger.error("GITHUB_USERNAME or FINDGITSTOKEN environment variables are not set.")
-		return None, None
+		return None
 	return HTTPBasicAuth(username, token)
 
 @asynccontextmanager
@@ -133,8 +133,7 @@ def get_remote_url(git_path: str) -> str:
 		logger.error(f'[gr] fatal {e} {type(e)} {git_path=} remote_out: {remote_out} {out=} {err=}')
 		logger.error(f'traceback: {traceback.format_exc()}')
 		raise e
-	finally:
-		return remote_url
+	return remote_url
 
 def get_git_info(git_path: str) -> dict:
 	"""

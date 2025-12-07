@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, cast, Sequence, Any
 from loguru import logger
 import sqlalchemy
-from sqlalchemy import (Row, func, Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text)
+from sqlalchemy import (Row, func, Integer, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, create_engine, text, Text)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import DeclarativeBase
@@ -67,10 +67,16 @@ class GitFolder(Base):
 	""" A folder containing one git repo """
 	__tablename__ = 'git_path'
 	id: Mapped[int] = mapped_column(primary_key=True)
-	gitrepo_id: Mapped[int] = mapped_column(Integer, ForeignKey('gitrepo.id'))
-	star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
-	list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
-	git_path = Column('git_path', String(255))
+	# gitrepo_id: Mapped[int] = mapped_column(Integer, ForeignKey('gitrepo.id'))
+	gitrepo_id: Mapped[Optional[int]] = mapped_column(ForeignKey('gitrepo.id'), nullable=True)
+	# star_id = Column(Integer, ForeignKey('gitstars.id'), nullable=True)
+	# list_id = Column(Integer, ForeignKey('gitlists.id'), nullable=True)
+	star_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('gitstars.id'), nullable=True)
+	list_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('gitlists.id'), nullable=True)
+	is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
+
+	# git_path = Column('git_path', String(255))
+	git_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 	first_scan = Column('first_scan', DateTime)
 	last_scan = Column('last_scan', DateTime)
 	scan_count = Column('scan_count', Integer)
@@ -85,20 +91,19 @@ class GitFolder(Base):
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
 	scanned = Column(Boolean, default=False)  # Fixed this line
-	is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
+	# is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
 
 	# Relationships
-	repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
-	star_entry: Mapped[Optional["GitStar"]] = relationship(
-		"GitStar",
-		foreign_keys=[star_id],
-		overlaps="git_list"  # Avoid relationship conflicts
-	)
-	list_entry: Mapped[Optional["GitList"]] = relationship(
-		"GitList",
-		foreign_keys=[list_id],
-		overlaps="starred_repos"  # Avoid relationship conflicts
-	)
+	# repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="git_folders")
+	# repo: Mapped[Optional["GitRepo"]] = relationship("GitRepo", back_populates="git_folders", foreign_keys=[gitrepo_id])
+	# star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id], overlaps="git_list")
+	# list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id], overlaps="starred_repos")
+	# star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id], primaryjoin="GitFolder.star_id == GitStar.id")
+	# list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id], primaryjoin="GitFolder.list_id == GitList.id")
+
+	repo: Mapped[Optional["GitRepo"]] = relationship("GitRepo", back_populates="git_folders", foreign_keys=[gitrepo_id])
+	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", foreign_keys=[star_id], primaryjoin="GitFolder.star_id == GitStar.id")
+	list_entry: Mapped[Optional["GitList"]] = relationship("GitList", foreign_keys=[list_id], primaryjoin="GitFolder.list_id == GitList.id")
 
 	def __init__(self, git_path: str, gitrepo_id):
 		self.git_path = str(git_path)
@@ -221,8 +226,10 @@ class GitRepo(Base):
 	starred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 	# Relationships - specify foreign_keys explicitly to resolve ambiguity
+	# git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
+	# star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", back_populates="repo", uselist=False, foreign_keys="GitStar.gitrepo_id")
 	git_folders: Mapped[List["GitFolder"]] = relationship("GitFolder", back_populates="repo")
-	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", back_populates="repo", uselist=False, foreign_keys="GitStar.gitrepo_id")
+	star_entry: Mapped[Optional["GitStar"]] = relationship("GitStar", back_populates="repo", uselist=False, foreign_keys="[GitStar.gitrepo_id]")
 
 	def __init__(self, git_url, local_path, repo_data=None):
 		# Initialize with minimal information
@@ -355,11 +362,17 @@ class CacheEntry(Base):
 	__tablename__ = 'cache_entries'
 
 	id: Mapped[int] = mapped_column(primary_key=True)
-	cache_key = Column('cache_key', String(255), unique=True)  # Unique identifier for this cache entry
-	cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
+	# cache_key = Column('cache_key', String(255), unique=True)  # Unique identifier for this cache entry
+	# cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
 	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)
 	timestamp = Column('timestamp', DateTime)  # When this entry was created/updated
 	last_scan = Column('last_scan', DateTime)  # When this entry was last scanned
+
+	cache_key: Mapped[str] = mapped_column(String(255), unique=True)
+	cache_type: Mapped[str] = mapped_column(String(50))
+	data: Mapped[str] = mapped_column(Text)  # Use Mapped[str] instead of Column[str]
+	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+	expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 	def __init__(self, cache_key, cache_type, data):
 		self.cache_key = cache_key
@@ -390,14 +403,16 @@ class GitStar(Base):
 	full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 	html_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-	# Relationships - specify foreign_keys explicitly
-	repo: Mapped["GitRepo"] = relationship(
-		"GitRepo",
-		back_populates="star_entry",
-		foreign_keys=[gitrepo_id]
-	)
-	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
+	# Relationships - back_populates must match the property name in the other class
+	repo: Mapped[Optional["GitRepo"]] = relationship("GitRepo", back_populates="star_entry", foreign_keys=[gitrepo_id])
 	git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos", foreign_keys=[gitlist_id])
+
+	# Relationships - specify foreign_keys explicitly
+	# repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="star_entry", foreign_keys=[gitrepo_id])
+	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
+	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos", foreign_keys=[gitlist_id])
+	# repo: Mapped[Optional["GitRepo"]] = relationship("GitRepo", back_populates="stars", foreign_keys=[gitrepo_id])
+	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="stars", foreign_keys=[gitlist_id])
 
 class GitList(Base):
 	"""A starred repo list, containing multiple GitStars"""
@@ -411,7 +426,9 @@ class GitList(Base):
 
 	# Relationships - one list can contain many starred repos
 	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
-	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="GitStar.gitlist_id")
+	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="GitStar.gitlist_id")
+	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="gitlist", foreign_keys="[GitStar.gitlist_id]")
+	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="[GitStar.gitlist_id]")
 
 # Add relationships to GitRepo and GitStar
 # GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
@@ -583,11 +600,11 @@ def check_git_dates(session, create_heatmap=False) -> None:
 	for col in timestamp_columns:
 		df[col] = pd.to_datetime(df[col])
 	# Calculate time differences (in days)
-	df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)
-	df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / (60 * 60 * 24)
+	df['mtime_to_ctime'] = (df['git_path_ctime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)  # type: ignore
+	df['atime_to_mtime'] = (df['git_path_atime'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)  # type: ignore
+	df['mtime_to_updated_at'] = (df['updated_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)  # type: ignore
+	df['mtime_to_pushed_at'] = (df['pushed_at'] - df['git_path_mtime']).dt.total_seconds() / (60 * 60 * 24)  # type: ignore
+	df['created_at_to_pushed_at'] = (df['pushed_at'] - df['created_at']).dt.total_seconds() / (60 * 60 * 24)  # type: ignore
 
 	# Display the differences
 	print(f'Differences in timestamps for {len(df)} git paths:')

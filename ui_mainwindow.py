@@ -37,19 +37,19 @@ class Ui_MainWindow(object):
         self.formLayoutWidget_3.setGeometry(QRect(10, 10, 151, 32))
         self.formLayout = QFormLayout(self.formLayoutWidget_3)
         self.formLayout.setObjectName(u"formLayout")
-        self.formLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.formLayout.setLabelAlignment(Qt.AlignCenter)
-        self.formLayout.setFormAlignment(Qt.AlignJustify | Qt.AlignTop)
+        self.formLayout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self.formLayout.setLabelAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.formLayout.setFormAlignment(Qt.AlignmentFlag.AlignJustify | Qt.AlignmentFlag.AlignTop)
         self.formLayout.setContentsMargins(0, 3, 3, 3)
         self.idLabel = QLabel(self.formLayoutWidget_3)
         self.idLabel.setObjectName(u"idLabel")
 
-        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.idLabel)
+        self.formLayout.setWidget(0, QFormLayout.ItemRole.LabelRole, self.idLabel)
 
         self.idLineEdit = QLineEdit(self.formLayoutWidget_3)
         self.idLineEdit.setObjectName(u"idLineEdit")
 
-        self.formLayout.setWidget(0, QFormLayout.FieldRole, self.idLineEdit)
+        self.formLayout.setWidget(0, QFormLayout.ItemRole.FieldRole, self.idLineEdit)
 
         self.layoutWidget = QWidget(self.centralwidget)
         self.layoutWidget.setObjectName(u"layoutWidget")

@@ -31,9 +31,8 @@ async def get_api_rate_limits(args) -> dict:
 		logger.error(f'fatal {e} {type(e)}')
 		logger.error(f'traceback: {traceback.format_exc()}')
 		raise e
-	finally:
-		rate_limits['rate_limits'] = rates
-		return rate_limits
+	rate_limits['rate_limits'] = rates
+	return rate_limits
 
 async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 	"""
@@ -46,51 +45,54 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 	try:
 		# Get current rate limits from GitHub API
 		rate_limits_data = await get_api_rate_limits(args)
-
-		# Check if limit_hit is already set
-		if rate_limits_data.get('limit_hit', False):
-			return True
-
-		# Get the resources section
-		resources = rate_limits_data.get('rate_limits', {}).get('resources', {})
-
-		# Also check the overall rate limit
-		rate = rate_limits_data.get('rate_limits', {}).get('rate', {})
-		if rate:
-			resources['overall'] = rate
-
-		# Check each resource type
-		for resource_name, resource_data in resources.items():
-			# Skip if missing essential data
-			if not all(k in resource_data for k in ('limit', 'remaining', 'reset')):
-				continue
-
-			limit = resource_data.get('limit', 0)
-			remaining = resource_data.get('remaining', 0)
-			reset_time = resource_data.get('reset', 0)
-
-			# Skip if limit is 0 (unlimited)
-			if limit == 0:
-				continue
-
-			# Calculate threshold value
-			threshold_value = max(1, int(limit * threshold_percent / 100))
-
-			# Check if below threshold
-			if remaining <= threshold_value:
-				logger.warning(f"Rate limit approaching for {resource_name}: {remaining}/{limit} remaining, resets at {datetime.fromtimestamp(reset_time)}")
+		if rate_limits_data:
+			# Check if limit_hit is already set
+			if rate_limits_data.get('limit_hit', False):
 				return True
-		if args.debug:
-			logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
-			# print(resources)
-		# No limits hit
-		return False
+
+			# Get the resources section
+			resources = rate_limits_data.get('rate_limits', {}).get('resources', {})
+
+			# Also check the overall rate limit
+			rate = rate_limits_data.get('rate_limits', {}).get('rate', {})
+			if rate:
+				resources['overall'] = rate
+
+			# Check each resource type
+			for resource_name, resource_data in resources.items():
+				# Skip if missing essential data
+				if not all(k in resource_data for k in ('limit', 'remaining', 'reset')):
+					continue
+
+				limit = resource_data.get('limit', 0)
+				remaining = resource_data.get('remaining', 0)
+				reset_time = resource_data.get('reset', 0)
+
+				# Skip if limit is 0 (unlimited)
+				if limit == 0:
+					continue
+
+				# Calculate threshold value
+				threshold_value = max(1, int(limit * threshold_percent / 100))
+
+				# Check if below threshold
+				if remaining <= threshold_value:
+					logger.warning(f"Rate limit approaching for {resource_name}: {remaining}/{limit} remaining, resets at {datetime.fromtimestamp(reset_time)}")
+					return True
+			if args.debug:
+				# logger.debug(f"Rate limits checked core: {resources} graphql: {resources} ")
+				logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
+			# print(resources
+				# print(resources)
+			# No limits hit
+			return False
 
 	except Exception as e:
 		logger.error(f"Error checking rate limits: {e} {type(e)}")
 		logger.error(f'traceback: {traceback.format_exc()}')
 		# Return True as a precaution when we can't determine limits
 		return True
+	return False
 
 async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 	"""
@@ -154,8 +156,16 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 						set_cache_entry(session, cache_key, cache_type, defaultjson)
 						session.commit()
 						return default_repo_data
+					elif r.status == 401:
+						default_repo_data = BLANK_REPO_DATA.copy()
+						default_repo_data['name'] = repo_name
+						defaultjson = json.dumps([default_repo_data])
+						set_cache_entry(session, cache_key, cache_type, defaultjson)
+						session.commit()
+						logger.error(f"Unauthorized access (401) to repository: {api_url}")
+						return default_repo_data
 					else:
-						logger.error(f"Failed to fetch repository data: {r.status}")
+						logger.error(f"Failed to fetch repository data: {r.status} from {api_url}")
 						return None
 		except TimeoutError as e:
 			logger.error(f"unhandled TimeoutError fetching repository data: {e} {type(e)}")
