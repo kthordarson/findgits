@@ -3,6 +3,7 @@ import traceback
 import aiohttp
 import json
 import sqlite3
+from sqlalchemy.exc import OperationalError
 from loguru import logger
 from datetime import datetime
 from dbstuff import CacheEntry, BLANK_REPO_DATA, RepoCacheExpanded
@@ -32,6 +33,9 @@ async def get_api_rate_limits(args) -> dict:
 		logger.error(f'traceback: {traceback.format_exc()}')
 		raise e
 	rate_limits['rate_limits'] = rates
+	if rate_limits.get('rate_limits', {}).get('status') == 401:
+		logger.error(f"Unauthorized access (401) when fetching rate limits - check your authentication. {rate_limits.get('rate_limits','').get('message')}")
+		rate_limits['limit_hit'] = True
 	return rate_limits
 
 async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
@@ -48,6 +52,10 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 		if rate_limits_data:
 			# Check if limit_hit is already set
 			if rate_limits_data.get('limit_hit', False):
+				return True
+			
+			if rate_limits_data.get('rate_limits', {}).get('status') == '401':
+				logger.error(f"Unauthorized access (401) when checking rate limits - check your authentication. {rate_limits_data}")
 				return True
 
 			# Get the resources section
@@ -81,7 +89,11 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 					return True
 			if args.debug:
 				# logger.debug(f"Rate limits checked core: {resources} graphql: {resources} ")
-				logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
+				try:
+					logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
+				except Exception as e:
+					logger.error(f"Error logging rate limits: {e} {type(e)} resources: {resources} rate_limits_data: {rate_limits_data}")
+					
 			# print(resources
 				# print(resources)
 			# No limits hit
@@ -178,7 +190,16 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 
 def get_cache_entry(session, cache_key, cache_type) -> CacheEntry | None:
 	"""Get a cache entry from the database"""
-	return session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
+	try:
+		entry = session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
+		return entry
+	except OperationalError as e:
+		logger.error(f"OperationalError while getting cache entry: {e} {type(e)}")
+		return None
+	except Exception as e:
+		logger.error(f"Failed to get cache entry: {e} {type(e)}")
+		# logger.error(f'traceback: {traceback.format_exc()}')
+		return None
 
 def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 	"""Set or update a cache entry in the database"""
@@ -238,6 +259,10 @@ def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 						session.add(expanded)
 					else:
 						logger.warning(f"Skipping RepoCacheExpanded creation for repo with no ID: {repo_json.get('full_name')}")
+		except OperationalError as e:
+			logger.error(f"Failed to expand repo_data cache: {e} {type(e)}")
+			session.rollback()
+			return None
 		except Exception as e:
 			logger.error(f"Failed to expand repo_data cache: {e} {type(e)}")
 			logger.error(f"Data: {data}")
@@ -265,7 +290,7 @@ def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 					return existing_entry
 				except Exception as e:
 					logger.error(f"Failed to update existing cache entry: {e} {type(e)}")
-					logger.error(f'traceback: {traceback.format_exc()}')
+					# logger.error(f'traceback: {traceback.format_exc()}')
 					session.rollback()
 					return None
 			else:

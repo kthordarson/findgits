@@ -368,6 +368,12 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 					'lists_metadata': cached_metadata or [],
 					'lists_with_repos': cached_stars or {}
 				}
+			elif r.status == 404:
+				logger.error("GitHub returned 404 Not Found - check your URL. Using cached data if available.")
+				return {
+					'lists_metadata': cached_metadata or [],
+					'lists_with_repos': cached_stars or {}
+				}
 			else:
 				logger.error(f"Failed to fetch star list: {r.status} {listurl}")
 				return {
