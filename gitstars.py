@@ -322,6 +322,8 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 	# If we have both cached, return them
 	if cached_metadata and cached_stars:
+		if args.debug:
+			logger.debug(f"Returning data from cache for both metadata and stars. cached_metadata: {len(cached_metadata)} lists, cached_stars: {len(cached_stars)} lists")
 		return {
 			'lists_metadata': cached_metadata,
 			'lists_with_repos': cached_stars
@@ -330,7 +332,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	# Get authentication
 	auth = await get_auth_params()
 	if not auth:
-		logger.error('No auth provided for get_lists_and_stars_unified')
+		logger.warning('No auth provided for get_lists_and_stars_unified')
 		return {
 			'lists_metadata': cached_metadata or [],
 			'lists_with_repos': cached_stars or {}
@@ -363,7 +365,13 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				content = await r.text()
 				soup = BeautifulSoup(content, 'html.parser')
 			elif r.status == 406:
-				logger.error("GitHub returned 406 Not Acceptable - check your headers. Using cached data if available.")
+				logger.error(f"GitHub returned 406 Not Acceptable - check your headers. Using cached data if available. listurl: {listurl}")
+				return {
+					'lists_metadata': cached_metadata or [],
+					'lists_with_repos': cached_stars or {}
+				}
+			elif r.status == 404:
+				logger.error(f"GitHub returned 404 Not Found - check your URL. Using cached data if available. listurl: {listurl}")
 				return {
 					'lists_metadata': cached_metadata or [],
 					'lists_with_repos': cached_stars or {}
@@ -384,7 +392,11 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	for sl in souplist:
 		# Extract list name
 		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')  # type: ignore
-		list_name = name_elem.text.strip() if name_elem else 'Unknown'
+		if not name_elem:
+			name_elem = sl.find('h3', class_='f4 text-bold tmp-mr-3')
+		list_name = name_elem.text.strip() if name_elem else 'UnknownListNameFromSoup'
+		if list_name == 'Unknown' and args.debug:
+			logger.warning(f"Failed to extract list name from element: {sl} name_elem: {name_elem}")
 		try:
 			list_description_elem = sl.find('span', class_='Truncate-text color-fg-muted mr-3')  # type: ignore
 			list_description = list_description_elem.text.strip() if list_description_elem else ''
@@ -414,6 +426,10 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 			for item in list_items:
 				# Fix: Use the same selectors as above for consistency
 				list_name = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
+				if list_name == 'Unknown':
+					list_name = item.find('h3', class_='f4 text-bold tmp-mr-3').text.strip()  # type: ignore
+				if list_name == 'Unknown' and args.debug:
+					logger.warning(f"Failed to extract list name from element: {item}")
 				list_link = f"https://github.com{item.attrs['href']}"  # type: ignore
 				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''  # type: ignore
 

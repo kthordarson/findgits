@@ -364,7 +364,7 @@ class CacheEntry(Base):
 	id: Mapped[int] = mapped_column(primary_key=True)
 	# cache_key = Column('cache_key', String(255), unique=True)  # Unique identifier for this cache entry
 	# cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
-	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)
+	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)  # type: ignore
 	timestamp = Column('timestamp', DateTime)  # When this entry was created/updated
 	last_scan = Column('last_scan', DateTime)  # When this entry was last scanned
 

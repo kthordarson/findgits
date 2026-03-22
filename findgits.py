@@ -109,8 +109,8 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
         logger.info(f"Found {len(starred_repos)} starred repos from GitHub API")
 
         # Get all git lists and their associated repos
-        git_lists_data = await get_lists_and_stars_unified(session, args)
-        lists_with_repos = git_lists_data.get('lists_with_repos', {})
+        unified_data = await get_lists_and_stars_unified(session, args)
+        lists_with_repos = unified_data.get('lists_with_repos', {})
 
         if isinstance(lists_with_repos, dict) and 'lists_with_repos' in lists_with_repos:
             actual_lists = lists_with_repos['lists_with_repos']
@@ -159,7 +159,7 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
                     )
                     session.add(git_repo)
                     session.flush()  # Get the ID
-                    logger.debug(f"Created new GitRepo for starred repo: {full_name}")
+                    # logger.debug(f"New starred repo: {full_name}")
 
                 # Mark repo as starred
                 git_repo.is_starred = True
@@ -196,7 +196,8 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
 
             except Exception as e:
                 logger.error(f"Error processing starred repo {starred_repo.get('full_name', 'unknown')}: {e} {type(e)}")
-                logger.error(f'traceback: {traceback.format_exc()}')
+                if args.debug:
+                    logger.error(f'traceback: {traceback.format_exc()}')
                 continue
 
         session.commit()
@@ -204,7 +205,8 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
 
     except Exception as e:
         logger.error(f"Error linking existing repos to stars: {e} {type(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        if args.debug:
+            logger.error(f"Traceback: {traceback.format_exc()}")
         session.rollback()
 
 # Update populate_git_lists to use the unified function
@@ -229,6 +231,10 @@ async def populate_git_lists(session: Session, args: argparse.Namespace) -> List
             url_parts = entry.get('list_url', '').split('/')
             if len(url_parts) > 0:
                 list_name = url_parts[-1]
+        if list_name == 'Unknown' and args.debug:
+            newlistname = entry.get('list_url').split('/')[-1]
+            logger.warning(f"List name is 'Unknown' for entry: {entry}, setting to {newlistname}")
+            list_name = newlistname
 
         # Check if list already exists by name or URL
         db_list = session.query(GitList).filter((GitList.list_name == list_name) | (GitList.list_url == entry.get('list_url', ''))).first()
@@ -393,24 +399,31 @@ async def main() -> None:
 
             cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
             if cache_entry:
-                git_lists = json.loads(cast(str, cache_entry.data))
+                unified_data = json.loads(cast(str, cache_entry.data))
             else:
                 # Fallback if cache somehow failed
                 if args.debug:
                     logger.debug("[fallback] Cache entry not found, fetching lists and stars from GitHub")
-                git_lists = await get_lists_and_stars_unified(session, args)
-            try:
-                urls = list(set(flatten([git_lists[k]['hrefs'] for k in git_lists])))
-            except TypeError as e:
-                logger.error(f"Error flattening URLs: {e}")
+                unified_data = await get_lists_and_stars_unified(session, args)
                 if args.debug:
-                    logger.error(f"git_lists: {git_lists}")
+                    logger.debug(f"[fallback] found {len(unified_data)} lists from GitHub API")
+            if len(unified_data.get('lists_metadata', {})) > 0 or len(unified_data.get('lists_with_repos', {})) > 0 or len(unified_data.get('Unknown', {})) > 0:
+                try:
+                    urls = list(set(flatten([unified_data[k]['hrefs'] for k in unified_data])))
+                except TypeError as e:
+                    logger.error(f"Error flattening URLs: {e}")
+                    if args.debug:
+                        logger.error(f"unified_data: {unified_data}")
+                    urls = []
+            else:
+                if args.debug:
+                    logger.warning(f"unified_data does not contain expected keys or is empty. unified_data: {unified_data}")
                 urls = []
 
             localrepos = [k.github_repo_name for k in git_repos]
             notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
             foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
-            print(f'Git Lists: {len(git_lists)} git_list_count: {len(git_lists)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
+            print(f'Git Lists: {len(unified_data)} git_list_count: {len(unified_data)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 
             # Process repos in parallel
             for i in range(0, len(notfoundrepos), args.batch_size):
@@ -439,9 +452,17 @@ async def main() -> None:
                     logger.warning(f'Global limit set to {args.global_limit}, processing only first {len(git_folders)} git folders')
                 print(f'Scan path: {scanpath} found {len(git_folders)} git folders')
                 tasks = set()
+                seen_paths = set()
                 for git_folder in git_folders:
                     git_path = git_folder.parent
+                    if git_path in seen_paths:
+                        continue
+                    seen_paths.add(git_path)
                     tasks.add(process_git_folder(git_path, session, args))
+                
+                if len(git_folders) != len(tasks):
+                    logger.warning(f"Found {len(git_folders)} git folders, but only {len(tasks)} unique paths. Duplicates ignored.")
+                
                 await asyncio.gather(*tasks)
                 session.commit()
                 print(f'Processed {len(git_folders)} git folders')

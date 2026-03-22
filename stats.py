@@ -340,9 +340,9 @@ async def show_list_by_group(session, args) -> None:
 		for repo in repos[:args.max_output]:
 			stars = repo.get('stargazers_count', 0)
 			if repo.get('language'):
-				lang = repo.get('language', 'Unknown')[:15].ljust(15)  # Ensure fixed width
+				lang = repo.get('language', 'UnknownLang')[:15].ljust(15)  # Ensure fixed width
 			else:
-				lang = 'Unknown'.ljust(15)
+				lang = 'UnknownLang'.ljust(15)
 			if repo.get('description'):
 				desc = repo.get('description', 'No description')
 			else:
