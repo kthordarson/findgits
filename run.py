@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from PySide6.QtCore import (QCoreApplication)
 from PySide6.QtWidgets import (QMainWindow, QApplication, QTreeWidgetItem, QPushButton)
 from PySide6.QtWidgets import QTextBrowser  # Changed from QTextEdit
-from PySide6.QtCore import Qt, QRect, QMetaObject  # type: ignore
+from PySide6.QtCore import Qt, QRect  # , QMetaObject  # type: ignore
 from PySide6.QtWidgets import QHeaderView
 
 class NumericTreeWidgetItem(QTreeWidgetItem):
@@ -158,7 +158,7 @@ class MainApp(QMainWindow):
 		details.append(f"<b>Forks:</b> {repo.forks_count or 0}")
 		details.append(f"<b>Open Issues:</b> {repo.open_issues_count or 0}")
 		details.append(f"<b>Size:</b> {repo.size or 0} KB")
-		details.append(f"<b>Language:</b> {repo.language or 'Unknown'}")
+		details.append(f"<b>Language:</b> {repo.language or 'UnknownLang'}")
 		details.append("")
 		details.append("<b>--- Dates ---</b>")
 		details.append(f"<b>Created:</b> {repo.created_at or 'N/A'}")
@@ -182,7 +182,7 @@ class MainApp(QMainWindow):
 			details.append("")
 			details.append(f"<b>--- Local Folders ({len(folders)}) ---</b>")
 			for folder in folders:
-				folder_size = f"{folder.folder_size / 1024:.1f} KB" if folder.folder_size else "Unknown"
+				folder_size = f"{folder.folder_size / 1024:.1f} KB" if folder.folder_size else "UnknownSize"
 				details.append(f"  • {make_file_link(folder.git_path)}")
 				details.append(f"    Size: {folder_size}, Files: {folder.file_count or 0}")
 
@@ -211,9 +211,9 @@ class MainApp(QMainWindow):
 		# Build query based on filter state
 		query = self.session.query(GitRepo)
 		if self.hide_not_cloned:
-			query = query.filter(GitRepo.local_path.isnot(None))
-			query = query.filter(GitRepo.local_path != '')
-			query = query.filter(GitRepo.local_path != '[notcloned]')
+			query = query.filter(GitRepo.local_path.isnot(None))  # type: ignore
+			query = query.filter(GitRepo.local_path != '')  # type: ignore
+			query = query.filter(GitRepo.local_path != '[notcloned]')  # type: ignore
 
 		gitrepos = query.all()
 
@@ -260,7 +260,7 @@ class MainApp(QMainWindow):
 	def folderButton_clicked(self, widget):  # change to folder tree view
 		if widget:
 			repo = self.session.query(GitRepo).filter(GitRepo.id == widget.text(0)).first()
-			# logger.debug(f'folderButton_clicked {repo=}')
+			logger.debug(f'folderButton_clicked {repo=}')
 		# self.checkBox_filterdupes.setEnabled(True)
 
 if __name__ == '__main__':

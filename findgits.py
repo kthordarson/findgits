@@ -159,7 +159,7 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
                     )
                     session.add(git_repo)
                     session.flush()  # Get the ID
-                    logger.debug(f"New starred repo: {full_name}")
+                    # logger.debug(f"New starred repo: {full_name}")
 
                 # Mark repo as starred
                 git_repo.is_starred = True
@@ -231,6 +231,10 @@ async def populate_git_lists(session: Session, args: argparse.Namespace) -> List
             url_parts = entry.get('list_url', '').split('/')
             if len(url_parts) > 0:
                 list_name = url_parts[-1]
+        if list_name == 'Unknown' and args.debug:
+            newlistname = entry.get('list_url').split('/')[-1]
+            logger.warning(f"List name is 'Unknown' for entry: {entry}, setting to {newlistname}")
+            list_name = newlistname
 
         # Check if list already exists by name or URL
         db_list = session.query(GitList).filter((GitList.list_name == list_name) | (GitList.list_url == entry.get('list_url', ''))).first()

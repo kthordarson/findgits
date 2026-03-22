@@ -392,7 +392,11 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	for sl in souplist:
 		# Extract list name
 		name_elem = sl.find('h3', class_='f4 text-bold no-wrap mr-3')  # type: ignore
-		list_name = name_elem.text.strip() if name_elem else 'Unknown'
+		if not name_elem:
+			name_elem = sl.find('h3', class_='f4 text-bold tmp-mr-3')
+		list_name = name_elem.text.strip() if name_elem else 'UnknownListNameFromSoup'
+		if list_name == 'Unknown' and args.debug:
+			logger.warning(f"Failed to extract list name from element: {sl} name_elem: {name_elem}")
 		try:
 			list_description_elem = sl.find('span', class_='Truncate-text color-fg-muted mr-3')  # type: ignore
 			list_description = list_description_elem.text.strip() if list_description_elem else ''
@@ -422,6 +426,10 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 			for item in list_items:
 				# Fix: Use the same selectors as above for consistency
 				list_name = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
+				if list_name == 'Unknown':
+					list_name = item.find('h3', class_='f4 text-bold tmp-mr-3').text.strip()  # type: ignore
+				if list_name == 'Unknown' and args.debug:
+					logger.warning(f"Failed to extract list name from element: {item}")
 				list_link = f"https://github.com{item.attrs['href']}"  # type: ignore
 				list_count_info = item.find('div', class_="color-fg-muted text-small no-wrap").text if item.find('div', class_="color-fg-muted text-small no-wrap") else ''  # type: ignore
 
