@@ -87,7 +87,8 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 			repo_metadata = await fetch_metadata(repo_info, session, args)
 		except Exception as e:
 			logger.error(f'Failed to fetch metadata for {repo_path}: {e} {type(e)}')
-			logger.error(f'traceback: {traceback.format_exc()}')
+			if args.debug:
+				logger.error(f'traceback: {traceback.format_exc()}')
 			repo_metadata = None
 
 	try:
@@ -123,7 +124,8 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 				repo_metadata = None
 			except Exception as e:
 				logger.error(f'Fatal Exception for {repo_path}: {e} {type(e)}')
-				logger.error(f'traceback: {traceback.format_exc()}')
+				if args.debug:
+					logger.error(f'traceback: {traceback.format_exc()}')
 				raise e
 
 		# Try lookup by name if URL lookup failed
@@ -154,14 +156,11 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 					if 'BLANK_REPO_DATA' in repo_metadata:
 						logger.warning(f"BLANK_REPO_DATA found in repo_metadata for {repo_name} repo_metadata: {repo_metadata}")
 					git_repo = populate_from_metadata(git_repo, repo_metadata)
-				session.add(git_repo)
-				session.flush()  # Get the ID without committing
 				if 'BLANK_REPO_DATA' in git_repo.git_url or 'BLANK_REPO_DATA' in git_repo.github_repo_name:
 					logger.warning(f"BLANK_REPO_DATA found in git_repo.git_url: {git_repo.git_url} or git_repo.github_repo_name: {git_repo.github_repo_name}")
-					session.rollback()
-					return None
-				else:
-					logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name}')
+				session.add(git_repo)
+				session.flush()  # Get the ID without committing
+				logger.info(f'Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name} in folder: {git_folder_path}')
 
 		else:
 			# Update existing repo
@@ -186,6 +185,8 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 			# Create new folder
 			git_folder = GitFolder(git_folder_path, git_repo.id)
 			session.add(git_folder)
+			session.flush()  # Get the ID
+			logger.info(f'Created new GitFolder for path: {git_folder_path} linked to GitRepo: {git_repo.github_repo_name} {git_repo.git_url}')
 
 		# Commit the transaction
 		session.commit()
@@ -193,27 +194,26 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 
 	except Exception as e:
 		logger.error(f'Database error: {e} {type(e)} for git_folder_path: {git_folder_path}')
-		logger.error(f'traceback: {traceback.format_exc()}')
-		if repo_metadata:
-			logger.error(f'repo_metadata: {repo_metadata}')
-		logger.error(f'traceback: {traceback.format_exc()}')
-		logger.error(f'tracebackstack: {traceback.print_stack()}')
+		if args.debug:
+			logger.error(f'traceback: {traceback.format_exc()}')
+			if repo_metadata:
+				logger.error(f'repo_metadata: {repo_metadata}')
 		if session.is_active:
 			session.rollback()
 		return None
 
 async def create_repo_to_list_mapping(session, args) -> dict:
 	"""Create a mapping of repo URLs to list names - fetch once and reuse"""
-	git_lists_data = await get_lists_and_stars_unified(session, args)
+	unified_data = await get_lists_and_stars_unified(session, args)
 	repo_to_list_mapping = {}
 
 	# Debug the structure
 	if args.debug:
-		logger.debug(f"git_lists_data keys: {git_lists_data.keys()}")
-		logger.debug(f"git_lists_data structure: {type(git_lists_data)}")
+		logger.debug(f"git_lists_data keys: {unified_data.keys()}")
+		logger.debug(f"git_lists_data structure: {type(unified_data)}")
 
 	# Extract the correct data structure
-	lists_with_repos = git_lists_data.get('lists_with_repos', {})
+	lists_with_repos = unified_data.get('lists_with_repos', {})
 
 	# Handle the nested structure more carefully
 	if isinstance(lists_with_repos, dict):

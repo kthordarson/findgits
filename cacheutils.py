@@ -142,11 +142,13 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 							set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
 						except TimeoutError as e:
 							logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
-							logger.error(f'traceback: {traceback.format_exc()}')
+							if args.debug:
+								logger.error(f'traceback: {traceback.format_exc()}')
 							return None
 						except Exception as e:
 							logger.error(f"Fatal Failed to set cache entry for {repo_name}: {e} {type(e)}")
-							logger.error(f'traceback: {traceback.format_exc()}')
+							if args.debug:
+								logger.error(f'traceback: {traceback.format_exc()}')
 							raise e
 						session.commit()
 						return repo_data
@@ -154,38 +156,29 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 						logger.warning(f"Repository error {r.status}: {api_url}")
 						default_repo_data = BLANK_REPO_DATA.copy()
 						default_repo_data['name'] = repo_name
-						try:
-							defaultjson = json.dumps([default_repo_data])
-						except TypeError as e:
-							logger.error(f"TypeError while serializing default repo data: {e} {type(e)}")
-							logger.error(f'traceback: {traceback.format_exc()}')
-							logger.error(f"Default repo data: {default_repo_data}")
-							return None
-						except Exception as e:
-							logger.error(f"Fatal Failed to serialize default repo data: {e} {type(e)}")
-							logger.error(f'traceback: {traceback.format_exc()}')
-							raise e
-						set_cache_entry(session, cache_key, cache_type, defaultjson)
-						session.commit()
+						# set_cache_entry(session, cache_key, cache_type, defaultjson)
+						# session.commit()
 						return default_repo_data
 					elif r.status == 401:
 						default_repo_data = BLANK_REPO_DATA.copy()
 						default_repo_data['name'] = repo_name
-						defaultjson = json.dumps([default_repo_data])
-						set_cache_entry(session, cache_key, cache_type, defaultjson)
-						session.commit()
+						# defaultjson = json.dumps([default_repo_data])
+						# set_cache_entry(session, cache_key, cache_type, defaultjson)
+						# session.commit()
 						logger.error(f"Unauthorized access (401) to repository: {api_url}")
 						return default_repo_data
 					else:
 						logger.error(f"Failed to fetch repository data: {r.status} from {api_url}")
 						return None
 		except TimeoutError as e:
-			logger.error(f"unhandled TimeoutError fetching repository data: {e} {type(e)}")
-			logger.error(f'traceback: {traceback.format_exc()}')
+			logger.error(f"TimeoutError fetching repository data: {e} {type(e)}")
+			# if args.debug:
+			# 	logger.error(f'traceback: {traceback.format_exc()}')
 			return None
 		except Exception as e:
 			logger.error(f"Fatal Error fetching repository data: {e} {type(e)}")
-			logger.error(f'traceback: {traceback.format_exc()}')
+			if args.debug:
+				logger.error(f'traceback: {traceback.format_exc()}')
 			raise e
 
 def get_cache_entry(session, cache_key, cache_type) -> CacheEntry | None:
@@ -205,7 +198,7 @@ def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 	"""Set or update a cache entry in the database"""
 	if 'BLANK_REPO_DATA' in data:
 		logger.warning(f"Invalid data for cache entry: {json.loads(data)[0]["name"]} ")
-		# return None
+		return None
 	entry = get_cache_entry(session, cache_key, cache_type)
 	if entry:
 		entry.data = data

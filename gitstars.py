@@ -322,6 +322,8 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 	# If we have both cached, return them
 	if cached_metadata and cached_stars:
+		if args.debug:
+			logger.debug(f"Returning data from cache for both metadata and stars. cached_metadata: {len(cached_metadata)} lists, cached_stars: {len(cached_stars)} lists")
 		return {
 			'lists_metadata': cached_metadata,
 			'lists_with_repos': cached_stars
@@ -330,7 +332,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 	# Get authentication
 	auth = await get_auth_params()
 	if not auth:
-		logger.error('No auth provided for get_lists_and_stars_unified')
+		logger.warning('No auth provided for get_lists_and_stars_unified')
 		return {
 			'lists_metadata': cached_metadata or [],
 			'lists_with_repos': cached_stars or {}
@@ -363,13 +365,13 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				content = await r.text()
 				soup = BeautifulSoup(content, 'html.parser')
 			elif r.status == 406:
-				logger.error("GitHub returned 406 Not Acceptable - check your headers. Using cached data if available.")
+				logger.error(f"GitHub returned 406 Not Acceptable - check your headers. Using cached data if available. listurl: {listurl}")
 				return {
 					'lists_metadata': cached_metadata or [],
 					'lists_with_repos': cached_stars or {}
 				}
 			elif r.status == 404:
-				logger.error("GitHub returned 404 Not Found - check your URL. Using cached data if available.")
+				logger.error(f"GitHub returned 404 Not Found - check your URL. Using cached data if available. listurl: {listurl}")
 				return {
 					'lists_metadata': cached_metadata or [],
 					'lists_with_repos': cached_stars or {}

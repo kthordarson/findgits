@@ -61,6 +61,7 @@ async def cleanup_shared_session() -> None:
 async def get_auth_params() -> HTTPBasicAuth | None:
 	"""Get authentication parameters from environment variables."""
 	username = os.getenv("GITHUB_USERNAME", '')
+	username = username.split('@')[0] if '@' in username else username  # Handle email format
 	token = os.getenv("FINDGITSTOKEN", '')
 	if not username or not token:
 		logger.error("GITHUB_USERNAME or FINDGITSTOKEN environment variables are not set.")
