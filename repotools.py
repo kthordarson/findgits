@@ -295,9 +295,9 @@ async def insert_update_starred_repo(github_repo, session, args, create_new=Fals
 			logger.warning(f'Skipping creation of new GitRepo for {remote_url} as create_new is False')
 			return None
 	else:
-		logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}. repo_data: {type(repo_data)}')
-		if repo_data:
-			update_repo_from_data(git_repo, repo_data)
+		if repo_data and repo_data.get('http_status') not in [404, 401]:
+				logger.info(f'update GitRepo: {git_repo} remote_url: {remote_url}. ')
+				update_repo_from_data(git_repo, repo_data)
 
 	# Create or update GitStar entry
 	if git_repo:

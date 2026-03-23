@@ -30,7 +30,8 @@ async def get_api_rate_limits(args) -> dict:
 		return rate_limits
 	except Exception as e:
 		logger.error(f'fatal {e} {type(e)}')
-		logger.error(f'traceback: {traceback.format_exc()}')
+		if args.debug:
+			logger.error(f'traceback: {traceback.format_exc()}')
 		raise e
 	rate_limits['rate_limits'] = rates
 	if rate_limits.get('rate_limits', {}).get('status') == 401:
@@ -93,7 +94,8 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 					logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
 				except Exception as e:
 					logger.error(f"Error logging rate limits: {e} {type(e)} resources: {resources} rate_limits_data: {rate_limits_data}")
-					
+					if args.debug:
+						logger.error(f'traceback: {traceback.format_exc()}')
 			# print(resources
 				# print(resources)
 			# No limits hit
@@ -101,7 +103,8 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 
 	except Exception as e:
 		logger.error(f"Error checking rate limits: {e} {type(e)}")
-		logger.error(f'traceback: {traceback.format_exc()}')
+		if args.debug:
+			logger.error(f'traceback: {traceback.format_exc()}')
 		# Return True as a precaution when we can't determine limits
 		return True
 	return False
@@ -127,11 +130,8 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 					return cache_data[0] if cache_data else None
 				except Exception as e:
 					logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_name_or_url}")
-					logger.error(f'traceback: {traceback.format_exc()}')
-		auth = await get_auth_params()
-		if not auth:
-			logger.error('update_repo_cache: no auth provided')
-			return None
+					if args.debug:
+						logger.error(f'traceback: {traceback.format_exc()}')
 		api_url = f'https://api.github.com/repos/{repo_name}'
 		try:
 			async with get_client_session(args) as api_session:
@@ -156,12 +156,14 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 						logger.warning(f"Repository error {r.status}: {api_url}")
 						default_repo_data = BLANK_REPO_DATA.copy()
 						default_repo_data['name'] = repo_name
+						default_repo_data['http_status'] = r.status
 						# set_cache_entry(session, cache_key, cache_type, defaultjson)
 						# session.commit()
 						return default_repo_data
 					elif r.status == 401:
 						default_repo_data = BLANK_REPO_DATA.copy()
 						default_repo_data['name'] = repo_name
+						default_repo_data['http_status'] = r.status
 						# defaultjson = json.dumps([default_repo_data])
 						# set_cache_entry(session, cache_key, cache_type, defaultjson)
 						# session.commit()

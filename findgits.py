@@ -80,7 +80,8 @@ async def process_git_folder(git_path: Path, session: Session, args: argparse.Na
 
     except Exception as e:
         logger.error(f'Error processing {git_path}: {e} {type(e)}')
-        logger.error(f'traceback: {traceback.format_exc()}')
+        if args.debug:
+            logger.error(f'traceback: {traceback.format_exc()}')
         if session.is_active:
             session.rollback()
         return None
@@ -91,13 +92,16 @@ async def process_starred_repo(repo: str, session: Session, args: argparse.Names
         await insert_update_starred_repo(github_repo=repo, session=session, args=args, create_new=True)
     except sqlite3.IntegrityError as e:
         logger.error(f'Error processing {repo}: {e} {type(e)}')
-        logger.error(f'traceback: {traceback.format_exc()}')
+        if args.debug:
+            logger.error(f'traceback: {traceback.format_exc()}')
     except TypeError as e:
         logger.error(f'Error processing {repo}: {e} {type(e)}')
-        logger.error(f'traceback: {traceback.format_exc()}')
+        if args.debug:
+            logger.error(f'traceback: {traceback.format_exc()}')
     except Exception as e:
         logger.error(f'Error processing {repo}: {e} {type(e)}')
-        logger.error(f'traceback: {traceback.format_exc()}')
+        if args.debug:
+            logger.error(f'traceback: {traceback.format_exc()}')
 
 async def link_existing_repos_to_stars(session: Session, args: argparse.Namespace) -> None:
     """Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
@@ -308,7 +312,8 @@ async def run_update_paths(session: Session, args: argparse.Namespace) -> None:
         logger.info(f"{len(git_paths)} folder_stats updated successfully")
     except Exception as e:
         logger.error(f"Error during update_paths: {e} {type(e)}")
-        logger.error(f'traceback: {traceback.format_exc()}')
+        if args.debug:
+            logger.error(f'traceback: {traceback.format_exc()}')
         if session.is_active:
             session.rollback()
 
@@ -407,19 +412,7 @@ async def main() -> None:
                 unified_data = await get_lists_and_stars_unified(session, args)
                 if args.debug:
                     logger.debug(f"[fallback] found {len(unified_data)} lists from GitHub API")
-            if len(unified_data.get('lists_metadata', {})) > 0 or len(unified_data.get('lists_with_repos', {})) > 0 or len(unified_data.get('Unknown', {})) > 0:
-                try:
-                    urls = list(set(flatten([unified_data[k]['hrefs'] for k in unified_data])))
-                except TypeError as e:
-                    logger.error(f"Error flattening URLs: {e}")
-                    if args.debug:
-                        logger.error(f"unified_data: {unified_data}")
-                    urls = []
-            else:
-                if args.debug:
-                    logger.warning(f"unified_data does not contain expected keys or is empty. unified_data: {unified_data}")
-                urls = []
-
+            urls = list(set(flatten([unified_data[k]['hrefs'] for k in unified_data])))
             localrepos = [k.github_repo_name for k in git_repos]
             notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
             foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
@@ -437,7 +430,7 @@ async def main() -> None:
 
                 await asyncio.gather(*tasks)
                 session.commit()
-                await asyncio.sleep(1)  # Small delay to avoid overwhelming the DB
+                await asyncio.sleep(0.01)  # Small delay to avoid overwhelming the DB
             await link_existing_repos_to_stars(session, args)
 
             verification_results = await verify_star_list_links(session, args)

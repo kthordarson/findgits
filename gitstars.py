@@ -28,7 +28,7 @@ async def get_info_for_list(link, headers, session, args) -> list:
 
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit, skipping fetch for list.")
-		await asyncio.sleep(1)
+		await asyncio.sleep(0.1)
 		raise RateLimitExceededError()
 
 	all_hrefs = []
@@ -99,7 +99,7 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
+		await asyncio.sleep(0.1)
 		raise RateLimitExceededError()
 
 	async with semaphore:
@@ -181,7 +181,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
+		await asyncio.sleep(0.1)
 		raise RateLimitExceededError()
 
 	async with get_client_session(args) as api_session:
@@ -352,7 +352,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 	if await is_rate_limit_hit(args):
 		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
+		await asyncio.sleep(0.1)
 		raise RateLimitExceededError()  # return {'lists_metadata': cached_metadata or [], 'lists_with_repos': cached_stars or {}}
 
 	# Scrape the GitHub stars page once
