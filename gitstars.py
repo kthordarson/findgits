@@ -423,7 +423,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		try:
 			list_items = listsoup[0].find_all('a', attrs={'class': 'd-block Box-row Box-row--hover-gray mt-0 color-fg-default no-underline'})  # type: ignore
 
-			for item in list_items:
+			for idx,item in enumerate(list_items):
 				# Fix: Use the same selectors as above for consistency
 				list_name = item.find('h3', class_='f4 text-bold no-wrap mr-3').text.strip() if item.find('h3', class_='f4 text-bold no-wrap mr-3') else 'Unknown'  # type: ignore
 				if list_name == 'Unknown':
@@ -446,6 +446,8 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 				# Get individual list repository links
 				try:
 					list_repos = await get_info_for_list(list_link, headers, session, args)
+					if args.debug:
+						logger.debug(f"[{idx}/{len(list_items)}] Fetched {len(list_repos)} repos for list '{list_name}'")
 				except Exception as e:
 					logger.warning(f'{e} {type(e)} failed to get list info for {list_name}')
 					logger.error(f'traceback: {traceback.format_exc()}')
