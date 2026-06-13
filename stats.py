@@ -114,12 +114,16 @@ def stats_check_git_dates(session, args, create_heatmap=False) -> None:
 			years = days / 365.25
 			print(f"   • {repo['short_path']:<50} {days:7.0f} days ({years:.1f} years)")
 
-	# Recently accessed repos
-	recent_access = df[df['atime_to_mtime'] < 7].sort_values('atime_to_mtime')
+	# Recently accessed repos (accessed within last 7 days)
+	now = pd.Timestamp.now()
+	if df['git_path_atime'].dt.tz is not None:
+		now = now.tz_localize(df['git_path_atime'].dt.tz)
+	df['days_since_atime'] = (now - df['git_path_atime']).dt.total_seconds() / seconds_per_day
+	recent_access = df[df['days_since_atime'] < 7].sort_values('days_since_atime')
 	if not recent_access.empty:
-		print("\n Recently accessed repositories (accessed within 7 days of modification):")
+		print("\n Recently accessed repositories (accessed within the last 7 days):")
 		for _, repo in recent_access.head(args.max_output).iterrows():
-			days = repo['atime_to_mtime']
+			days = repo['days_since_atime']
 			print(f"   • {repo['short_path']:<50} {days:5.1f} days ago")
 
 	# Repos with future timestamps (potential issues)

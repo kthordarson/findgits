@@ -220,6 +220,7 @@ class GitRepo(Base):
 	config_mtime = Column('config_mtime', DateTime)
 	valid = Column(Boolean, default=True)
 	scanned = Column(Boolean, default=False)
+	last_status = Column('last_status', Integer, nullable=True, default=0)
 
 	is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
 	# starred_at = Column('starred_at', DateTime, nullable=True)
@@ -239,6 +240,7 @@ class GitRepo(Base):
 		self.last_scan = self.first_scan
 		self.scan_count = 0
 		self.scanned = False
+		self.last_status = 0
 
 		# Extract repository name from URL
 		if git_url.endswith('/'):
@@ -269,6 +271,7 @@ class GitRepo(Base):
 			self.git_url_api = repo_data.get('git_url')
 			self.svn_url = repo_data.get('svn_url')
 			self.homepage = repo_data.get('homepage')
+			self.last_status = repo_data.get('last_status', 1)
 
 			# Statistics
 			self.size = repo_data.get('size')

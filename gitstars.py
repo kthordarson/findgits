@@ -26,7 +26,7 @@ async def get_info_for_list(link, headers, session, args) -> list:
 			except json.JSONDecodeError as e:
 				logger.error(f'Failed to parse cached list info: {e}')
 
-	if await is_rate_limit_hit(args):
+	if await is_rate_limit_hit(args, caller='get_info_for_list'):
 		logger.warning("Rate limit hit, skipping fetch for list.")
 		await asyncio.sleep(1)
 		raise RateLimitExceededError()
@@ -72,7 +72,7 @@ async def get_info_for_list(link, headers, session, args) -> list:
 		try:
 			set_cache_entry(session, cache_key, cache_type, json.dumps(all_hrefs))
 			session.commit()
-			logger.info(f"Cached {len(all_hrefs)} repo links for {link}")
+			# logger.info(f"Cached {len(all_hrefs)} repo links for {link}")
 		except Exception as e:
 			logger.error(f'Failed to save list info to cache: {e} {type(e)}')
 			logger.error(f'traceback: {traceback.format_exc()}')
@@ -97,11 +97,6 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 		Tuple of (page_num, page_data)
 	"""
 
-	if await is_rate_limit_hit(args):
-		logger.warning("Rate limit hit!")
-		await asyncio.sleep(1)
-		raise RateLimitExceededError()
-
 	async with semaphore:
 		# Check if we should stop (other pages found empty results)
 		if stop_signal and stop_signal.is_set():
@@ -119,11 +114,15 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 		try:
 			if args.debug:
 				if max_pages_to_fetch:
-					logger.debug(f"Fetching page {page_num}/{max_pages_to_fetch} from {page_url}")
+					logger.debug(f"Fetching page {page_num}/{max_pages_to_fetch} from {page_url} max_pages_to_fetch: {max_pages_to_fetch}")
 				else:
 					logger.debug(f"Fetching page {page_num} from {page_url}")
 
 			async with api_session.get(page_url, headers=headers) as page_response:
+				if await is_rate_limit_hit(args, caller='fetch_page_generic'):
+					logger.warning("Rate limit hit!")
+					await asyncio.sleep(1)
+					raise RateLimitExceededError()
 				if page_response.status == 200:
 					page_data = await page_response.json()
 
@@ -133,10 +132,8 @@ async def fetch_page_generic(api_session, base_url, page_num, headers, semaphore
 							stop_signal.set()
 						logger.warning(f"Page {page_num}: got 0 repos - signaling stop")
 						return page_num, []
-
-					if args.debug:
-						logger.debug(f"Page {page_num}: got {len(page_data)} repos")
 					return page_num, page_data
+
 				elif page_response.status == 403:
 					logger.warning(f"Rate limit hit on page {page_num}")
 					raise RateLimitExceededError()
@@ -179,7 +176,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 	per_page = 100
 	repos = []
 
-	if await is_rate_limit_hit(args):
+	if await is_rate_limit_hit(args, caller='fetch_github_starred_repos'):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
 		raise RateLimitExceededError()
@@ -350,7 +347,7 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 		'Upgrade-Insecure-Requests': '1',
 	}
 
-	if await is_rate_limit_hit(args):
+	if await is_rate_limit_hit(args, caller='get_lists_and_stars_unified'):
 		logger.warning("Rate limit hit!")
 		await asyncio.sleep(1)
 		raise RateLimitExceededError()  # return {'lists_metadata': cached_metadata or [], 'lists_with_repos': cached_stars or {}}

@@ -38,7 +38,7 @@ async def get_api_rate_limits(args) -> dict:
 		rate_limits['limit_hit'] = True
 	return rate_limits
 
-async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
+async def is_rate_limit_hit(args, threshold_percent=10, caller=None) -> bool:
 	"""
 	Check if any GitHub API rate limits are hit or approaching their limits
 	Args:
@@ -89,7 +89,7 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 			if args.debug:
 				# logger.debug(f"Rate limits checked core: {resources} graphql: {resources} ")
 				try:
-					logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
+					logger.debug(f"{caller} core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
 				except Exception as e:
 					logger.error(f"Error logging rate limits: {e} {type(e)} resources: {resources} rate_limits_data: {rate_limits_data}")
 
@@ -137,6 +137,7 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 				async with api_session.get(api_url) as r:
 					if r.status == 200:
 						repo_data = await r.json()
+						repo_data['last_status'] = r.status
 						try:
 							set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
 						except TimeoutError as e:
@@ -154,17 +155,20 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 					elif r.status in (403, 404, 451):
 						logger.warning(f"Repository error {r.status}: {api_url}")
 						return None
-						# default_repo_data = BLANK_REPO_DATA.copy()
-						# default_repo_data['name'] = repo_name
-						# set_cache_entry(session, cache_key, cache_type, defaultjson)
-						# session.commit()
-						# return default_repo_data
+						default_repo_data = BLANK_REPO_DATA.copy()
+						default_repo_data['name'] = repo_name
+						default_repo_data['last_status'] = r.status
+						defaultjson = json.dumps([default_repo_data])
+						set_cache_entry(session, cache_key, cache_type, defaultjson)
+						session.commit()
+						return default_repo_data
 					elif r.status == 401:
 						default_repo_data = BLANK_REPO_DATA.copy()
 						default_repo_data['name'] = repo_name
-						# defaultjson = json.dumps([default_repo_data])
-						# set_cache_entry(session, cache_key, cache_type, defaultjson)
-						# session.commit()
+						default_repo_data['last_status'] = r.status
+						defaultjson = json.dumps([default_repo_data])
+						set_cache_entry(session, cache_key, cache_type, defaultjson)
+						session.commit()
 						logger.error(f"Unauthorized access (401) to repository: {api_url}")
 						return default_repo_data
 					else:

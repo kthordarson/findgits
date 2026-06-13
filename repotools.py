@@ -497,15 +497,9 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 		# If no repo exists, create a new one with safeguards
 		if not git_repo:
 			# Double check once more with a broader query
-			git_repo = (
-				session.query(GitRepo)
-				.filter(
-					(GitRepo.git_url.ilike(f"%{repo_name}%"))
-					| (GitRepo.github_repo_name == repo_name)
-				)
-				.first()
-			)
-
+			git_repo = (session.query(GitRepo).filter((GitRepo.git_url.ilike(f"%{repo_name}%")) | (GitRepo.github_repo_name == repo_name) | (GitRepo.local_path == git_folder_path)).first())
+			# if args.debug:
+			# 	logger.debug(f'Second chance lookup for repo_name {repo_name} found: {git_repo}')
 			if not git_repo:
 				git_repo = GitRepo(remote_url, git_folder_path)
 				git_repo.github_repo_name = repo_name
@@ -515,13 +509,6 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 				git_repo.scan_count = 1
 				git_repo.update_local_git_info()
 
-				# Populate with metadata if available
-				if repo_metadata:
-					git_repo = populate_from_metadata(git_repo, repo_metadata)
-					# if "BLANK_REPO_DATA" in repo_metadata:
-					# 	logger.warning(f"BLANK_REPO_DATA found in repo_metadata for {repo_name} repo_metadata: {repo_metadata}")
-				if ("BLANK_REPO_DATA" in git_repo.git_url or "BLANK_REPO_DATA" in git_repo.github_repo_name or "BLANK_REPO_DATA" in repo_metadata if repo_metadata else False):
-					logger.warning(f"BLANK_REPO_DATA found in git_repo.git_url: {git_repo.git_url} or git_repo.github_repo_name: {git_repo.github_repo_name} repo_name: {repo_name}")
 				session.add(git_repo)
 				session.flush()  # Get the ID without committing
 				logger.info(f"Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name} in folder: {git_folder_path}")
@@ -537,7 +524,7 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 			if repo_metadata:
 				git_repo = populate_from_metadata(git_repo, repo_metadata)
 			else:
-				logger.warning(f"No metadata found for {git_repo} git_url: {git_repo.git_url}")
+				logger.warning(f"No metadata found for {git_repo} git_url: {git_repo.git_url} {git_repo.last_status}")
 
 		# Now handle the GitFolder entry
 		if git_folder:

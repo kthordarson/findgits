@@ -51,7 +51,7 @@ async def main_scanpath(args: argparse.Namespace, unified_data:dict, starred_rep
         urls = []
 
     localrepos = [k.github_repo_name for k in git_repos]
-    notfoundrepos = [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
+    notfoundrepos = []  # [k for k in [k for k in urls] if k.split('/')[-1] not in localrepos]
     foundrepos = [k for k in [k for k in urls] if k.split('/')[-1] in localrepos]
     print(f'unified_data: {len(unified_data)} Starred Repos: {len(starred_repos)} urls: {len(urls)} foundrepos: {len(foundrepos)} notfoundrepos: {len(notfoundrepos)}')
 
