@@ -53,7 +53,6 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 			# Check if limit_hit is already set
 			if rate_limits_data.get('limit_hit', False):
 				return True
-			
 			if rate_limits_data.get('rate_limits', {}).get('status') == '401':
 				logger.error(f"Unauthorized access (401) when checking rate limits - check your authentication. {rate_limits_data}")
 				return True
@@ -93,7 +92,7 @@ async def is_rate_limit_hit(args, threshold_percent=10) -> bool:
 					logger.debug(f"Rate limits checked core: {resources.get('core').get('used')}/{resources.get('core').get('remaining')} graphql: {resources.get('graphql').get('used')}/{resources.get('graphql').get('remaining')}")
 				except Exception as e:
 					logger.error(f"Error logging rate limits: {e} {type(e)} resources: {resources} rate_limits_data: {rate_limits_data}")
-					
+
 			# print(resources
 				# print(resources)
 			# No limits hit

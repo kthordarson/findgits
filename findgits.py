@@ -1,24 +1,18 @@
 #!/usr/bin/python3
-import traceback
-from typing import cast, Optional, Any, Dict, List, Tuple
+from typing import cast, Tuple
 import asyncio
-import re
-from datetime import datetime
-from pathlib import Path
 import argparse
 import json
 from loguru import logger
 import sqlalchemy
-import sqlite3
 from sqlalchemy.orm import sessionmaker, Session
 from scanpath import main_scanpath
-from dbstuff import GitRepo, GitStar, GitList, GitFolder
-from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
-from repotools import create_repo_to_list_mapping, verify_star_list_links, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
-from repotools import populate_git_lists, process_starred_repos, run_update_paths
-from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
-from utils import flatten, cleanup_shared_session
-from cacheutils import set_cache_entry, get_cache_entry
+from dbstuff import get_engine, db_init, drop_database
+from repotools import run_update_paths
+from gitstars import get_lists_and_stars_unified
+from stats import fetch_github_starred_repos
+from utils import cleanup_shared_session
+from cacheutils import get_cache_entry
 # Import functions from stats.py
 from stats import (
     stats_check_git_dates,
@@ -81,28 +75,37 @@ async def main() -> None:
         session.close()
         return
     try:
-        if args.scanpath:
-            await main_scanpath(args)
-
-        if args.checkdates:
-            stats_check_git_dates(session, args)
-
-        if args.list_by_group:
-            await show_list_by_group(session, args)
-
-        if args.list_stats:
-            show_starred_repo_stats(session, args)
-
-        if args.check_rate_limits:
-            await show_rate_limits(session, args)
-
-        if args.update_paths:
-            await run_update_paths(session, args)
-
-        # If only info/stats flags were used, close session and return
-        if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits):
-            session.close()
+        unified_data = None
+        unified_data = await get_lists_and_stars_unified(session, args)
+        if args.debug:
+            logger.debug(f"[f] unified_data: {len(unified_data)}")
+        if not unified_data:
+            logger.error("Failed to retrieve unified data for lists and stars. Exiting.")
             return
+        else:
+            starred_repos = await fetch_github_starred_repos(args, session)
+            if args.scanpath:
+                await main_scanpath(args, unified_data=unified_data, starred_repos=starred_repos, session=session)
+
+            if args.checkdates:
+                stats_check_git_dates(session, args)
+
+            if args.list_by_group:
+                await show_list_by_group(session, args, unified_data=unified_data, starred_repos=starred_repos)
+
+            if args.list_stats:
+                show_starred_repo_stats(session, args)
+
+            if args.check_rate_limits:
+                await show_rate_limits(session, args)
+
+            if args.update_paths:
+                await run_update_paths(session, args)
+
+            # If only info/stats flags were used, close session and return
+            if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits):
+                session.close()
+                return
     finally:
         await cleanup_shared_session()
         session.close()

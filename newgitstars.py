@@ -9,7 +9,6 @@ import requests
 from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 import pandas as pd
-from sqlalchemy import create_engine
 import sqlite3
 import json
 import argparse
@@ -194,7 +193,7 @@ def get_git_stars(auth, max=None, use_cache=False):
 	"""
 	# tmpfn = 'starred.tmp'
 	jsonbuffer = []
-	star_list = []
+	# star_list = []
 	stars_dict = {}
 	session = requests.session()
 	apiurl = 'https://api.github.com/user/starred?per_page=100'
@@ -293,7 +292,7 @@ def get_git_lists(auth:HTTPBasicAuth, use_cache=False) -> dict:
 		try:
 			list_description = item.select('span', class_="Truncate-text color-fg-muted mr-3")[1].text.strip()  # type: ignore
 		except IndexError as e:
-			# logger.warning(f'{e} no description for {listname}')
+			logger.warning(f'{e} no description for {listname}')
 			list_description = ''
 		try:
 			list_repos = get_info_for_list(list_link, session, use_cache)
@@ -319,7 +318,7 @@ def get_info_for_list(link, session, use_cache):
 			with open(link_fn, 'r') as f:
 				soup = BeautifulSoup(f.read(), 'html.parser')
 		except FileNotFoundError as e:
-			pass  # logger.warning(f'failed to read {link_fn} {e}')
+			logger.warning(f'failed to read {link_fn} {e}')
 		except Exception as e:
 			logger.error(f'failed to read {link_fn} {e}')
 	if not soup:

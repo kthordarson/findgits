@@ -1,44 +1,25 @@
-import traceback
-from typing import cast, Optional, Any, Dict, List, Tuple
 import asyncio
-import re
-from datetime import datetime
 from pathlib import Path
 import argparse
 import json
 from loguru import logger
-import sqlalchemy
-import sqlite3
-from sqlalchemy.orm import sessionmaker, Session
-from dbstuff import GitRepo, GitStar, GitList, GitFolder
-from dbstuff import get_engine, db_init, drop_database, mark_repo_as_starred
-from repotools import create_repo_to_list_mapping, verify_star_list_links, insert_update_git_folder, insert_update_starred_repo, populate_repo_data
+from sqlalchemy.orm import Session
+from dbstuff import GitRepo
+from repotools import create_repo_to_list_mapping, verify_star_list_links, populate_repo_data
 from repotools import populate_git_lists, process_starred_repo, link_existing_repos_to_stars, process_git_folder
-from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
-from utils import flatten, cleanup_shared_session
-from cacheutils import set_cache_entry, get_cache_entry
+from gitstars import fetch_github_starred_repos
+from utils import flatten
 # Import functions from stats.py
-from stats import (
-    stats_check_git_dates,
-    show_starred_repo_stats,
-    show_list_by_group,
-    show_rate_limits
-)
 
-async def main_scanpath(args: argparse.Namespace, session: Session):
+async def main_scanpath(args: argparse.Namespace, unified_data:dict, starred_repos:list, session: Session):
     scanpath = Path(args.scanpath[0])
 
     if args.debug:
-        logger.debug(f'Scan path: {scanpath}')
+        logger.debug(f'Scan path: {scanpath} unified_data: {len(unified_data)} starred_repos: {len(starred_repos)}')
 
-    list_data = await populate_git_lists(session, args)
+    list_data = await populate_git_lists(session, args, unified_data=unified_data)
     if args.debug:
         logger.debug(f'Populated git lists from GitHub, list_data: {len(list_data)}')
-
-    # Fetch starred repos ONCE at the beginning
-    starred_repos = await fetch_github_starred_repos(args, session)
-    if args.debug:
-        logger.debug(f'Fetched {len(starred_repos)} starred repos from GitHub API')
 
     # Pass the already-fetched starred_repos to populate_repo_data instead of letting it fetch again
     stats = await populate_repo_data(session, args, starred_repos=starred_repos)
@@ -55,16 +36,6 @@ async def main_scanpath(args: argparse.Namespace, session: Session):
     if args.debug:
         logger.debug(f'Git Repos: {len(git_repos)}')
 
-    cache_entry = get_cache_entry(session, "git_list_stars", "list_stars")
-    if cache_entry:
-        unified_data = json.loads(cast(str, cache_entry.data))
-    else:
-        # Fallback if cache somehow failed
-        if args.debug:
-            logger.debug("[fallback] Cache entry not found, fetching lists and stars from GitHub")
-        unified_data = await get_lists_and_stars_unified(session, args)
-        if args.debug:
-            logger.debug(f"[fallback] found {len(unified_data)} lists from GitHub API")
     if len(unified_data.get('lists_metadata', {})) > 0 or len(unified_data.get('lists_with_repos', {})) > 0 or len(unified_data.get('Unknown', {})) > 0:
         try:
             # urls = list(set(flatten([unified_data[k]['hrefs'] for k in unified_data])))
@@ -98,7 +69,7 @@ async def main_scanpath(args: argparse.Namespace, session: Session):
         await asyncio.gather(*tasks)
         session.commit()
         await asyncio.sleep(1)  # Small delay to avoid overwhelming the DB
-    await link_existing_repos_to_stars(session, args)
+    await link_existing_repos_to_stars(session, args, unified_data, starred_repos)
 
     verification_results = await verify_star_list_links(session, args)
     if verification_results:
@@ -131,5 +102,5 @@ async def main_scanpath(args: argparse.Namespace, session: Session):
 
     # PRE-FETCH the repo-to-list mapping ONCE
     logger.info("Creating repo-to-list mapping...")
-    repo_to_list_mapping = await create_repo_to_list_mapping(session, args)
+    repo_to_list_mapping = await create_repo_to_list_mapping(session, args, unified_data=unified_data)
     logger.info(f"Created mapping for {len(repo_to_list_mapping)} repositories")

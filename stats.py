@@ -10,7 +10,7 @@ from typing import Dict, List
 from loguru import logger
 from sqlalchemy import text
 from dbstuff import GitRepo, GitFolder
-from gitstars import get_lists_and_stars_unified, fetch_github_starred_repos
+from gitstars import fetch_github_starred_repos
 from cacheutils import get_api_rate_limits
 
 def dbcheck(session) -> dict:
@@ -213,12 +213,12 @@ def stats_check_git_dates(session, args, create_heatmap=False) -> None:
 		print("\n Heatmap saved as 'timestamp_differences_heatmap.png'")
 		plt.show()
 
-async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
+async def get_starred_repos_by_list(session, args, unified_data, starred_repos) -> Dict[str, List[dict]]:
 	"""
 	Get starred repositories grouped by list name
 	"""
 	try:
-		unified_data = await get_lists_and_stars_unified(session, args)
+		# unified_data = await get_lists_and_stars_unified(session, args)
 		git_lists = unified_data.get('lists_with_repos', {})
 		if 'lists_with_repos' in git_lists:
 			git_lists = git_lists['lists_with_repos']
@@ -227,8 +227,6 @@ async def get_starred_repos_by_list(session, args) -> Dict[str, List[dict]]:
 			logger.warning("No GitHub lists found")
 			return {}
 
-		# Get starred repos as before
-		starred_repos = await fetch_github_starred_repos(args, session)
 		if not starred_repos:
 			logger.warning("No starred repositories found")
 			return {}
@@ -326,9 +324,9 @@ def show_starred_repo_stats(session, args) -> None:
 		for i, (list_name, count) in enumerate(top_lists, 1):
 			print(f"   {i}. {list_name}: {count:,} repos")
 
-async def show_list_by_group(session, args) -> None:
+async def show_list_by_group(session, args, unified_data, starred_repos) -> None:
 	"""Show starred repos grouped by list"""
-	grouped_repos = await get_starred_repos_by_list(session, args)
+	grouped_repos = await get_starred_repos_by_list(session, args, unified_data, starred_repos)
 	total_repos = sum(len(repos) for repos in grouped_repos.values())
 	print(f"\nFound {len(grouped_repos)} lists with {total_repos} total repositories:\n")
 	for list_name, repos in grouped_repos.items():
@@ -355,7 +353,7 @@ async def show_rate_limits(session, args) -> None:
 	"""Show GitHub API rate limit information"""
 	rate_limits = await get_api_rate_limits(args)
 	if rate_limits:
-		print("\n🔍 GitHub API Rate Limits Status")
+		print("GitHub API Rate Limits Status")
 		print("=" * 50)
 
 		if rate_limits.get('limit_hit'):
@@ -417,4 +415,4 @@ async def show_rate_limits(session, args) -> None:
 					status = " "  # if usage_pct > 80 else "🟡" if usage_pct > 50 else "🟢"
 					print(f"{status} {resource:25} {used:4d}/{limit:4d} ({usage_pct:5.1f}%) - {remaining:4d} remaining")
 	else:
-		print("❌ No API rate limits found or unable to fetch.")
+		print("[x] No API rate limits found or unable to fetch.")
