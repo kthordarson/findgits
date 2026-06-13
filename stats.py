@@ -416,3 +416,34 @@ async def show_rate_limits(session, args) -> None:
 					print(f"{status} {resource:25} {used:4d}/{limit:4d} ({usage_pct:5.1f}%) - {remaining:4d} remaining")
 	else:
 		print("[x] No API rate limits found or unable to fetch.")
+
+def show_topics(session, args):
+	"""Show repository topics statistics"""
+	query = text('select topics from gitrepo where topics !=""')
+	result = session.execute(query).fetchall()
+	if not result:
+		print("No repositories with topics found.")
+		return
+	topic_counts = defaultdict(int)
+	for row in result:
+		topics_str = row[0]
+		if topics_str:
+			topics = topics_str.split(',')
+			for topic in topics:
+				topic_counts[topic.strip()] += 1
+	sorted_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)
+	print("\n" + "=" * 60)
+	print(" REPOSITORY TOPICS STATISTICS")
+	print("=" * 60)
+	print(f"{'Topic':<30} {'Count':<10} {'Percentage':<12} {'Bar'}")
+	print("-" * 60)
+	total_repos = sum(topic_counts.values())
+	for topic, count in sorted_topics[:args.max_output]:
+		percentage = (count / total_repos) * 100
+		bar_length = 20
+		filled_length = int(bar_length * count / max(topic_counts.values()))
+		bar = '█' * filled_length + '░' * (bar_length - filled_length)
+		print(f"{topic:<30} {count:<10} {percentage:<11.1f}% {bar}")
+	print("-" * 60)
+	print(f"{'TOTAL':<30} {total_repos:<10} {'100.0%':<12}")
+	print("=" * 60)

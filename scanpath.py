@@ -17,9 +17,9 @@ async def main_scanpath(args: argparse.Namespace, unified_data:dict, starred_rep
     if args.debug:
         logger.debug(f'Scan path: {scanpath} unified_data: {len(unified_data)} starred_repos: {len(starred_repos)}')
 
-    list_data = await populate_git_lists(session, args, unified_data=unified_data)
-    if args.debug:
-        logger.debug(f'Populated git lists from GitHub, list_data: {len(list_data)}')
+    # list_data = await populate_git_lists(session, args, unified_data=unified_data)
+    # if args.debug:
+    #     logger.debug(f'Populated git lists from GitHub, list_data: {len(list_data)}')
 
     # Pass the already-fetched starred_repos to populate_repo_data instead of letting it fetch again
     stats = await populate_repo_data(session, args, starred_repos=starred_repos)

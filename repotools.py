@@ -86,7 +86,9 @@ async def process_git_folder(
 
 	except Exception as e:
 		logger.error(f"Error processing {git_path}: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 		if session.is_active:
 			session.rollback()
 		return None
@@ -102,14 +104,18 @@ async def process_starred_repo(
 		)
 	except sqlite3.IntegrityError as e:
 		logger.error(f"Error processing {repo}: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 	except TypeError as e:
 		logger.error(f"Error processing {repo}: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 	except Exception as e:
 		logger.error(f"Error processing {repo}: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
-
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
 
 async def link_existing_repos_to_stars(session: Session, args: argparse.Namespace, unified_data:dict, starred_repos:list) -> None:
 	"""Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
@@ -224,6 +230,7 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
 				)
 				if args.debug:
 					logger.error(f"traceback: {traceback.format_exc()}")
+
 				continue
 
 		session.commit()
@@ -234,7 +241,8 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
 	except Exception as e:
 		logger.error(f"Error linking existing repos to stars: {e} {type(e)}")
 		if args.debug:
-			logger.error(f"Traceback: {traceback.format_exc()}")
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 		session.rollback()
 
 
@@ -261,7 +269,9 @@ async def run_update_paths(session: Session, args: argparse.Namespace) -> None:
 		logger.info(f"{len(git_paths)} folder_stats updated successfully")
 	except Exception as e:
 		logger.error(f"Error during update_paths: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 		if session.is_active:
 			session.rollback()
 
@@ -270,7 +280,6 @@ async def run_update_paths(session: Session, args: argparse.Namespace) -> None:
 async def populate_git_lists(session: Session, args: argparse.Namespace, unified_data:dict) -> List[Dict[str, Any]]:
 	# Use the unified function instead of separate calls
 	# unified_data = await get_lists_and_stars_unified(session, args)
-	print(f'unified_data: {len(unified_data)} {unified_data.keys()}')
 	list_data = unified_data['lists_metadata'] if 'lists_metadata' in unified_data else []
 	if args.debug:
 		logger.debug(f"populate_git_lists: {len(list_data)} lists")
@@ -281,9 +290,9 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 	set_cache_entry(session, cache_key, cache_type, json.dumps(list_data))
 
 	for list_entry in list_data:
-		entry = list_data[list_entry]
-		list_name = list_entry  # entry.get("name", "Unknown")
-		list_url = entry.get('href')
+		entry = list_entry
+		list_name = entry['name']
+		list_url = entry['list_url']
 		# if list_name == "Unknown" and entry.get("list_url"):
 		# 	# Extract list name from URL like "/stars/kthordarson/lists/az" -> "az"
 		# 	url_parts = entry.get("list_url", "").split("/")
@@ -303,11 +312,11 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 		# Parse repo count from text like "19 repositories" or "1 repository"
 		repo_count = 0
 		try:
-			# repo_count_str = entry.get("repo_count", "0")
-			repo_count = len(entry['hrefs'])
+			repo_count_str = entry.get("repo_count", "0")
+			# repo_count = len(entry['hrefs'])
 			# Extract numbers from strings like "1 repository" or "19 repositories"
-			# numbers = re.findall(r"\d+", repo_count_str)
-			# repo_count = int(numbers[0]) if numbers else 0
+			numbers = re.findall(r"\d+", repo_count_str)
+			repo_count = int(numbers[0]) if numbers else 0
 		except (ValueError, AttributeError, IndexError) as e:
 			repo_count = 0
 			logger.warning(f"Could not parse repo_count '{entry.get('repo_count')}' for list {list_name}: {e}")
@@ -315,8 +324,8 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 		if db_list:
 			# Update existing entry
 			db_list.list_name = list_name
-			db_list.list_description = entry.get("description", "")
-			db_list.list_url = entry.get("href", "")
+			db_list.list_description = entry['description']
+			db_list.list_url = list_url
 			db_list.repo_count = repo_count
 
 			if args.debug:
@@ -325,8 +334,8 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 			# Create new entry
 			db_list = GitList()
 			db_list.list_name = list_name
-			db_list.list_description = entry.get("description", "")
-			db_list.list_url = entry.get("href", "")
+			db_list.list_description = entry['description']
+			db_list.list_url = list_url
 			db_list.repo_count = repo_count
 			db_list.created_at = datetime.now()
 
@@ -348,9 +357,7 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 	session.commit()
 	# Log final results
 	total_repos = sum(entry.get("parsed_repo_count", 0) for entry in list_data)
-	logger.info(
-		f"Populated {len(list_data)} lists with {total_repos} total repositories"
-	)
+	logger.info(f"Populated {len(list_data)} lists with {total_repos} total repositories")
 	return list_data
 
 
@@ -379,7 +386,9 @@ async def verify_star_list_links(session, args) -> dict:
 		result_dict["unlinked_stars"] = unlinked_stars
 	except Exception as e:
 		logger.error(f"Error verifying star-list links: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 	return result_dict
 
 
@@ -399,10 +408,7 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 	# Get remote URL and normalize it
 	remote_url = get_remote_url(git_folder_path).lower().strip()
 	if not remote_url or remote_url == "[no remote]":
-		remote_url = f"file://{git_folder_path}"  # Use local path as fallback URL
-		logger.warning(
-			f"Could not determine remote URL for {git_folder_path}  ... skipping"
-		)
+		logger.warning(f"Could not determine remote URL for {git_folder_path}  ... skipping")
 		return None
 
 	# Extract repo name and owner from URL for GitHub API lookup
@@ -438,30 +444,18 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 			logger.error(f"Failed to fetch metadata for {repo_path}: {e} {type(e)}")
 			if args.debug:
 				logger.error(f"traceback: {traceback.format_exc()}")
-			repo_metadata = None
-
 	try:
 		# First check if the repo already exists by URL
-		git_repo = (
-			session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url)).first()
-		)
+		git_repo = (session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url)).first())
 
 		# If not found by exact URL, try alternative lookups
 		if not git_repo:
 			# Try without .git suffix
 			if remote_url.endswith(".git"):
-				git_repo = (
-					session.query(GitRepo)
-					.filter(GitRepo.git_url.ilike(remote_url[:-4]))
-					.first()
-				)
+				git_repo = (session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url[:-4])).first())
 			# Try with .git suffix
 			else:
-				git_repo = (
-					session.query(GitRepo)
-					.filter(GitRepo.git_url.ilike(remote_url + ".git"))
-					.first()
-				)
+				git_repo = (session.query(GitRepo).filter(GitRepo.git_url.ilike(remote_url + ".git")).first())
 
 		# Extract repo name from URL for name-based lookup if needed
 		if not repo_name:
@@ -489,26 +483,16 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 
 		# Try lookup by name if URL lookup failed
 		if not git_repo:
-			git_repo = (
-				session.query(GitRepo)
-				.filter(GitRepo.github_repo_name == repo_name)
-				.first()
-			)
+			git_repo = (session.query(GitRepo).filter(GitRepo.github_repo_name == repo_name).first())
 
 		# Check if folder already exists in database
-		git_folder = (
-			session.query(GitFolder)
-			.filter(GitFolder.git_path == git_folder_path)
-			.first()
-		)
+		git_folder = (session.query(GitFolder).filter(GitFolder.git_path == git_folder_path).first())
 		if (
 			"BLANK_REPO_DATA" in remote_url
 			or "BLANK_REPO_DATA" in git_folder_path
 			or "BLANK_REPO_DATA" in repo_name
 		):
-			logger.warning(
-				f"BLANK_REPO_DATA found in remote_url: {remote_url} or git_folder_path: {git_folder_path} or repo_name: {repo_name}"
-			)
+			logger.warning(f"BLANK_REPO_DATA found in remote_url: {remote_url} or git_folder_path: {git_folder_path} or repo_name: {repo_name}")
 
 		# If no repo exists, create a new one with safeguards
 		if not git_repo:
@@ -533,23 +517,14 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 
 				# Populate with metadata if available
 				if repo_metadata:
-					if "BLANK_REPO_DATA" in repo_metadata:
-						logger.warning(
-							f"BLANK_REPO_DATA found in repo_metadata for {repo_name} repo_metadata: {repo_metadata}"
-						)
 					git_repo = populate_from_metadata(git_repo, repo_metadata)
-				if (
-					"BLANK_REPO_DATA" in git_repo.git_url
-					or "BLANK_REPO_DATA" in git_repo.github_repo_name
-				):
-					logger.warning(
-						f"BLANK_REPO_DATA found in git_repo.git_url: {git_repo.git_url} or git_repo.github_repo_name: {git_repo.github_repo_name}"
-					)
+					# if "BLANK_REPO_DATA" in repo_metadata:
+					# 	logger.warning(f"BLANK_REPO_DATA found in repo_metadata for {repo_name} repo_metadata: {repo_metadata}")
+				if ("BLANK_REPO_DATA" in git_repo.git_url or "BLANK_REPO_DATA" in git_repo.github_repo_name or "BLANK_REPO_DATA" in repo_metadata if repo_metadata else False):
+					logger.warning(f"BLANK_REPO_DATA found in git_repo.git_url: {git_repo.git_url} or git_repo.github_repo_name: {git_repo.github_repo_name} repo_name: {repo_name}")
 				session.add(git_repo)
 				session.flush()  # Get the ID without committing
-				logger.info(
-					f"Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name} in folder: {git_folder_path}"
-				)
+				logger.info(f"Created new GitRepo: github_repo_name {git_repo.github_repo_name} full_name: {git_repo.full_name} in folder: {git_folder_path}")
 
 		else:
 			# Update existing repo
@@ -562,9 +537,7 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 			if repo_metadata:
 				git_repo = populate_from_metadata(git_repo, repo_metadata)
 			else:
-				logger.warning(
-					f"No metadata found for {git_repo} git_url: {git_repo.git_url}"
-				)
+				logger.warning(f"No metadata found for {git_repo} git_url: {git_repo.git_url}")
 
 		# Now handle the GitFolder entry
 		if git_folder:
@@ -586,9 +559,7 @@ async def insert_update_git_folder(git_folder_path, session, args) -> GitFolder 
 		return git_folder
 
 	except Exception as e:
-		logger.error(
-			f"Database error: {e} {type(e)} for git_folder_path: {git_folder_path}"
-		)
+		logger.error(f"Database error: {e} {type(e)} for git_folder_path: {git_folder_path}")
 		if args.debug:
 			logger.error(f"traceback: {traceback.format_exc()}")
 			if repo_metadata:
@@ -602,11 +573,6 @@ async def create_repo_to_list_mapping(session, args, unified_data:dict) -> dict:
 	"""Create a mapping of repo URLs to list names - fetch once and reuse"""
 	# unified_data = await get_lists_and_stars_unified(session, args)
 	repo_to_list_mapping = {}
-
-	# Debug the structure
-	if args.debug:
-		logger.debug(f"git_lists_data keys: {unified_data.keys()}")
-		logger.debug(f"git_lists_data structure: {type(unified_data)}")
 
 	# Extract the correct data structure
 	lists_with_repos = unified_data.get("lists_with_repos", {})
@@ -623,11 +589,6 @@ async def create_repo_to_list_mapping(session, args, unified_data:dict) -> dict:
 		logger.warning(f"Unexpected lists_with_repos type: {type(lists_with_repos)}")
 		return repo_to_list_mapping
 
-	if args.debug:
-		logger.debug(
-			f"actual_lists type: {type(actual_lists)}, keys: {actual_lists.keys() if isinstance(actual_lists, dict) else 'N/A'}"
-		)
-
 	# Ensure actual_lists is a dictionary before iterating
 	if not isinstance(actual_lists, dict):
 		logger.warning(f"actual_lists is not a dictionary: {type(actual_lists)}")
@@ -637,9 +598,7 @@ async def create_repo_to_list_mapping(session, args, unified_data:dict) -> dict:
 	for list_name, list_data in actual_lists.items():
 		# Ensure list_data is a dictionary
 		if not isinstance(list_data, dict):
-			logger.warning(
-				f"list_data for {list_name} is not a dictionary: {type(list_data)}"
-			)
+			logger.warning(f"list_data for {list_name} is not a dictionary: {type(list_data)}")
 			continue
 
 		hrefs = list_data.get("hrefs", [])
@@ -688,9 +647,7 @@ async def insert_update_starred_repo(
 
 	# Get full repository data from GitHub API
 	try:
-		repo_data = await update_repo_cache(
-			clean_path if isinstance(github_repo, str) else full_name, session, args
-		)
+		repo_data = await update_repo_cache(clean_path if isinstance(github_repo, str) else full_name, session, args)
 	except RateLimitExceededError as e:
 		logger.warning(
 			f"Rate limit exceeded while fetching metadata for {clean_path if isinstance(github_repo, str) else full_name}: {e}"
@@ -711,9 +668,7 @@ async def insert_update_starred_repo(
 			)
 			return None
 	else:
-		logger.info(
-			f"update GitRepo: {git_repo} remote_url: {remote_url}. repo_data: {type(repo_data)}"
-		)
+		logger.info(f"update GitRepo: {git_repo} remote_url: {remote_url}.")
 		if repo_data:
 			update_repo_from_data(git_repo, repo_data)
 
@@ -794,9 +749,7 @@ def check_update_dupes(session) -> dict:
 		dupe_urls.add(dupe_url)
 
 		# Find all repos with this URL
-		same_url_repos = (
-			session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all()
-		)
+		same_url_repos = (session.query(GitRepo).filter(GitRepo.git_url == dupe_url).all())
 
 		# Update their dupe flags
 		for repo in same_url_repos:
@@ -939,15 +892,12 @@ async def populate_repo_data(session, args, starred_repos=None) -> dict:
 				# Commit periodically to avoid large transactions
 				if (stats["updated"] + stats["not_found"]) % 100 == 0:
 					session.commit()
-					logger.info(
-						f"Progress: {stats['updated'] + stats['not_found']}/{stats['total_db_repos']} repositories processed"
-					)
 
 			except Exception as e:
-				logger.error(
-					f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e} {type(e)}"
-				)
-				logger.error(f"traceback: {traceback.format_exc()}")
+				logger.error(f"Error processing repo {db_repo.id} - {db_repo.github_repo_name}: {e} {type(e)}")
+				if args.debug:
+					logger.error(f"traceback: {traceback.format_exc()}")
+
 				stats["errors"] += 1
 
 		# Final commit
@@ -956,7 +906,9 @@ async def populate_repo_data(session, args, starred_repos=None) -> dict:
 
 	except Exception as e:
 		logger.error(f"Error processing repositories: {e} {type(e)}")
-		logger.error(f"traceback: {traceback.format_exc()}")
+		if args.debug:
+			logger.error(f"traceback: {traceback.format_exc()}")
+
 		stats["errors"] += 1
 		return {"errors": stats["errors"], "message": str(e)}
 
@@ -1181,7 +1133,9 @@ async def fetch_metadata(repo, session, args) -> dict | None:
 				return cached_repo
 		except Exception as e:
 			logger.error(f"Error parsing cached metadata: {e} {type(e)} for {repo}")
-			logger.error(f"traceback: {traceback.format_exc()}")
+			if args.debug:
+				logger.error(f"traceback: {traceback.format_exc()}")
+
 	else:
 		# Use update_repo_cache to get metadata
 		repo_metadata = None
@@ -1203,7 +1157,9 @@ async def fetch_metadata(repo, session, args) -> dict | None:
 			logger.error(
 				f"Error fetching repository metadata: {e} {type(e)} for {repo_path}"
 			)
-			logger.error(f"traceback: {traceback.format_exc()}")
+			if args.debug:
+				logger.error(f"traceback: {traceback.format_exc()}")
+
 			# return None
 		if not repo_metadata:
 			logger.warning(f"No cache entry found for {repo_path}")

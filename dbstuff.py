@@ -58,7 +58,7 @@ BLANK_REPO_DATA = {
 	"topics": [],
 	"visibility": "unknown",
 	"error_code": -1,
-	"_unavailable": True}  # Flag to indicate this is default data
+	"_unavailable": True}
 
 class Base(DeclarativeBase):
 	pass
@@ -90,7 +90,7 @@ class GitFolder(Base):
 	git_path_mtime = Column('git_path_mtime', DateTime)
 	dupe_count = Column('dupe_count', BigInteger)
 	valid = Column(Boolean, default=True)
-	scanned = Column(Boolean, default=False)  # Fixed this line
+	scanned = Column(Boolean, default=False)
 	# is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
 
 	# Relationships
@@ -219,7 +219,7 @@ class GitRepo(Base):
 	config_atime = Column('config_atime', DateTime)
 	config_mtime = Column('config_mtime', DateTime)
 	valid = Column(Boolean, default=True)
-	scanned = Column(Boolean, default=False)  # Fixed this line
+	scanned = Column(Boolean, default=False)
 
 	is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
 	# starred_at = Column('starred_at', DateTime, nullable=True)
@@ -362,8 +362,6 @@ class CacheEntry(Base):
 	__tablename__ = 'cache_entries'
 
 	id: Mapped[int] = mapped_column(primary_key=True)
-	# cache_key = Column('cache_key', String(255), unique=True)  # Unique identifier for this cache entry
-	# cache_type = Column('cache_type', String(50))  # Type of cache (starred_repos, repo_metadata, etc)
 	data = Column('data', String(10485760))  # JSON data stored as string (10MB limit)  # type: ignore
 	timestamp = Column('timestamp', DateTime)  # When this entry was created/updated
 	last_scan = Column('last_scan', DateTime)  # When this entry was last scanned

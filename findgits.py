@@ -8,7 +8,7 @@ import sqlalchemy
 from sqlalchemy.orm import sessionmaker, Session
 from scanpath import main_scanpath
 from dbstuff import get_engine, db_init, drop_database
-from repotools import run_update_paths
+from repotools import run_update_paths, populate_git_lists
 from gitstars import get_lists_and_stars_unified
 from stats import fetch_github_starred_repos
 from utils import cleanup_shared_session
@@ -25,10 +25,11 @@ def get_args() -> argparse.Namespace:
     myparse = argparse.ArgumentParser(description="findgits")
     myparse.add_argument('--scanpath','-sp', help='Scan path for git repos', action='store', dest='scanpath', nargs=1)
     myparse.add_argument('--update_paths','-up', help='update_paths', action='store_true', dest='update_paths', default=False)
+    myparse.add_argument('--populate_git_lists', help='populate_git_lists', action='store_true', dest='populate_git_lists', default=False)
     # info
     myparse.add_argument('--checkdates', help='checkdates', action='store_true', default=False, dest='checkdates')
-    myparse.add_argument('--list-by-group', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
-    myparse.add_argument('--list-stats', help='show starred repo count statistics by list', action='store_true', default=False, dest='list_stats')
+    myparse.add_argument('--list-by-group', '-lbg', help='show starred repos grouped by list', action='store_true', default=False, dest='list_by_group')
+    myparse.add_argument('--list-stats', '-ls', help='show starred repo count statistics by list', action='store_true', default=False, dest='list_stats')
     myparse.add_argument('--dbinfo', help='show dbinfo', action='store_true', default=False, dest='dbinfo')
     myparse.add_argument('--dbinfoall', help='show all dbinfo', action='store_true', default=False, dest='dbinfoall')
     myparse.add_argument('--check_rate_limits', help='check_rate_limits', action='store_true', default=False, dest='check_rate_limits')
@@ -48,12 +49,11 @@ def get_args() -> argparse.Namespace:
     if args.disable_cache:
         args.use_cache = False
         logger.info('Cache disabled')
-    if args.debug or args.dbinfoall:
-        logger.info('Debug mode enabled')
+    if args.dbinfoall:
         args.checkdates = True
         args.dbinfo = True
         args.list_by_group = True
-        args.list_stats = True  # Add this to debug mode
+        args.list_stats = True
         args.check_rate_limits = True
     return args
 
@@ -68,22 +68,27 @@ def get_session(args: argparse.Namespace) -> Tuple[Session, sqlalchemy.Engine]:
 async def main() -> None:
     args = get_args()
     session, engine = get_session(args)
-
+    unified_data = None
+    starred_repos = None
     if args.dropdatabase:
         drop_database(engine)
         logger.info('Database dropped')
         session.close()
         return
     try:
-        unified_data = None
         unified_data = await get_lists_and_stars_unified(session, args)
         if args.debug:
             logger.debug(f"[f] unified_data: {len(unified_data)}")
         if not unified_data:
             logger.error("Failed to retrieve unified data for lists and stars. Exiting.")
             return
+        starred_repos = await fetch_github_starred_repos(args, session)
+        if args.debug:
+            logger.debug(f"[f] starred_repos: {len(starred_repos)}")
+        if not starred_repos:
+            logger.error("Failed to retrieve starred repositories. Exiting.")
+            return
         else:
-            starred_repos = await fetch_github_starred_repos(args, session)
             if args.scanpath:
                 await main_scanpath(args, unified_data=unified_data, starred_repos=starred_repos, session=session)
 
@@ -102,8 +107,13 @@ async def main() -> None:
             if args.update_paths:
                 await run_update_paths(session, args)
 
+            if args.populate_git_lists:
+                list_data = await populate_git_lists(session, args, unified_data=unified_data)
+                if args.debug:
+                    logger.debug(f'Populated git lists from GitHub, list_data: {len(list_data)}')
+
             # If only info/stats flags were used, close session and return
-            if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits):
+            if not args.scanpath and (args.checkdates or args.dbinfo or args.list_by_group or args.list_stats or args.check_rate_limits or args.populate_git_lists):
                 session.close()
                 return
     finally:
