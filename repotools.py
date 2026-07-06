@@ -268,7 +268,7 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 	# Cache the list data
 	cache_key = "git_lists_metadata"
 	cache_type = "list_metadata"
-	set_cache_entry(session, cache_key, cache_type, json.dumps(list_data))
+	set_cache_entry(session, cache_key, cache_type, json.dumps(list_data), ttl_hours=args.cache_ttl_hours)
 
 	for list_entry in list_data:
 		entry = list_entry
@@ -332,7 +332,7 @@ async def populate_git_lists(session: Session, args: argparse.Namespace, unified
 		entry_to_cache = entry.copy()
 		entry_to_cache["name"] = list_name
 		entry_to_cache["parsed_repo_count"] = repo_count
-		set_cache_entry(session, list_cache_key, list_cache_type, json.dumps(entry_to_cache))
+		set_cache_entry(session, list_cache_key, list_cache_type, json.dumps(entry_to_cache), ttl_hours=args.cache_ttl_hours)
 
 	# Commit the database changes
 	session.commit()

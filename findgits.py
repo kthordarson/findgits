@@ -45,6 +45,7 @@ def get_args() -> argparse.Namespace:
     myparse.add_argument('--debug', help='debug', action='store_true', default=False, dest='debug')
     myparse.add_argument('--use_cache', help='use_cache', action='store_true', default=True, dest='use_cache')
     myparse.add_argument('--disable_cache', help='disable_cache', action='store_true', default=False, dest='disable_cache')
+    myparse.add_argument('--cache_ttl_hours', help='hours before a cache entry is considered stale and refetched', action='store', default=24, dest='cache_ttl_hours', type=float)
     args = myparse.parse_args()
     if args.disable_cache:
         args.use_cache = False

@@ -70,7 +70,7 @@ async def get_info_for_list(link, headers, session, args) -> list:
 	# Cache the complete results
 	if all_hrefs:
 		try:
-			set_cache_entry(session, cache_key, cache_type, json.dumps(all_hrefs))
+			set_cache_entry(session, cache_key, cache_type, json.dumps(all_hrefs), ttl_hours=args.cache_ttl_hours)
 			session.commit()
 			# logger.info(f"Cached {len(all_hrefs)} repo links for {link}")
 		except Exception as e:
@@ -213,7 +213,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 			if last_page_no == 1:
 				logger.info(f"Downloaded {len(repos)} starred repos (single page)")
 				if repos:
-					set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
+					set_cache_entry(session, cache_key, cache_type, json.dumps(repos), ttl_hours=args.cache_ttl_hours)
 					session.commit()
 				return repos
 
@@ -274,7 +274,7 @@ async def fetch_github_starred_repos(args, session, cache_key="starred_repos_lis
 
 	# Cache results
 	if repos:
-		set_cache_entry(session, cache_key, cache_type, json.dumps(repos))
+		set_cache_entry(session, cache_key, cache_type, json.dumps(repos), ttl_hours=args.cache_ttl_hours)
 		session.commit()
 		logger.info(f"Successfully fetched and cached {len(repos)} starred repos from {len(successful_pages) + 1} total pages (including first page)")
 	else:
@@ -463,10 +463,10 @@ async def get_lists_and_stars_unified(session, args) -> dict:
 
 	# Cache both results
 	if git_lists_metadata:
-		set_cache_entry(session, cache_key_metadata, cache_type_metadata, json.dumps(git_lists_metadata))
+		set_cache_entry(session, cache_key_metadata, cache_type_metadata, json.dumps(git_lists_metadata), ttl_hours=args.cache_ttl_hours)
 
 	if lists_with_repos:
-		set_cache_entry(session, cache_key_stars, cache_type_stars, json.dumps(lists_with_repos))
+		set_cache_entry(session, cache_key_stars, cache_type_stars, json.dumps(lists_with_repos), ttl_hours=args.cache_ttl_hours)
 
 	session.commit()
 

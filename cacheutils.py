@@ -5,7 +5,7 @@ import json
 import sqlite3
 from sqlalchemy.exc import OperationalError
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timedelta
 from dbstuff import CacheEntry, BLANK_REPO_DATA, RepoCacheExpanded
 from utils import get_client_session, ensure_datetime, get_auth_params, get_semaphore
 
@@ -140,7 +140,7 @@ async def update_repo_cache(repo_url, session, args) -> dict | None:
 						repo_data = await r.json()
 						repo_data['last_status'] = r.status
 						try:
-							set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]))
+							set_cache_entry(session, cache_key, cache_type, json.dumps([repo_data]), ttl_hours=args.cache_ttl_hours)
 						except TimeoutError as e:
 							logger.error(f"Failed to set cache entry for {repo_name}: {e} {type(e)}")
 							if args.debug:
@@ -159,7 +159,7 @@ async def update_repo_cache(repo_url, session, args) -> dict | None:
 						default_repo_data['name'] = repo_name
 						default_repo_data['last_status'] = r.status
 						defaultjson = json.dumps([default_repo_data])
-						set_cache_entry(session, cache_key, cache_type, defaultjson)
+						set_cache_entry(session, cache_key, cache_type, defaultjson, ttl_hours=args.cache_ttl_hours)
 						session.commit()
 						return default_repo_data
 					else:
@@ -177,9 +177,12 @@ async def update_repo_cache(repo_url, session, args) -> dict | None:
 			raise e
 
 def get_cache_entry(session, cache_key, cache_type) -> CacheEntry | None:
-	"""Get a cache entry from the database"""
+	"""Get a cache entry from the database, treating expired entries as a miss"""
 	try:
 		entry = session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
+		if entry and entry.expires_at and datetime.now() > entry.expires_at:
+			logger.info(f"Cache entry expired for {cache_key} ({cache_type}), expired at {entry.expires_at}")
+			return None
 		return entry
 	except OperationalError as e:
 		logger.error(f"OperationalError while getting cache entry: {e} {type(e)}")
@@ -189,18 +192,22 @@ def get_cache_entry(session, cache_key, cache_type) -> CacheEntry | None:
 		# logger.error(f'traceback: {traceback.format_exc()}')
 		return None
 
-def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
+def set_cache_entry(session, cache_key, cache_type, data, ttl_hours=24) -> CacheEntry | None:
 	"""Set or update a cache entry in the database"""
 	if 'BLANK_REPO_DATA' in data:
 		logger.warning(f"Invalid data for cache entry: {json.loads(data)[0]["name"]} cache_key: {cache_key} cache_type: {cache_type}")
 		return None
-	entry = get_cache_entry(session, cache_key, cache_type)
+	expires_at = datetime.now() + timedelta(hours=ttl_hours)
+	# Look up the raw row (ignoring expiration) so a stale entry is updated in place, not duplicated
+	entry = session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
 	if entry:
 		entry.data = data
 		entry.timestamp = datetime.now()
 		entry.last_scan = datetime.now()
+		entry.expires_at = expires_at
 	else:
 		entry = CacheEntry(cache_key, cache_type, data)
+		entry.expires_at = expires_at
 		session.add(entry)
 
 	# If cache_type is repo_data, expand JSON and store in RepoCacheExpanded
@@ -266,12 +273,13 @@ def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 			# Handle race condition - another process may have inserted the same key
 			logger.warning(f"Cache key already exists, attempting update: {cache_key}")
 			session.rollback()
-			# Try to update existing entry
-			existing_entry = get_cache_entry(session, cache_key, cache_type)
+			# Try to update existing entry (raw lookup, ignoring expiration)
+			existing_entry = session.query(CacheEntry).filter_by(cache_key=cache_key, cache_type=cache_type).first()
 			if existing_entry:
 				existing_entry.data = data
 				existing_entry.timestamp = datetime.now()
 				existing_entry.last_scan = datetime.now()
+				existing_entry.expires_at = expires_at
 				try:
 					session.commit()
 					logger.info(f"Successfully updated existing cache entry: {cache_key}")
