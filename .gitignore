@@ -21,3 +21,6 @@ gitrepo.db-journal
 *.db*
 .idea/**
 .coveragerc
+.ipynb_checkpoints/Untitled-checkpoint.ipynb
+check_unlinked.py
+.ipynb_checkpoints/findgits-checkpoint.py

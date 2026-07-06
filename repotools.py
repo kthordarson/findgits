@@ -120,35 +120,8 @@ async def process_starred_repo(
 async def link_existing_repos_to_stars(session: Session, args: argparse.Namespace, unified_data:dict, starred_repos:list) -> None:
 	"""Link existing GitRepo entries to their GitStar counterparts and associate with lists"""
 	try:
-		# Get all git lists and their associated repos
-		# unified_data = await get_lists_and_stars_unified(session, args)
-		lists_with_repos = unified_data.get("lists_with_repos", {})
-
-		if (
-			isinstance(lists_with_repos, dict)
-			and "lists_with_repos" in lists_with_repos
-		):
-			actual_lists = lists_with_repos["lists_with_repos"]
-		else:
-			actual_lists = lists_with_repos
-
 		# Create a mapping of repo URLs to list names
-		repo_to_list_mapping = {}
-		if isinstance(actual_lists, dict):
-			for list_name, list_data in actual_lists.items():
-				if isinstance(list_data, dict):
-					hrefs = list_data.get("hrefs", [])
-					for href in hrefs:
-						# Convert href to full_name format
-						if href.startswith("/"):
-							href = href[1:]
-						if "github.com/" in href:
-							full_name = href.split("github.com/")[-1]
-						else:
-							full_name = href
-						if full_name.endswith(".git"):
-							full_name = full_name[:-4]
-						repo_to_list_mapping[full_name] = list_name
+		repo_to_list_mapping = await create_repo_to_list_mapping(session, args, unified_data=unified_data)
 
 		# Process ALL starred repos, not just existing GitRepo entries
 		star_entries_created = 0
@@ -225,13 +198,21 @@ async def link_existing_repos_to_stars(session: Session, args: argparse.Namespac
 						linked_count += 1
 
 			except Exception as e:
-				logger.error(
-					f"Error processing starred repo {starred_repo.get('full_name', 'unknown')}: {e} {type(e)}"
-				)
+				logger.error(f"Error processing starred repo {starred_repo.get('full_name')}: {e} {type(e)}")
 				if args.debug:
 					logger.error(f"traceback: {traceback.format_exc()}")
+				session.rollback()
 
-				continue
+		# Also check any existing GitStars in the database that might not be in starred_repos
+		# but are present in our repo_to_list_mapping
+		existing_stars = session.query(GitStar).filter(GitStar.gitlist_id.is_(None)).all()
+		for git_star in existing_stars:
+			if git_star.full_name and git_star.full_name in repo_to_list_mapping:
+				list_name = repo_to_list_mapping[git_star.full_name]
+				git_list = session.query(GitList).filter(GitList.list_name == list_name).first()
+				if git_list:
+					git_star.gitlist_id = git_list.id
+					linked_count += 1
 
 		session.commit()
 		logger.info(
@@ -906,6 +887,7 @@ def update_repo_from_data(repo, repo_data) -> None:
 	"""Update a repository with data from GitHub API"""
 	repo.last_scan = datetime.now()
 	repo.scan_count += 1
+	repo.last_status = repo_data.get("last_status", 3)
 
 	# Update all fields with API data
 	repo.node_id = repo_data.get("node_id")
@@ -990,6 +972,7 @@ def populate_from_metadata(repo, metadata) -> GitRepo:
 	# Record the update time
 	repo.last_scan = datetime.now()
 	repo.scan_count = repo.scan_count + 1 if repo.scan_count else 1
+	repo.last_status = metadata.get("last_status", 2)
 
 	# Basic repository information
 	repo.github_repo_name = metadata.get("name")

@@ -105,16 +105,17 @@ async def is_rate_limit_hit(args, threshold_percent=10, caller=None) -> bool:
 		return True
 	return False
 
-async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
+async def update_repo_cache(repo_url, session, args) -> dict | None:
 	"""
 	Fetch repository data from GitHub API and update the database cache
 	"""
-	if 'BLANK_REPO_DATA' in repo_name_or_url:
-		logger.warning(f"BLANK_REPO_DATA repo_name_or_url: {repo_name_or_url}")
+	if 'BLANK_REPO_DATA' in repo_url:
+		logger.warning(f"BLANK_REPO_DATA repo_url: {repo_url}")
+		return None
 	semaphore = get_semaphore()
 	async with semaphore:
 		# Normalize repo name
-		repo_name = repo_name_or_url.strip('/').replace('github.com/', '').replace('.git', '')
+		repo_name = repo_url.strip('/').replace('github.com/', '').replace('.git', '')
 		cache_key = f"repo:{repo_name}"
 		cache_type = "repo_data"
 		# Try cache first
@@ -125,7 +126,7 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 					cache_data = json.loads(cache_entry.data)
 					return cache_data[0] if cache_data else None
 				except Exception as e:
-					logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_name_or_url}")
+					logger.error(f"Failed to parse cache data: {e} {type(e)} for {repo_url}")
 					logger.error(f'traceback: {traceback.format_exc()}')
 		auth = await get_auth_params()
 		if not auth:
@@ -152,24 +153,14 @@ async def update_repo_cache(repo_name_or_url, session, args) -> dict | None:
 							raise e
 						session.commit()
 						return repo_data
-					elif r.status in (403, 404, 451):
+					elif r.status in (401, 403, 404, 451):
 						logger.warning(f"Repository error {r.status}: {api_url}")
-						return None
 						default_repo_data = BLANK_REPO_DATA.copy()
 						default_repo_data['name'] = repo_name
 						default_repo_data['last_status'] = r.status
 						defaultjson = json.dumps([default_repo_data])
 						set_cache_entry(session, cache_key, cache_type, defaultjson)
 						session.commit()
-						return default_repo_data
-					elif r.status == 401:
-						default_repo_data = BLANK_REPO_DATA.copy()
-						default_repo_data['name'] = repo_name
-						default_repo_data['last_status'] = r.status
-						defaultjson = json.dumps([default_repo_data])
-						set_cache_entry(session, cache_key, cache_type, defaultjson)
-						session.commit()
-						logger.error(f"Unauthorized access (401) to repository: {api_url}")
 						return default_repo_data
 					else:
 						logger.error(f"Failed to fetch repository data: {r.status} from {api_url}")
@@ -201,7 +192,7 @@ def get_cache_entry(session, cache_key, cache_type) -> CacheEntry | None:
 def set_cache_entry(session, cache_key, cache_type, data) -> CacheEntry | None:
 	"""Set or update a cache entry in the database"""
 	if 'BLANK_REPO_DATA' in data:
-		logger.warning(f"Invalid data for cache entry: {json.loads(data)[0]["name"]} ")
+		logger.warning(f"Invalid data for cache entry: {json.loads(data)[0]["name"]} cache_key: {cache_key} cache_type: {cache_type}")
 		return None
 	entry = get_cache_entry(session, cache_key, cache_type)
 	if entry:

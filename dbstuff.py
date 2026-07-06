@@ -23,6 +23,7 @@ from utils import get_directory_size, get_subfilecount, get_subdircount
 BLANK_REPO_DATA = {
 	"id": None,
 	"node_id": None,
+	"last_status": -1,
 	"name": 'BLANK_REPO_DATA',
 	"full_name": 'BLANK_REPO_DATA',
 	"owner": {"login": 'BLANK_REPO_DATA'},
@@ -397,7 +398,6 @@ class GitStar(Base):
 	gitrepo_id: Mapped[int] = mapped_column(Integer, ForeignKey('gitrepo.id'))
 	# Link to lists that contain this starred repo
 	gitlist_id = Column('gitlist_id', Integer, ForeignKey('gitlists.id'), nullable=True)
-	# starred_at = Column('starred_at', DateTime, nullable=True)
 	starred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 	stargazers_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 	description: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
@@ -408,13 +408,6 @@ class GitStar(Base):
 	repo: Mapped[Optional["GitRepo"]] = relationship("GitRepo", back_populates="star_entry", foreign_keys=[gitrepo_id])
 	git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos", foreign_keys=[gitlist_id])
 
-	# Relationships - specify foreign_keys explicitly
-	# repo: Mapped["GitRepo"] = relationship("GitRepo", back_populates="star_entry", foreign_keys=[gitrepo_id])
-	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos")
-	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="starred_repos", foreign_keys=[gitlist_id])
-	# repo: Mapped[Optional["GitRepo"]] = relationship("GitRepo", back_populates="stars", foreign_keys=[gitrepo_id])
-	# git_list: Mapped[Optional["GitList"]] = relationship("GitList", back_populates="stars", foreign_keys=[gitlist_id])
-
 class GitList(Base):
 	"""A starred repo list, containing multiple GitStars"""
 	__tablename__ = 'gitlists'
@@ -424,16 +417,7 @@ class GitList(Base):
 	list_description: Mapped[str] = mapped_column(String(1024))
 	list_url: Mapped[str] = mapped_column(String(255))
 	created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-	# Relationships - one list can contain many starred repos
-	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list")
-	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="GitStar.gitlist_id")
-	# starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="gitlist", foreign_keys="[GitStar.gitlist_id]")
 	starred_repos: Mapped[List["GitStar"]] = relationship("GitStar", back_populates="git_list", foreign_keys="[GitStar.gitlist_id]")
-
-# Add relationships to GitRepo and GitStar
-# GitRepo.star_entry = relationship("GitStar", back_populates="repo", uselist=False)
-# GitStar.lists = relationship("GitList", back_populates="star")
 
 class RepoCacheExpanded(Base):
 	__tablename__ = 'repo_cache_expanded'
